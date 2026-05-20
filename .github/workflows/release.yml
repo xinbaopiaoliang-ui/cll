@@ -1,0 +1,60 @@
+name: Release xaccel-node
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x86_64:
+    name: Build Linux x86_64 release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test node core
+        working-directory: node-core
+        run: cargo test --locked
+
+      - name: Package release
+        run: bash scripts/package-release.sh
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xaccel-node-linux-x86_64
+          path: |
+            dist/xaccel-node-linux-x86_64.tar.gz
+            dist/xaccel-node-linux-x86_64.tar.gz.sha256
+            dist/xaccel-node-*-linux-x86_64.tar.gz
+            dist/xaccel-node-*-linux-x86_64.sha256
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG_NAME" \
+            dist/xaccel-node-linux-x86_64.tar.gz \
+            dist/xaccel-node-linux-x86_64.tar.gz.sha256 \
+            dist/xaccel-node-*-linux-x86_64.tar.gz \
+            dist/xaccel-node-*-linux-x86_64.sha256 \
+            --title "$TAG_NAME" \
+            --notes "Automated xaccel-node Linux x86_64 release." \
+          || gh release upload "$TAG_NAME" \
+            dist/xaccel-node-linux-x86_64.tar.gz \
+            dist/xaccel-node-linux-x86_64.tar.gz.sha256 \
+            dist/xaccel-node-*-linux-x86_64.tar.gz \
+            dist/xaccel-node-*-linux-x86_64.sha256 \
+            --clobber
+

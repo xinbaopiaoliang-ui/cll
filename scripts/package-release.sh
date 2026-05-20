@@ -22,6 +22,7 @@ case "$ARCH" in
 esac
 
 ARTIFACT_NAME="xaccel-node-${VERSION}-linux-${RELEASE_ARCH}"
+GENERIC_ARTIFACT_NAME="xaccel-node-linux-${RELEASE_ARCH}"
 WORK_DIR="${DIST_DIR}/${ARTIFACT_NAME}"
 
 rm -rf "$WORK_DIR"
@@ -37,13 +38,17 @@ cp "${ROOT_DIR}/install/uninstall.sh" "$WORK_DIR/"
 
 cd "$DIST_DIR"
 tar -czf "${ARTIFACT_NAME}.tar.gz" "$ARTIFACT_NAME"
+cp "${ARTIFACT_NAME}.tar.gz" "${GENERIC_ARTIFACT_NAME}.tar.gz"
 
 if command -v sha256sum >/dev/null 2>&1; then
   sha256sum "${ARTIFACT_NAME}.tar.gz" > "${ARTIFACT_NAME}.sha256"
+  sha256sum "${GENERIC_ARTIFACT_NAME}.tar.gz" > "${GENERIC_ARTIFACT_NAME}.tar.gz.sha256"
 else
   shasum -a 256 "${ARTIFACT_NAME}.tar.gz" > "${ARTIFACT_NAME}.sha256"
+  shasum -a 256 "${GENERIC_ARTIFACT_NAME}.tar.gz" > "${GENERIC_ARTIFACT_NAME}.tar.gz.sha256"
 fi
 
 echo "created ${DIST_DIR}/${ARTIFACT_NAME}.tar.gz"
 echo "created ${DIST_DIR}/${ARTIFACT_NAME}.sha256"
-
+echo "created ${DIST_DIR}/${GENERIC_ARTIFACT_NAME}.tar.gz"
+echo "created ${DIST_DIR}/${GENERIC_ARTIFACT_NAME}.tar.gz.sha256"

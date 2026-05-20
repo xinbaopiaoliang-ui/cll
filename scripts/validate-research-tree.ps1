@@ -20,6 +20,7 @@ $required = @(
     "docs\one-click-install-design.md",
     "docs\admin-node-install-flow.md",
     "docs\node-ops-upgrade.md",
+    "docs\deploy-linux.md",
     "api\openapi-node.yaml",
     "db\schema.sql",
     "install\install.sh",
@@ -30,6 +31,7 @@ $required = @(
     "node-core\Cargo.toml",
     "node-core\src\main.rs",
     "scripts\package-release.sh",
+    ".github\workflows\release.yml",
     "docs\local-validation.md"
 )
 

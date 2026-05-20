@@ -70,7 +70,7 @@ impl RuntimeState {
     }
 
     pub fn status(&self) -> &'static str {
-        match self.inner.status {
+        match &self.inner.status {
             NodeStatus::Ready => "ready",
             NodeStatus::Registered => "registered",
         }
@@ -102,4 +102,3 @@ fn now_unix() -> u64 {
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
 }
-

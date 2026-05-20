@@ -18,6 +18,8 @@
 
 目标：
 
+- GitHub Actions 自动构建 Linux `x86_64` release。
+- 一键安装器默认下载 release 并校验 sha256。
 - 实现 QUIC UDP tunnel。
 - 支持后台拉配置。
 - 支持节点上报状态和流量。
@@ -94,4 +96,3 @@
 - `fake_ping_value` 不建议改网络包，只做 UI 展示或业务侧显示。
 - 多运营商 IP 必须确认真实绑定在 Linux 网卡上。
 - QUIC 在部分网络可能被限速，需要 TCP/TLS 或 WireGuard 兜底。
-

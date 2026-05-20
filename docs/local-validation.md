@@ -51,7 +51,14 @@ sudo bash install/install.sh \
 
 正式 bootstrap API 未接入前，不要执行非 `--dry-run` 安装到生产机。
 
-如果要先跑通 systemd 部署链路，可以使用 standalone 模式：
+如果要先跑通 systemd 部署链路，先创建 GitHub Release：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+等 GitHub Actions 完成后，再使用 standalone 模式：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh | sudo bash -s -- \
@@ -70,6 +77,14 @@ journalctl -u xaccel-node -f
 cat /etc/xaccel-node/config.toml
 cat /var/lib/xaccel-node/bootstrap-response.json
 ```
+
+如果 release 还没有准备好，但只想验证安装器和 systemd，可以显式加：
+
+```bash
+--allow-placeholder
+```
+
+不加这个参数时，安装器会因为找不到真实 release 而失败，避免误装占位内核。
 
 卸载：
 

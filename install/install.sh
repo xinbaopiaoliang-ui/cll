@@ -11,6 +11,8 @@ SYSTEMD_UNIT="/etc/systemd/system/${SERVICE_NAME}.service"
 IDENTITY_FILE="${DATA_DIR}/identity.json"
 CONFIG_FILE="${CONFIG_DIR}/config.toml"
 HEALTH_URL="http://127.0.0.1:9876/health"
+GITHUB_REPO="xinbaopiaoliang-ui/cll"
+RELEASE_BASE_URL="https://github.com/${GITHUB_REPO}/releases/latest/download"
 
 BOOTSTRAP_URL=""
 BOOTSTRAP_TOKEN=""
@@ -23,6 +25,9 @@ NODE_SECRET=""
 CHANNEL="stable"
 OPEN_FIREWALL="0"
 DRY_RUN="0"
+ARTIFACT_URL=""
+SHA256_URL=""
+ALLOW_PLACEHOLDER="0"
 
 usage() {
   cat <<'USAGE'
@@ -40,6 +45,9 @@ Options:
   --server-port PORT      Node server port for standalone mode.
   --node-secret SECRET    Optional node secret for standalone mode.
   --channel CHANNEL       Release channel. Default: stable.
+  --artifact-url URL      Override xaccel-node tar.gz download URL.
+  --sha256-url URL        Override xaccel-node sha256 download URL.
+  --allow-placeholder     Install placeholder service if release download is unavailable.
   --open-firewall         Try to open the node port with ufw/firewalld.
   --dry-run               Run preflight only and print planned actions.
   -h, --help              Show this help.
@@ -93,6 +101,18 @@ while [[ $# -gt 0 ]]; do
       CHANNEL="${2:-}"
       shift 2
       ;;
+    --artifact-url)
+      ARTIFACT_URL="${2:-}"
+      shift 2
+      ;;
+    --sha256-url)
+      SHA256_URL="${2:-}"
+      shift 2
+      ;;
+    --allow-placeholder)
+      ALLOW_PLACEHOLDER="1"
+      shift
+      ;;
     --open-firewall)
       OPEN_FIREWALL="1"
       shift
@@ -145,6 +165,8 @@ preflight() {
   require_root
   command -v systemctl >/dev/null 2>&1 || fail "systemd is required"
   command -v ip >/dev/null 2>&1 || fail "iproute2 is required"
+  command -v curl >/dev/null 2>&1 || fail "curl is required"
+  command -v tar >/dev/null 2>&1 || fail "tar is required"
 
   if [[ "$STANDALONE" == "1" ]]; then
     [[ -n "$NODE_ID" ]] || fail "--node-id is required in standalone mode"
@@ -156,7 +178,6 @@ preflight() {
     return
   fi
 
-  command -v curl >/dev/null 2>&1 || fail "curl is required"
   [[ -n "$BOOTSTRAP_URL" ]] || fail "--bootstrap-url is required"
   [[ -n "$BOOTSTRAP_TOKEN" ]] || fail "--bootstrap-token is required"
 }
@@ -270,6 +291,54 @@ echo "xaccel-node binary is not installed yet. Replace this placeholder with the
 sleep 3600
 SH
   chmod 0755 "${INSTALL_DIR}/${SERVICE_NAME}"
+}
+
+install_binary_release() {
+  local arch artifact_name artifact_url sha_url tmp_dir tar_file sha_file extracted_bin
+  arch="$(detect_arch)"
+  artifact_name="xaccel-node-linux-${arch}.tar.gz"
+  artifact_url="${ARTIFACT_URL:-${RELEASE_BASE_URL}/${artifact_name}}"
+  sha_url="${SHA256_URL:-${artifact_url}.sha256}"
+  tmp_dir="$(mktemp -d)"
+  tar_file="${tmp_dir}/${artifact_name}"
+  sha_file="${tar_file}.sha256"
+
+  log "download node release: ${artifact_url}"
+  if ! curl -fsSL "$artifact_url" -o "$tar_file"; then
+    rm -rf "$tmp_dir"
+    if [[ "$ALLOW_PLACEHOLDER" == "1" ]]; then
+      log "release download failed; installing placeholder because --allow-placeholder is set"
+      install_binary_placeholder
+      return 0
+    fi
+    fail "failed to download release artifact. Create a GitHub Release first, or pass --allow-placeholder for installer-only testing"
+  fi
+
+  log "download checksum: ${sha_url}"
+  if curl -fsSL "$sha_url" -o "$sha_file"; then
+    if command -v sha256sum >/dev/null 2>&1; then
+      (cd "$tmp_dir" && sha256sum -c "$(basename "$sha_file")")
+    elif command -v shasum >/dev/null 2>&1; then
+      (cd "$tmp_dir" && shasum -a 256 -c "$(basename "$sha_file")")
+    else
+      rm -rf "$tmp_dir"
+      fail "sha256sum or shasum is required to verify release artifact"
+    fi
+  else
+    rm -rf "$tmp_dir"
+    fail "failed to download sha256 file for release artifact"
+  fi
+
+  tar -xzf "$tar_file" -C "$tmp_dir"
+  extracted_bin="$(find "$tmp_dir" -type f -name "$SERVICE_NAME" | head -n 1)"
+  [[ -n "$extracted_bin" ]] || {
+    rm -rf "$tmp_dir"
+    fail "release artifact does not contain ${SERVICE_NAME}"
+  }
+
+  install -m 0755 "$extracted_bin" "${INSTALL_DIR}/${SERVICE_NAME}"
+  rm -rf "$tmp_dir"
+  log "installed ${INSTALL_DIR}/${SERVICE_NAME}"
 }
 
 write_config() {
@@ -391,7 +460,7 @@ main() {
   fi
 
   write_identity_placeholder
-  install_binary_placeholder
+  install_binary_release
   write_config
   write_systemd_unit
   open_firewall_if_requested

@@ -49,11 +49,20 @@ traffic through a self-developed node core.
 
 - [Rust 节点内核 MVP](node-core/README.md)
 - [本地验证流程](docs/local-validation.md)
+- [Linux 部署流程](docs/deploy-linux.md)
 - [Release 打包脚本](scripts/package-release.sh)
 
 ## Quick Linux Install
 
-Before the backend bootstrap API exists, use standalone mode:
+Before deploying, create a GitHub Release by pushing a version tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+GitHub Actions will build `xaccel-node-linux-x86_64.tar.gz` and attach it to
+the release. After the release is ready, use standalone mode:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh | sudo bash -s -- \
@@ -64,6 +73,6 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
   --server-port 666
 ```
 
-This installs a placeholder `xaccel-node` service to verify the Linux systemd
-deployment path. Replace `YOUR_SERVER_IP` with the public IP of the Linux
-server.
+Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
+automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
+next stage.
