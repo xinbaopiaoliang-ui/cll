@@ -50,3 +50,20 @@ traffic through a self-developed node core.
 - [Rust 节点内核 MVP](node-core/README.md)
 - [本地验证流程](docs/local-validation.md)
 - [Release 打包脚本](scripts/package-release.sh)
+
+## Quick Linux Install
+
+Before the backend bootstrap API exists, use standalone mode:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh | sudo bash -s -- \
+  --standalone \
+  --node-id 1 \
+  --panel-url https://api.example.com \
+  --server-ip YOUR_SERVER_IP \
+  --server-port 666
+```
+
+This installs a placeholder `xaccel-node` service to verify the Linux systemd
+deployment path. Replace `YOUR_SERVER_IP` with the public IP of the Linux
+server.

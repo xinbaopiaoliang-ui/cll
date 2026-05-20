@@ -51,6 +51,38 @@ sudo bash install/install.sh \
 
 正式 bootstrap API 未接入前，不要执行非 `--dry-run` 安装到生产机。
 
+如果要先跑通 systemd 部署链路，可以使用 standalone 模式：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh | sudo bash -s -- \
+  --standalone \
+  --node-id 1 \
+  --panel-url https://api.example.com \
+  --server-ip YOUR_SERVER_IP \
+  --server-port 666
+```
+
+安装后检查：
+
+```bash
+systemctl status xaccel-node
+journalctl -u xaccel-node -f
+cat /etc/xaccel-node/config.toml
+cat /var/lib/xaccel-node/bootstrap-response.json
+```
+
+卸载：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/uninstall.sh | sudo bash
+```
+
+彻底清理：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/uninstall.sh | sudo bash -s -- --purge
+```
+
 ## Release 打包验证
 
 在 Linux 或 WSL 中：
@@ -73,4 +105,3 @@ dist/xaccel-node-<version>-linux-<arch>.sha256
 - release manifest 还没有自动写入真实 sha256。
 - Rust 节点还未实现 control-plane、listener、session、relay。
 - Linux systemd 全链路需要在真实服务器验证。
-
