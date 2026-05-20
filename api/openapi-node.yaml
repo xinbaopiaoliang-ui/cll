@@ -1,0 +1,322 @@
+openapi: 3.0.3
+info:
+  title: XAccel Node Control API
+  version: 0.1.0
+  description: Backend APIs used by the Linux acceleration node installer and daemon.
+servers:
+  - url: https://api.example.com
+paths:
+  /api/node/v1/bootstrap:
+    post:
+      summary: Exchange a one-time bootstrap token for node identity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BootstrapRequest'
+      responses:
+        '200':
+          description: Node identity and release info.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapResponse'
+        '400':
+          description: Invalid request, expired token, used token, or IP mismatch.
+  /api/node/v1/handshake:
+    post:
+      summary: Node daemon handshake after service start.
+      security:
+        - NodeHmac: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandshakeRequest'
+      responses:
+        '200':
+          description: Control-plane capabilities and config revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HandshakeResponse'
+  /api/node/v1/config:
+    get:
+      summary: Fetch node runtime configuration.
+      security:
+        - NodeHmac: []
+      parameters:
+        - name: node_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: revision
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Full node config.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeConfig'
+        '304':
+          description: Config unchanged.
+  /api/node/v1/report:
+    post:
+      summary: Report traffic, sessions, quality, system load, install errors, and status.
+      security:
+        - NodeHmac: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodeReport'
+      responses:
+        '200':
+          description: Report accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+components:
+  securitySchemes:
+    NodeHmac:
+      type: apiKey
+      in: header
+      name: X-Node-Signature
+      description: HMAC over node_id, timestamp, nonce, and body sha256.
+  schemas:
+    BootstrapRequest:
+      type: object
+      required:
+        - bootstrap_token
+        - hostname
+        - os
+        - arch
+        - kernel
+        - ips
+        - installer_version
+      properties:
+        bootstrap_token:
+          type: string
+        hostname:
+          type: string
+        os:
+          type: string
+          enum: [linux]
+        arch:
+          type: string
+          enum: [x86_64, aarch64]
+        kernel:
+          type: string
+        ips:
+          type: array
+          items:
+            type: string
+        installer_version:
+          type: string
+    BootstrapResponse:
+      type: object
+      required:
+        - node_id
+        - node_secret
+        - panel_url
+        - server_ip
+        - server_port
+        - config_revision
+        - release
+      properties:
+        node_id:
+          type: integer
+        node_secret:
+          type: string
+        panel_url:
+          type: string
+          format: uri
+        server_ip:
+          type: string
+        server_port:
+          type: integer
+        config_revision:
+          type: integer
+        release:
+          type: object
+          required: [version, manifest_url]
+          properties:
+            version:
+              type: string
+            manifest_url:
+              type: string
+              format: uri
+    HandshakeRequest:
+      type: object
+      required:
+        - node_id
+        - node_version
+        - os
+        - arch
+        - boot_id
+        - timestamp
+        - nonce
+      properties:
+        node_id:
+          type: integer
+        node_version:
+          type: string
+        os:
+          type: string
+        arch:
+          type: string
+        boot_id:
+          type: string
+        timestamp:
+          type: integer
+        nonce:
+          type: string
+    HandshakeResponse:
+      type: object
+      properties:
+        server_time:
+          type: integer
+        config_revision:
+          type: integer
+        min_node_version:
+          type: string
+        websocket:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            url:
+              type: string
+              format: uri
+    NodeConfig:
+      type: object
+      required:
+        - schema_version
+        - config_revision
+        - node
+        - transports
+        - limits
+        - report
+      properties:
+        schema_version:
+          type: integer
+        config_revision:
+          type: integer
+        issued_at:
+          type: integer
+        expires_at:
+          type: integer
+        node:
+          $ref: '#/components/schemas/NodeFields'
+        transports:
+          type: object
+        limits:
+          type: object
+        report:
+          type: object
+        security:
+          type: object
+    NodeFields:
+      type: object
+      required:
+        - id
+        - server_ip
+        - server_port
+        - is_support_ipv6
+        - bandwidth_quality
+        - disable_quic
+        - area
+        - is_local_ip
+        - status
+      properties:
+        id:
+          type: integer
+        server_ip:
+          type: string
+        server_port:
+          type: integer
+        relay_server_ip:
+          type: string
+          nullable: true
+        relay_server_port:
+          type: integer
+          nullable: true
+        is_support_ipv6:
+          type: boolean
+        bandwidth_quality:
+          type: string
+          enum: [fast, normal, slow]
+        disable_quic:
+          type: boolean
+        area:
+          type: string
+        is_local_ip:
+          type: boolean
+        telecom_ip:
+          type: string
+          nullable: true
+        mobile_ip:
+          type: string
+          nullable: true
+        unicom_ip:
+          type: string
+          nullable: true
+        tag:
+          type: string
+          nullable: true
+        status:
+          type: integer
+    NodeReport:
+      type: object
+      required:
+        - node_id
+        - config_revision
+        - status
+      properties:
+        node_id:
+          type: integer
+        config_revision:
+          type: integer
+        status:
+          type: string
+        traffic:
+          type: array
+          items:
+            type: object
+            properties:
+              user_id:
+                type: integer
+              device_id:
+                type: string
+              game_id:
+                type: integer
+              up:
+                type: integer
+              down:
+                type: integer
+        sessions:
+          type: object
+        quality:
+          type: object
+        system:
+          type: object
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+

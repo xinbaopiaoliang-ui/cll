@@ -1,0 +1,19 @@
+/dist/
+/node-core/target/
+*.log
+*.tmp
+*.local
+
+# Runtime secrets and generated node state
+/identity.json
+/bootstrap-response.json
+*.secret
+*.key
+*.pem
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
