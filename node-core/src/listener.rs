@@ -106,9 +106,7 @@ async fn handle_tcp_connection(mut stream: TcpStream, state: RuntimeState) -> an
     state.stats().record_tcp_rx(size as u64);
 
     stream.write_all(TCP_PROBE_RESPONSE).await?;
-    state
-        .stats()
-        .record_tcp_tx(TCP_PROBE_RESPONSE.len() as u64);
+    state.stats().record_tcp_tx(TCP_PROBE_RESPONSE.len() as u64);
     stream.shutdown().await?;
     Ok(())
 }

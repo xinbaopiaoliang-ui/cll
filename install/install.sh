@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.1.0"
+INSTALLER_VERSION="0.3.0"
 SERVICE_NAME="xaccel-node"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-node"
@@ -28,6 +28,7 @@ DRY_RUN="0"
 ARTIFACT_URL=""
 SHA256_URL=""
 ALLOW_PLACEHOLDER="0"
+ENABLE_CONTROL_PLANE="0"
 
 usage() {
   cat <<'USAGE'
@@ -48,6 +49,7 @@ Options:
   --artifact-url URL      Override xaccel-node tar.gz download URL.
   --sha256-url URL        Override xaccel-node sha256 download URL.
   --allow-placeholder     Install placeholder service if release download is unavailable.
+  --enable-control-plane  Enable daemon reports to --panel-url. Standalone mode defaults off.
   --open-firewall         Try to open the node port with ufw/firewalld.
   --dry-run               Run preflight only and print planned actions.
   -h, --help              Show this help.
@@ -111,6 +113,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-placeholder)
       ALLOW_PLACEHOLDER="1"
+      shift
+      ;;
+    --enable-control-plane)
+      ENABLE_CONTROL_PLANE="1"
       shift
       ;;
     --open-firewall)
@@ -245,7 +251,7 @@ bootstrap_standalone() {
   "server_port": $SERVER_PORT,
   "config_revision": 1,
   "release": {
-    "version": "0.1.0",
+    "version": "0.3.0",
     "manifest_url": ""
   },
   "standalone": true
@@ -342,6 +348,12 @@ install_binary_release() {
 }
 
 write_config() {
+  local control_enabled
+  control_enabled="true"
+  if [[ "$STANDALONE" == "1" && "$ENABLE_CONTROL_PLANE" != "1" ]]; then
+    control_enabled="false"
+  fi
+
   mkdir -p "$CONFIG_DIR" "$LOG_DIR"
   chmod 0755 "$CONFIG_DIR" "$LOG_DIR"
   cat > "$CONFIG_FILE" <<EOF
@@ -356,6 +368,16 @@ channel = "$CHANNEL"
 
 [bootstrap]
 response_file = "${DATA_DIR}/bootstrap-response.json"
+
+[control]
+enabled = ${control_enabled}
+config_revision = 1
+request_timeout_sec = 5
+
+[report]
+interval_sec = 30
+traffic_batch_sec = 60
+metrics_interval_sec = 15
 EOF
 
   if [[ "$STANDALONE" == "1" ]]; then

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.1.0
+  version: 0.3.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -94,7 +94,7 @@ components:
       type: apiKey
       in: header
       name: X-Node-Signature
-      description: HMAC over node_id, timestamp, nonce, and body sha256.
+      description: HMAC-SHA256 over method, path, timestamp, nonce, and base64 body sha256.
   schemas:
     BootstrapRequest:
       type: object
@@ -289,8 +289,14 @@ components:
           type: integer
         config_revision:
           type: integer
+        node_version:
+          type: string
+        timestamp:
+          type: integer
         status:
           type: string
+        health:
+          type: object
         traffic:
           type: array
           items:
@@ -319,4 +325,3 @@ components:
               type: string
             message:
               type: string
-

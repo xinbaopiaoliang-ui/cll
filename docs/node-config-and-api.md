@@ -206,6 +206,49 @@ POST /api/node/v1/report
 {"event":"node.error","data":{"code":"BIND_FAILED","message":"1.2.3.5:666 bind failed"}}
 ```
 
+## v0.3.0 Control-Plane Report Contract
+
+The node can optionally send a signed report loop. Standalone installs keep it
+disabled unless `--enable-control-plane` is passed.
+
+Config:
+
+```toml
+[control]
+enabled = true
+config_revision = 1
+request_timeout_sec = 5
+
+[report]
+interval_sec = 30
+traffic_batch_sec = 60
+metrics_interval_sec = 15
+```
+
+Request:
+
+```http
+POST /api/node/v1/report
+X-Node-Id: 1
+X-Node-Timestamp: 1779250000
+X-Node-Nonce: 1234-1779250000-1
+X-Node-Body-Sha256: base64(sha256(body))
+X-Node-Signature: base64(hmac_sha256(secret, canonical))
+```
+
+Canonical string:
+
+```text
+POST
+/api/node/v1/report
+1779250000
+1234-1779250000-1
+base64(sha256(body))
+```
+
+The JSON body includes `node_id`, `config_revision`, `node_version`, `status`,
+`timestamp`, and a full health snapshot.
+
 ## 客户端连接意图
 
 游戏规则不是直接给节点消费，而是客户端生成连接意图后由后台调度。
@@ -256,4 +299,3 @@ POST /api/client/v1/connect-intent
   ]
 }
 ```
-

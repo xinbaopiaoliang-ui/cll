@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod control_plane;
 mod health;
 mod identity;
 mod listener;
@@ -9,6 +10,7 @@ use anyhow::Context;
 use clap::Parser;
 use cli::Cli;
 use config::NodeConfig;
+use control_plane::spawn_control_plane;
 use health::run_health_server;
 use identity::IdentityState;
 use listener::spawn_network_listeners;
@@ -57,16 +59,21 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let listener_tasks = spawn_network_listeners(state.clone()).await?;
+    let control_plane_tasks = spawn_control_plane(state.clone());
 
     let health_state = state.clone();
     let health_addr = state.config().runtime.health_addr;
-    let health_task = tokio::spawn(async move { run_health_server(health_addr, health_state).await });
+    let health_task =
+        tokio::spawn(async move { run_health_server(health_addr, health_state).await });
 
     wait_for_shutdown().await;
     info!("shutdown requested");
 
     health_task.abort();
     for task in listener_tasks {
+        task.abort();
+    }
+    for task in control_plane_tasks {
         task.abort();
     }
     Ok(())

@@ -14,4 +14,3 @@ pub struct Cli {
     #[arg(long)]
     pub version: bool,
 }
-

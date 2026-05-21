@@ -7,6 +7,7 @@ pub struct NodeConfig {
     pub identity: IdentityConfig,
     pub runtime: RuntimeConfig,
     pub bootstrap: Option<BootstrapConfig>,
+    pub control: Option<ControlPlaneConfig>,
     pub network: Option<NetworkConfig>,
     pub report: Option<ReportConfig>,
     pub limits: Option<LimitConfig>,
@@ -30,6 +31,24 @@ pub struct RuntimeConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BootstrapConfig {
     pub response_file: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ControlPlaneConfig {
+    pub enabled: bool,
+    pub config_revision: u64,
+    pub request_timeout_sec: u64,
+}
+
+impl Default for ControlPlaneConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            config_revision: 1,
+            request_timeout_sec: 5,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -114,6 +133,12 @@ impl NodeConfig {
             }
         }
 
+        if let Some(control) = &self.control {
+            if control.request_timeout_sec == 0 {
+                bail!("control.request_timeout_sec must be greater than 0");
+            }
+        }
+
         Ok(())
     }
 }
@@ -137,6 +162,9 @@ mod tests {
 
             [bootstrap]
             response_file = "/var/lib/xaccel-node/bootstrap-response.json"
+
+            [control]
+            enabled = false
             "#,
         )
         .expect("config parses");
@@ -144,4 +172,3 @@ mod tests {
         config.validate().expect("config validates");
     }
 }
-

@@ -27,6 +27,11 @@ telecom_ip = ""
 mobile_ip = ""
 unicom_ip = ""
 
+[control]
+enabled = true
+config_revision = 1
+request_timeout_sec = 5
+
 [report]
 interval_sec = 30
 traffic_batch_sec = 60
@@ -37,4 +42,3 @@ max_sessions = 200000
 max_sessions_per_user = 256
 max_udp_mappings = 500000
 default_user_speed_mbps = 0
-

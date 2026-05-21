@@ -28,7 +28,10 @@ pub async fn run_health_server(addr: SocketAddr, state: RuntimeState) -> anyhow:
     }
 }
 
-async fn handle_health_connection(mut stream: TcpStream, state: RuntimeState) -> anyhow::Result<()> {
+async fn handle_health_connection(
+    mut stream: TcpStream,
+    state: RuntimeState,
+) -> anyhow::Result<()> {
     let mut buf = [0_u8; 1024];
     let n = stream.read(&mut buf).await?;
     let request = String::from_utf8_lossy(&buf[..n]);
@@ -50,4 +53,3 @@ async fn handle_health_connection(mut stream: TcpStream, state: RuntimeState) ->
     stream.shutdown().await?;
     Ok(())
 }
-

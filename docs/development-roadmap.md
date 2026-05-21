@@ -36,13 +36,19 @@ Next:
 
 ## P3: Control Plane
 
+Done in `v0.3.0`:
+
+- Add optional control-plane report loop.
+- Sign node report requests with HMAC-SHA256.
+- Report health, listener, traffic, and session snapshots.
+- Expose control-plane success/failure state in `/health`.
+
 Goals:
 
 - Implement backend handshake.
 - Parse production bootstrap response.
-- Fetch node config.
-- Report node status, listeners, traffic, and system metrics.
-- Add HMAC request signing.
+- Fetch node config and hot-apply safe fields.
+- Add websocket or long-poll events for drain, config update, and user kick.
 
 ## P4: UDP Relay MVP
 
@@ -72,4 +78,3 @@ Goals:
 - Relay node support.
 - User/device auth.
 - Prometheus or structured metrics.
-

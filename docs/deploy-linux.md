@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.2.0`.
+Current version: `v0.3.0`.
 
 The node can:
 
@@ -12,7 +12,8 @@ The node can:
 - run as a systemd service;
 - expose `127.0.0.1:9876/health`;
 - listen on the configured TCP/UDP `server_ip:server_port`;
-- count basic TCP/UDP traffic.
+- count basic TCP/UDP traffic;
+- optionally report signed health snapshots to the backend control plane.
 
 It does not yet implement real game traffic forwarding.
 
@@ -21,8 +22,8 @@ It does not yet implement real game traffic forwarding.
 From the local repository:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 GitHub Actions will publish:
@@ -115,7 +116,41 @@ Expected fields:
 }
 ```
 
-## 5. Placeholder Mode
+## 5. Optional Control Plane Report
+
+Standalone installs keep backend reporting disabled by default because
+`https://api.example.com` is only a placeholder. When the real backend endpoint
+exists, enable signed node reports during install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh | sudo bash -s -- \
+  --standalone \
+  --node-id 1 \
+  --panel-url https://YOUR_BACKEND_DOMAIN \
+  --server-ip YOUR_SERVER_IP \
+  --server-port 666 \
+  --enable-control-plane
+```
+
+The node posts to:
+
+```text
+POST /api/node/v1/report
+```
+
+with HMAC headers:
+
+```text
+X-Node-Id
+X-Node-Timestamp
+X-Node-Nonce
+X-Node-Body-Sha256
+X-Node-Signature
+```
+
+Health exposes report status under `control_plane`.
+
+## 6. Placeholder Mode
 
 Only use this when the GitHub Release is not ready and you want to test the
 installer/systemd path:
@@ -130,7 +165,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
   --allow-placeholder
 ```
 
-## 6. Uninstall
+## 7. Uninstall
 
 Keep data and logs:
 
@@ -148,6 +183,6 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 - GitHub Actions currently builds Linux `x86_64` only.
 - TCP/UDP listener currently returns probe responses and records counters.
-- Real game acceleration, relay, user authentication, and control-plane sync
-  are still pending.
-
+- Control-plane reporting is implemented, but backend config sync and websocket
+  commands are still pending.
+- Real game acceleration, relay, and user authentication are still pending.

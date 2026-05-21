@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -39,6 +39,7 @@ pub struct HealthSnapshot {
     pub listeners: ListenerSnapshot,
     pub traffic: TrafficSnapshot,
     pub sessions: SessionSnapshot,
+    pub control_plane: ControlPlaneSnapshot,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,6 +74,17 @@ pub struct SessionSnapshot {
     pub active_tcp_connections: u64,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ControlPlaneSnapshot {
+    pub enabled: bool,
+    pub last_success_at: Option<u64>,
+    pub last_failure_at: Option<u64>,
+    pub last_http_status: Option<u16>,
+    pub last_error: Option<String>,
+    pub report_ok: u64,
+    pub report_failed: u64,
+}
+
 #[derive(Default)]
 pub struct RuntimeStats {
     udp_listening: AtomicBool,
@@ -85,6 +97,12 @@ pub struct RuntimeStats {
     tcp_active: AtomicU64,
     tcp_rx_bytes: AtomicU64,
     tcp_tx_bytes: AtomicU64,
+    control_last_success_at: AtomicU64,
+    control_last_failure_at: AtomicU64,
+    control_last_http_status: AtomicU64,
+    control_report_ok: AtomicU64,
+    control_report_failed: AtomicU64,
+    control_last_error: Mutex<Option<String>>,
 }
 
 impl RuntimeState {
@@ -156,6 +174,14 @@ impl RuntimeState {
             },
             traffic: self.inner.stats.traffic_snapshot(),
             sessions: self.inner.stats.session_snapshot(),
+            control_plane: self.inner.stats.control_plane_snapshot(
+                self.inner
+                    .config
+                    .control
+                    .as_ref()
+                    .map(|control| control.enabled)
+                    .unwrap_or(false),
+            ),
         }
     }
 }
@@ -207,6 +233,30 @@ impl RuntimeStats {
         self.tcp_tx_bytes.fetch_add(bytes, Ordering::Relaxed);
     }
 
+    pub fn record_control_success(&self, http_status: u16) {
+        self.control_report_ok.fetch_add(1, Ordering::Relaxed);
+        self.control_last_success_at
+            .store(now_unix(), Ordering::Relaxed);
+        self.control_last_http_status
+            .store(u64::from(http_status), Ordering::Relaxed);
+        if let Ok(mut last_error) = self.control_last_error.lock() {
+            *last_error = None;
+        }
+    }
+
+    pub fn record_control_failure(&self, http_status: Option<u16>, error: impl Into<String>) {
+        self.control_report_failed.fetch_add(1, Ordering::Relaxed);
+        self.control_last_failure_at
+            .store(now_unix(), Ordering::Relaxed);
+        if let Some(status) = http_status {
+            self.control_last_http_status
+                .store(u64::from(status), Ordering::Relaxed);
+        }
+        if let Ok(mut last_error) = self.control_last_error.lock() {
+            *last_error = Some(error.into());
+        }
+    }
+
     pub fn traffic_snapshot(&self) -> TrafficSnapshot {
         TrafficSnapshot {
             udp_rx_packets: self.udp_rx_packets.load(Ordering::Relaxed),
@@ -224,6 +274,31 @@ impl RuntimeStats {
             active_tcp_connections: self.tcp_active.load(Ordering::Relaxed),
         }
     }
+
+    pub fn control_plane_snapshot(&self, enabled: bool) -> ControlPlaneSnapshot {
+        let last_success_at = unix_option(self.control_last_success_at.load(Ordering::Relaxed));
+        let last_failure_at = unix_option(self.control_last_failure_at.load(Ordering::Relaxed));
+        let last_http_status = self.control_last_http_status.load(Ordering::Relaxed);
+        let last_error = self
+            .control_last_error
+            .lock()
+            .ok()
+            .and_then(|last_error| last_error.clone());
+
+        ControlPlaneSnapshot {
+            enabled,
+            last_success_at,
+            last_failure_at,
+            last_http_status: if last_http_status == 0 {
+                None
+            } else {
+                Some(last_http_status as u16)
+            },
+            last_error,
+            report_ok: self.control_report_ok.load(Ordering::Relaxed),
+            report_failed: self.control_report_failed.load(Ordering::Relaxed),
+        }
+    }
 }
 
 fn now_unix() -> u64 {
@@ -231,4 +306,12 @@ fn now_unix() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
+}
+
+fn unix_option(value: u64) -> Option<u64> {
+    if value == 0 {
+        None
+    } else {
+        Some(value)
+    }
 }
