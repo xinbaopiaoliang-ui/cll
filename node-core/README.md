@@ -8,6 +8,8 @@ this MVP is to verify the node lifecycle:
 - Load `/etc/xaccel-node/config.toml`.
 - Load installer identity/bootstrap state.
 - Expose a local health endpoint.
+- Listen on the configured TCP/UDP server endpoint.
+- Record basic TCP/UDP counters.
 - Support `--check-config` for installer validation.
 - Provide a stable place to add control-plane, listener, session, and relay
   modules.
@@ -43,4 +45,3 @@ and starts it through:
 ```text
 /etc/systemd/system/xaccel-node.service
 ```
-

@@ -1,122 +1,93 @@
-# 本地验证流程
+# Local Validation
 
-本文验证当前研究目录中的一键安装资产和 Rust 节点内核 MVP。Windows 上可以验证 Rust 代码结构；真实 systemd 安装仍以 Linux 为准。
+This document verifies the research tree, installer assets, and Rust node MVP.
 
-## 研究目录自检
+## Research Tree
 
 ```powershell
 & "D:\项目\broad\game-accelerator-research\scripts\validate-research-tree.ps1"
 ```
 
-自检内容：
+The script checks that required docs, installer files, API contracts, DB schema,
+and Rust sources exist, and that no research directory was accidentally created
+inside Xboard.
 
-- 必要文档存在。
-- OpenAPI、DB schema、安装器脚本存在。
-- Rust `node-core` 存在。
-- Xboard 内没有误创建研究目录。
+## Rust Metadata
 
-## Rust 节点内核检查
+On this Windows machine, `cargo test` may fail without the MSVC linker. The
+lightweight check is:
 
 ```powershell
 cd D:\项目\broad\game-accelerator-research\node-core
+cargo metadata --no-deps --format-version 1
+```
+
+On Linux or a complete Rust toolchain:
+
+```bash
+cd node-core
 cargo fmt --check
-cargo test
-cargo run -- --check-config ..\install\config.example.toml
+cargo test --locked
+cargo run -- --check-config ../install/config.example.toml
 ```
 
-运行 daemon：
+## Linux Runtime Check
 
-```powershell
-cargo run -- --config ..\install\config.example.toml
-```
-
-健康检查：
-
-```powershell
-curl http://127.0.0.1:9876/health
-```
-
-当前 MVP 只验证生命周期，不做真实流量转发。
-
-## Linux 安装验证
-
-在 Linux 测试机上：
-
-```bash
-sudo bash install/install.sh \
-  --bootstrap-url https://api.example.com/api/node/v1/bootstrap \
-  --bootstrap-token test-token \
-  --dry-run
-```
-
-正式 bootstrap API 未接入前，不要执行非 `--dry-run` 安装到生产机。
-
-如果要先跑通 systemd 部署链路，先创建 GitHub Release：
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-等 GitHub Actions 完成后，再使用 standalone 模式：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh | sudo bash -s -- \
-  --standalone \
-  --node-id 1 \
-  --panel-url https://api.example.com \
-  --server-ip YOUR_SERVER_IP \
-  --server-port 666
-```
-
-安装后检查：
+After installing `v0.2.0`:
 
 ```bash
 systemctl status xaccel-node
-journalctl -u xaccel-node -f
-cat /etc/xaccel-node/config.toml
-cat /var/lib/xaccel-node/bootstrap-response.json
+curl http://127.0.0.1:9876/health
+ss -lntup | grep ':666'
 ```
 
-如果 release 还没有准备好，但只想验证安装器和 systemd，可以显式加：
+TCP probe:
 
 ```bash
---allow-placeholder
+printf 'ping\n' | nc -w 2 103.201.131.99 666
 ```
 
-不加这个参数时，安装器会因为找不到真实 release 而失败，避免误装占位内核。
-
-卸载：
+UDP probe:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/uninstall.sh | sudo bash
+printf 'ping\n' | nc -u -w 2 103.201.131.99 666
 ```
 
-彻底清理：
+Health should show:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/uninstall.sh | sudo bash -s -- --purge
+```json
+{
+  "status": "ready",
+  "listeners": {
+    "udp_listening": true,
+    "tcp_listening": true
+  },
+  "traffic": {
+    "udp_rx_packets": 1,
+    "tcp_accepted": 1
+  }
+}
 ```
 
-## Release 打包验证
+## Package Release
 
-在 Linux 或 WSL 中：
+On Linux or WSL:
 
 ```bash
-cd game-accelerator-research
 bash scripts/package-release.sh
 ```
 
-输出：
+Output:
 
 ```text
-dist/xaccel-node-<version>-linux-<arch>.tar.gz
-dist/xaccel-node-<version>-linux-<arch>.sha256
+dist/xaccel-node-linux-x86_64.tar.gz
+dist/xaccel-node-linux-x86_64.tar.gz.sha256
 ```
 
-## 当前缺口
+## Current Gaps
 
-- 安装脚本仍未解析真实 bootstrap JSON。
-- release manifest 还没有自动写入真实 sha256。
-- Rust 节点还未实现 control-plane、listener、session、relay。
-- Linux systemd 全链路需要在真实服务器验证。
+- The installer still does not parse production bootstrap JSON into all config
+  fields.
+- The node has basic TCP/UDP listener counters, but no real game forwarding.
+- Control-plane sync, relay, user/device auth, and QUIC tunnel are pending.
+

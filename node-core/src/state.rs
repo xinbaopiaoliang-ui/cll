@@ -1,7 +1,10 @@
 use crate::{config::NodeConfig, identity::IdentityState};
 use serde::Serialize;
 use std::{
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -15,6 +18,7 @@ struct RuntimeStateInner {
     identity: IdentityState,
     started_at: u64,
     status: NodeStatus,
+    stats: Arc<RuntimeStats>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,6 +36,9 @@ pub struct HealthSnapshot {
     pub panel_url: Option<String>,
     pub uptime_sec: u64,
     pub config: HealthConfigSnapshot,
+    pub listeners: ListenerSnapshot,
+    pub traffic: TrafficSnapshot,
+    pub sessions: SessionSnapshot,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,6 +48,43 @@ pub struct HealthConfigSnapshot {
     pub network_loaded: bool,
     pub disable_quic: Option<bool>,
     pub area: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListenerSnapshot {
+    pub udp_listening: bool,
+    pub tcp_listening: bool,
+    pub listen_addr: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrafficSnapshot {
+    pub udp_rx_packets: u64,
+    pub udp_rx_bytes: u64,
+    pub udp_tx_packets: u64,
+    pub udp_tx_bytes: u64,
+    pub tcp_accepted: u64,
+    pub tcp_rx_bytes: u64,
+    pub tcp_tx_bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionSnapshot {
+    pub active_tcp_connections: u64,
+}
+
+#[derive(Default)]
+pub struct RuntimeStats {
+    udp_listening: AtomicBool,
+    tcp_listening: AtomicBool,
+    udp_rx_packets: AtomicU64,
+    udp_rx_bytes: AtomicU64,
+    udp_tx_packets: AtomicU64,
+    udp_tx_bytes: AtomicU64,
+    tcp_accepted: AtomicU64,
+    tcp_active: AtomicU64,
+    tcp_rx_bytes: AtomicU64,
+    tcp_tx_bytes: AtomicU64,
 }
 
 impl RuntimeState {
@@ -57,6 +101,7 @@ impl RuntimeState {
                 identity,
                 started_at: now_unix(),
                 status,
+                stats: Arc::new(RuntimeStats::default()),
             }),
         }
     }
@@ -69,6 +114,10 @@ impl RuntimeState {
         &self.inner.identity
     }
 
+    pub fn stats(&self) -> &RuntimeStats {
+        &self.inner.stats
+    }
+
     pub fn status(&self) -> &'static str {
         match &self.inner.status {
             NodeStatus::Ready => "ready",
@@ -78,6 +127,14 @@ impl RuntimeState {
 
     pub fn health_snapshot(&self) -> HealthSnapshot {
         let network = self.inner.config.network.as_ref();
+
+        let listen_addr = network.map(|network| {
+            if network.server_ip.contains(':') {
+                format!("[{}]:{}", network.server_ip, network.server_port)
+            } else {
+                format!("{}:{}", network.server_ip, network.server_port)
+            }
+        });
 
         HealthSnapshot {
             status: self.inner.status.clone(),
@@ -92,6 +149,79 @@ impl RuntimeState {
                 disable_quic: network.map(|network| network.disable_quic),
                 area: network.map(|network| network.area.clone()),
             },
+            listeners: ListenerSnapshot {
+                udp_listening: self.inner.stats.udp_listening(),
+                tcp_listening: self.inner.stats.tcp_listening(),
+                listen_addr,
+            },
+            traffic: self.inner.stats.traffic_snapshot(),
+            sessions: self.inner.stats.session_snapshot(),
+        }
+    }
+}
+
+impl RuntimeStats {
+    pub fn set_udp_listening(&self, value: bool) {
+        self.udp_listening.store(value, Ordering::Relaxed);
+    }
+
+    pub fn set_tcp_listening(&self, value: bool) {
+        self.tcp_listening.store(value, Ordering::Relaxed);
+    }
+
+    pub fn udp_listening(&self) -> bool {
+        self.udp_listening.load(Ordering::Relaxed)
+    }
+
+    pub fn tcp_listening(&self) -> bool {
+        self.tcp_listening.load(Ordering::Relaxed)
+    }
+
+    pub fn record_udp_rx(&self, bytes: u64) {
+        self.udp_rx_packets.fetch_add(1, Ordering::Relaxed);
+        self.udp_rx_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn record_udp_tx(&self, bytes: u64) {
+        self.udp_tx_packets.fetch_add(1, Ordering::Relaxed);
+        self.udp_tx_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn record_tcp_accept(&self) {
+        self.tcp_accepted.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_tcp_open(&self) {
+        self.tcp_active.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_tcp_close(&self) {
+        self.tcp_active.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    pub fn record_tcp_rx(&self, bytes: u64) {
+        self.tcp_rx_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn record_tcp_tx(&self, bytes: u64) {
+        self.tcp_tx_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn traffic_snapshot(&self) -> TrafficSnapshot {
+        TrafficSnapshot {
+            udp_rx_packets: self.udp_rx_packets.load(Ordering::Relaxed),
+            udp_rx_bytes: self.udp_rx_bytes.load(Ordering::Relaxed),
+            udp_tx_packets: self.udp_tx_packets.load(Ordering::Relaxed),
+            udp_tx_bytes: self.udp_tx_bytes.load(Ordering::Relaxed),
+            tcp_accepted: self.tcp_accepted.load(Ordering::Relaxed),
+            tcp_rx_bytes: self.tcp_rx_bytes.load(Ordering::Relaxed),
+            tcp_tx_bytes: self.tcp_tx_bytes.load(Ordering::Relaxed),
+        }
+    }
+
+    pub fn session_snapshot(&self) -> SessionSnapshot {
+        SessionSnapshot {
+            active_tcp_connections: self.tcp_active.load(Ordering::Relaxed),
         }
     }
 }

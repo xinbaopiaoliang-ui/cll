@@ -57,8 +57,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 GitHub Actions will build `xaccel-node-linux-x86_64.tar.gz` and attach it to
@@ -75,4 +75,5 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage.
+next stage. Version `0.2.0` starts TCP/UDP listeners on `server_ip:server_port`
+and exposes basic counters in `/health`.

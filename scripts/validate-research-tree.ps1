@@ -30,6 +30,7 @@ $required = @(
     "install\systemd\xaccel-node.service",
     "node-core\Cargo.toml",
     "node-core\src\main.rs",
+    "node-core\src\listener.rs",
     "scripts\package-release.sh",
     ".github\workflows\release.yml",
     "docs\local-validation.md"

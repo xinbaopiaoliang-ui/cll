@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod health;
 mod identity;
+mod listener;
 mod state;
 
 use anyhow::Context;
@@ -10,6 +11,7 @@ use cli::Cli;
 use config::NodeConfig;
 use health::run_health_server;
 use identity::IdentityState;
+use listener::spawn_network_listeners;
 use state::RuntimeState;
 use std::path::PathBuf;
 use tracing::{info, warn};
@@ -54,6 +56,8 @@ async fn main() -> anyhow::Result<()> {
         warn!("node identity is still bootstrap placeholder; control-plane exchange is pending");
     }
 
+    let listener_tasks = spawn_network_listeners(state.clone()).await?;
+
     let health_state = state.clone();
     let health_addr = state.config().runtime.health_addr;
     let health_task = tokio::spawn(async move { run_health_server(health_addr, health_state).await });
@@ -62,6 +66,9 @@ async fn main() -> anyhow::Result<()> {
     info!("shutdown requested");
 
     health_task.abort();
+    for task in listener_tasks {
+        task.abort();
+    }
     Ok(())
 }
 
@@ -87,4 +94,3 @@ async fn wait_for_shutdown() {
         let _ = tokio::signal::ctrl_c().await;
     }
 }
-
