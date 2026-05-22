@@ -7,12 +7,19 @@ use anyhow::Context;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use std::{
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     time::{SystemTime, UNIX_EPOCH},
+};
+use tokio::{
+    net::{lookup_host, UdpSocket},
+    time::{timeout, Duration},
 };
 
 pub const PROTOCOL_VERSION: &str = "xaccel/1";
 const PROBE_TTL_SEC: u64 = 30;
+const DEFAULT_RELAY_TIMEOUT_MS: u64 = 200;
+const MAX_RELAY_TIMEOUT_MS: u64 = 1000;
+const MAX_RELAY_RESPONSE_BYTES: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -45,6 +52,10 @@ pub struct ClientSessionDataRequest {
     pub session_id: Option<String>,
     pub client_nonce: Option<String>,
     pub payload: Option<String>,
+    pub target_addr: Option<String>,
+    pub target_host: Option<String>,
+    pub target_port: Option<u16>,
+    pub response_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -98,13 +109,31 @@ struct ClientSessionDataResponse {
     status: &'static str,
     payload: String,
     payload_bytes: u64,
+    request_payload_bytes: u64,
+    target: Option<SessionTargetInfo>,
+    relay: Option<RelayInfo>,
     session: SessionDataInfo,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionTargetInfo {
+    address: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RelayInfo {
+    mode: &'static str,
+    timeout_ms: u64,
+    timed_out: bool,
+    upstream_tx_bytes: u64,
+    upstream_rx_bytes: u64,
 }
 
 #[derive(Debug, Serialize)]
 struct SessionDataInfo {
     created_at: u64,
     expires_at: u64,
+    authenticated: bool,
     user_id: Option<u64>,
     device_id: Option<String>,
     game_id: Option<u64>,
@@ -206,6 +235,7 @@ pub fn build_probe_response(
             identity.user_id,
             identity.device_id.clone(),
             identity.game_id,
+            identity.credential_valid,
             PROBE_TTL_SEC,
             peer,
         ));
@@ -237,6 +267,7 @@ pub fn build_probe_response(
             "udp_probe",
             "token_auth_hmac_v1",
             "udp_session_echo",
+            "udp_target_relay",
             "session_stats",
         ],
     };
@@ -244,7 +275,7 @@ pub fn build_probe_response(
     encode_json_line(&response)
 }
 
-pub fn build_session_data_response(
+pub async fn build_session_data_response(
     state: &RuntimeState,
     transport: TransportKind,
     peer: SocketAddr,
@@ -316,6 +347,72 @@ pub fn build_session_data_response(
         }
     };
 
+    let mut status = "echo";
+    let mut response_payload_bytes = payload_bytes.clone();
+    let mut response_payload = payload;
+    let mut target_info = None;
+    let mut relay_info = None;
+
+    if has_session_target(&request) && !session.authenticated {
+        state.stats().record_udp_relay_error();
+        return build_session_error(
+            state,
+            transport,
+            "relay_auth_required",
+            "target relay requires a valid client token",
+        );
+    }
+
+    let target = match resolve_session_target(&request).await {
+        Ok(target) => target,
+        Err(error) => {
+            state.stats().record_udp_relay_error();
+            return build_session_error(state, transport, error.code, error.message);
+        }
+    };
+
+    if let Some(target) = target {
+        let timeout_ms = clamp_relay_timeout(request.response_timeout_ms);
+        let relay = match relay_udp_payload(target, &payload_bytes, timeout_ms).await {
+            Ok(relay) => relay,
+            Err(error) => {
+                state.stats().record_udp_relay_error();
+                return build_session_error(
+                    state,
+                    transport,
+                    "relay_error",
+                    format!("udp relay failed: {error}"),
+                );
+            }
+        };
+
+        state.stats().record_udp_relay_tx(relay.upstream_tx_bytes);
+        target_info = Some(SessionTargetInfo {
+            address: target.to_string(),
+        });
+        relay_info = Some(RelayInfo {
+            mode: "udp_target",
+            timeout_ms,
+            timed_out: relay.timed_out,
+            upstream_tx_bytes: relay.upstream_tx_bytes,
+            upstream_rx_bytes: relay.payload.len() as u64,
+        });
+
+        if relay.timed_out {
+            state.stats().record_udp_relay_timeout();
+            status = "upstream_timeout";
+            response_payload_bytes = Vec::new();
+            response_payload = String::new();
+        } else {
+            state
+                .stats()
+                .record_udp_relay_rx(relay.payload.len() as u64);
+            status = "forwarded";
+            response_payload = BASE64.encode(&relay.payload);
+            response_payload_bytes = relay.payload;
+        }
+    }
+
     let response = ClientSessionDataResponse {
         message_type: "session.data.ok",
         protocol: PROTOCOL_VERSION,
@@ -325,12 +422,16 @@ pub fn build_session_data_response(
         transport,
         session_id: session.session_id.clone(),
         client_nonce: request.client_nonce,
-        status: "echo",
-        payload,
-        payload_bytes: payload_bytes.len() as u64,
+        status,
+        payload: response_payload,
+        payload_bytes: response_payload_bytes.len() as u64,
+        request_payload_bytes: payload_bytes.len() as u64,
+        target: target_info,
+        relay: relay_info,
         session: SessionDataInfo {
             created_at: session.created_at,
             expires_at: session.expires_at,
+            authenticated: session.authenticated,
             user_id: session.user_id,
             device_id: session.device_id,
             game_id: session.game_id,
@@ -346,6 +447,117 @@ pub fn build_session_data_response(
     state.stats().record_udp_session_tx(encoded.len() as u64);
 
     Ok(encoded)
+}
+
+struct TargetResolveError {
+    code: &'static str,
+    message: String,
+}
+
+struct RelayOutcome {
+    payload: Vec<u8>,
+    upstream_tx_bytes: u64,
+    timed_out: bool,
+}
+
+fn has_session_target(request: &ClientSessionDataRequest) -> bool {
+    request
+        .target_addr
+        .as_deref()
+        .is_some_and(|target_addr| !target_addr.trim().is_empty())
+        || request
+            .target_host
+            .as_deref()
+            .is_some_and(|target_host| !target_host.trim().is_empty())
+}
+
+async fn resolve_session_target(
+    request: &ClientSessionDataRequest,
+) -> Result<Option<SocketAddr>, TargetResolveError> {
+    if let Some(target_addr) = request
+        .target_addr
+        .as_deref()
+        .map(str::trim)
+        .filter(|target_addr| !target_addr.is_empty())
+    {
+        return resolve_socket_addr(target_addr).await.map(Some);
+    }
+
+    let Some(target_host) = request
+        .target_host
+        .as_deref()
+        .map(str::trim)
+        .filter(|target_host| !target_host.is_empty())
+    else {
+        return Ok(None);
+    };
+
+    let Some(target_port) = request.target_port else {
+        return Err(TargetResolveError {
+            code: "missing_target_port",
+            message: "target_port is required when target_host is provided".to_string(),
+        });
+    };
+
+    let endpoint = match target_host.parse::<IpAddr>() {
+        Ok(IpAddr::V6(_)) => format!("[{target_host}]:{target_port}"),
+        _ => format!("{target_host}:{target_port}"),
+    };
+
+    resolve_socket_addr(&endpoint).await.map(Some)
+}
+
+async fn resolve_socket_addr(endpoint: &str) -> Result<SocketAddr, TargetResolveError> {
+    let mut resolved = lookup_host(endpoint)
+        .await
+        .map_err(|error| TargetResolveError {
+            code: "invalid_target",
+            message: format!("invalid target endpoint: {error}"),
+        })?;
+
+    resolved.next().ok_or_else(|| TargetResolveError {
+        code: "invalid_target",
+        message: "target endpoint did not resolve".to_string(),
+    })
+}
+
+fn clamp_relay_timeout(timeout_ms: Option<u64>) -> u64 {
+    timeout_ms
+        .unwrap_or(DEFAULT_RELAY_TIMEOUT_MS)
+        .clamp(1, MAX_RELAY_TIMEOUT_MS)
+}
+
+async fn relay_udp_payload(
+    target: SocketAddr,
+    payload: &[u8],
+    timeout_ms: u64,
+) -> std::io::Result<RelayOutcome> {
+    let bind_addr = if target.is_ipv6() {
+        "[::]:0"
+    } else {
+        "0.0.0.0:0"
+    };
+    let socket = UdpSocket::bind(bind_addr).await?;
+    socket.connect(target).await?;
+    let sent = socket.send(payload).await?;
+
+    let mut buf = vec![0_u8; MAX_RELAY_RESPONSE_BYTES];
+    match timeout(Duration::from_millis(timeout_ms), socket.recv(&mut buf)).await {
+        Ok(Ok(size)) => {
+            buf.truncate(size);
+            Ok(RelayOutcome {
+                payload: buf,
+                upstream_tx_bytes: sent as u64,
+                timed_out: false,
+            })
+        }
+        Ok(Err(error)) => Err(error),
+        Err(_) => Ok(RelayOutcome {
+            payload: Vec::new(),
+            upstream_tx_bytes: sent as u64,
+            timed_out: true,
+        }),
+    }
 }
 
 pub fn build_probe_error(
@@ -370,9 +582,9 @@ fn build_session_error(
     _state: &RuntimeState,
     transport: TransportKind,
     code: &'static str,
-    message: &'static str,
+    message: impl Into<String>,
 ) -> anyhow::Result<Vec<u8>> {
-    build_client_error(transport, "session.error", code, message.to_string())
+    build_client_error(transport, "session.error", code, message.into())
 }
 
 fn build_client_error(
@@ -472,7 +684,7 @@ mod tests {
 
     #[test]
     fn parses_session_data_request() {
-        let payload = br#"{"type":"session.data","protocol":"xaccel/1","session_id":"s1","client_nonce":"d1","payload":"aGVsbG8="}"#;
+        let payload = br#"{"type":"session.data","protocol":"xaccel/1","session_id":"s1","client_nonce":"d1","payload":"aGVsbG8=","target_host":"127.0.0.1","target_port":7777,"response_timeout_ms":50}"#;
         let ParsedClientMessage::SessionData(request) = parse_client_message(payload) else {
             panic!("expected session.data request");
         };
@@ -480,6 +692,28 @@ mod tests {
         assert_eq!(request.session_id.as_deref(), Some("s1"));
         assert_eq!(request.client_nonce.as_deref(), Some("d1"));
         assert_eq!(request.payload.as_deref(), Some("aGVsbG8="));
+        assert_eq!(request.target_host.as_deref(), Some("127.0.0.1"));
+        assert_eq!(request.target_port, Some(7777));
+        assert_eq!(request.response_timeout_ms, Some(50));
+    }
+
+    #[tokio::test]
+    async fn relays_udp_payload_to_target() {
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let target = server.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let mut buf = [0_u8; 64];
+            let (size, peer) = server.recv_from(&mut buf).await.unwrap();
+            assert_eq!(&buf[..size], b"hello");
+            server.send_to(b"upstream:hello", peer).await.unwrap();
+        });
+
+        let outcome = relay_udp_payload(target, b"hello", 500).await.unwrap();
+
+        assert!(!outcome.timed_out);
+        assert_eq!(outcome.upstream_tx_bytes, 5);
+        assert_eq!(outcome.payload, b"upstream:hello");
+        handle.await.unwrap();
     }
 
     #[test]

@@ -16,6 +16,7 @@ pub struct UdpSession {
     pub user_id: Option<u64>,
     pub device_id: Option<String>,
     pub game_id: Option<u64>,
+    pub authenticated: bool,
     pub created_at: u64,
     pub expires_at: u64,
     pub last_seen_at: u64,
@@ -30,6 +31,7 @@ pub struct UdpSessionSnapshot {
     pub user_id: Option<u64>,
     pub device_id: Option<String>,
     pub game_id: Option<u64>,
+    pub authenticated: bool,
     pub created_at: u64,
     pub expires_at: u64,
 }
@@ -47,6 +49,7 @@ impl UdpSession {
         user_id: Option<u64>,
         device_id: Option<String>,
         game_id: Option<u64>,
+        authenticated: bool,
         ttl_sec: u64,
         peer: SocketAddr,
     ) -> Self {
@@ -57,6 +60,7 @@ impl UdpSession {
             user_id,
             device_id,
             game_id,
+            authenticated,
             created_at: now,
             expires_at: now + ttl_sec,
             last_seen_at: now,
@@ -120,6 +124,7 @@ impl UdpSession {
             user_id: self.user_id,
             device_id: self.device_id.clone(),
             game_id: self.game_id,
+            authenticated: self.authenticated,
             created_at: self.created_at,
             expires_at: self.expires_at,
         }
@@ -150,6 +155,7 @@ mod tests {
             Some(1001),
             Some("pc-001".to_string()),
             Some(8888),
+            true,
             30,
             peer,
         ));
@@ -160,6 +166,7 @@ mod tests {
 
         assert_eq!(session.session_id, "s1");
         assert_eq!(session.user_id, Some(1001));
+        assert!(session.authenticated);
         assert_eq!(store.active_udp_session_count(), 1);
     }
 

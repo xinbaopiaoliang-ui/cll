@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.6.0`.
+Current version: `v0.7.0`.
 
 The node can:
 
@@ -17,17 +17,19 @@ The node can:
   probe session id;
 - verify optional `xat.v1` HMAC client tokens;
 - keep short-lived UDP probe sessions and answer `session.data` echo packets;
+- forward authenticated UDP `session.data` packets to a target UDP endpoint;
 - optionally report signed health snapshots to the backend control plane.
 
-It does not yet implement real game traffic forwarding.
+It does not yet bind forwarding to production game rules or backend
+connect-intents.
 
 ## 1. Create A Release
 
 From the local repository:
 
 ```bash
-git tag v0.6.0
-git push origin v0.6.0
+git tag v0.7.0
+git push origin v0.7.0
 ```
 
 GitHub Actions will publish:
@@ -145,7 +147,7 @@ Expected response shape:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.6.0",
+  "node_version": "0.7.0",
   "transport": "udp",
   "requested_transport": "udp",
   "session": {
@@ -229,7 +231,7 @@ Expected response shape:
 {
   "type": "session.data.ok",
   "protocol": "xaccel/1",
-  "node_version": "0.6.0",
+  "node_version": "0.7.0",
   "transport": "udp",
   "session_id": "ps-udp-...",
   "status": "echo",
@@ -253,7 +255,70 @@ Call health again and check:
 }
 ```
 
-This is still an echo MVP. Real game target forwarding comes next.
+Without a target endpoint this remains an echo integration check.
+
+Authenticated sessions can also test real UDP target forwarding. Start a tiny
+UDP echo target on the node server in another shell:
+
+```bash
+python3 - <<'PY'
+import socket
+
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind(("127.0.0.1", 7777))
+print("udp echo target listening on 127.0.0.1:7777")
+while True:
+    data, addr = s.recvfrom(2048)
+    s.sendto(b"upstream:" + data, addr)
+PY
+```
+
+Send `session.data` with a target. Use the `session_id` from a token-authenticated
+UDP probe, because target forwarding requires `credential_valid = true`.
+
+```bash
+printf '{"type":"session.data","protocol":"xaccel/1","session_id":"PASTE_SESSION_ID","client_nonce":"d2","payload":"aGVsbG8=","target_host":"127.0.0.1","target_port":7777,"response_timeout_ms":200}\n' | nc -u -w 2 YOUR_SERVER_IP 666
+```
+
+Expected response shape:
+
+```json
+{
+  "type": "session.data.ok",
+  "node_version": "0.7.0",
+  "status": "forwarded",
+  "payload": "dXBzdHJlYW06aGVsbG8=",
+  "payload_bytes": 14,
+  "request_payload_bytes": 5,
+  "target": {
+    "address": "127.0.0.1:7777"
+  },
+  "relay": {
+    "mode": "udp_target",
+    "timed_out": false,
+    "upstream_tx_bytes": 5,
+    "upstream_rx_bytes": 14
+  }
+}
+```
+
+Health should include relay counters:
+
+```json
+{
+  "sessions": {
+    "udp_relay_tx_packets": 1,
+    "udp_relay_tx_bytes": 5,
+    "udp_relay_rx_packets": 1,
+    "udp_relay_rx_bytes": 14,
+    "udp_relay_timeout": 0,
+    "udp_relay_error": 0
+  }
+}
+```
+
+This is still a relay MVP. The next production step is to bind target forwarding
+to backend-issued connect-intents and game rules.
 
 ## 8. Optional Control Plane Report
 
@@ -322,11 +387,11 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 - GitHub Actions currently builds Linux `x86_64` only.
 - TCP/UDP listener currently returns legacy and structured probe responses.
-- UDP `session.data` currently verifies the session id and echoes payload for
-  client integration testing; it does not yet forward to a game target.
+- UDP `session.data` verifies the session id, echoes payload when no target is
+  provided, and can forward authenticated packets to a target UDP endpoint.
 - Token auth verifies `xat.v1` HMAC tokens when provided, but missing tokens
   are still allowed for standalone testing.
 - Control-plane reporting is implemented, but backend config sync and websocket
   commands are still pending.
-- Real game acceleration, relay forwarding, and token authentication enforcement
-  are still pending.
+- Production game-rule binding, relay-node chaining, and token authentication
+  enforcement for every client path are still pending.

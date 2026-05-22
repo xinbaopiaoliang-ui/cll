@@ -7,7 +7,7 @@ use crate::{
     state::RuntimeState,
 };
 use anyhow::{bail, Context};
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream, UdpSocket},
@@ -73,23 +73,30 @@ fn listen_addr(_config: &NodeConfig, network: &NetworkConfig) -> anyhow::Result<
 }
 
 async fn run_udp_listener(socket: UdpSocket, state: RuntimeState) -> anyhow::Result<()> {
-    let mut buf = vec![0_u8; 2048];
+    let socket = Arc::new(socket);
+    let mut buf = vec![0_u8; 4096];
 
     loop {
         let (size, peer) = socket.recv_from(&mut buf).await?;
         state.stats().record_udp_rx(size as u64);
         debug!(%peer, size, "UDP packet received");
 
-        let response = handle_client_payload(&buf[..size], &state, TransportKind::Udp, peer)
-            .unwrap_or_else(|error| {
-                warn!(%peer, ?error, "failed to build UDP response");
-                UDP_PROBE_RESPONSE.to_vec()
-            });
+        let payload = buf[..size].to_vec();
+        let packet_state = state.clone();
+        let packet_socket = Arc::clone(&socket);
+        tokio::spawn(async move {
+            let response = handle_client_payload(&payload, &packet_state, TransportKind::Udp, peer)
+                .await
+                .unwrap_or_else(|error| {
+                    warn!(%peer, ?error, "failed to build UDP response");
+                    UDP_PROBE_RESPONSE.to_vec()
+                });
 
-        match socket.send_to(&response, peer).await {
-            Ok(sent) => state.stats().record_udp_tx(sent as u64),
-            Err(error) => warn!(%peer, ?error, "failed to send UDP response"),
-        }
+            match packet_socket.send_to(&response, peer).await {
+                Ok(sent) => packet_state.stats().record_udp_tx(sent as u64),
+                Err(error) => warn!(%peer, ?error, "failed to send UDP response"),
+            }
+        });
     }
 }
 
@@ -121,6 +128,7 @@ async fn handle_tcp_connection(mut stream: TcpStream, state: RuntimeState) -> an
         TransportKind::Tcp,
         stream.peer_addr()?,
     )
+    .await
     .unwrap_or_else(|error| {
         warn!(?error, "failed to build TCP response");
         TCP_PROBE_RESPONSE.to_vec()
@@ -132,7 +140,7 @@ async fn handle_tcp_connection(mut stream: TcpStream, state: RuntimeState) -> an
     Ok(())
 }
 
-fn handle_client_payload(
+async fn handle_client_payload(
     payload: &[u8],
     state: &RuntimeState,
     transport: TransportKind,
@@ -147,7 +155,7 @@ fn handle_client_payload(
             build_probe_response(state, transport, peer, request)
         }
         ParsedClientMessage::SessionData(request) => {
-            build_session_data_response(state, transport, peer, request)
+            build_session_data_response(state, transport, peer, request).await
         }
         ParsedClientMessage::Invalid(message) => build_probe_error(state, transport, message),
     }

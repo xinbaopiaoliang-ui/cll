@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.6.0
+  version: 0.7.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -346,7 +346,20 @@ components:
           type: string
         payload:
           type: string
-          description: Base64 payload. v0.6.0 echoes this payload for integration testing.
+          description: Base64 payload. Echoed when no target is provided; forwarded when a target is present.
+        target_addr:
+          type: string
+          description: Optional target UDP endpoint such as 127.0.0.1:7777.
+        target_host:
+          type: string
+          description: Optional target host or IP used with target_port.
+        target_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        response_timeout_ms:
+          type: integer
+          description: Upstream UDP response wait timeout, clamped to 1-1000 ms.
     ClientSessionDataResponse:
       type: object
       properties:
@@ -373,11 +386,34 @@ components:
           nullable: true
         status:
           type: string
-          enum: [echo]
+          enum: [echo, forwarded, upstream_timeout]
         payload:
           type: string
         payload_bytes:
           type: integer
+        request_payload_bytes:
+          type: integer
+        target:
+          type: object
+          nullable: true
+          properties:
+            address:
+              type: string
+        relay:
+          type: object
+          nullable: true
+          properties:
+            mode:
+              type: string
+              enum: [udp_target]
+            timeout_ms:
+              type: integer
+            timed_out:
+              type: boolean
+            upstream_tx_bytes:
+              type: integer
+            upstream_rx_bytes:
+              type: integer
         session:
           type: object
           properties:
@@ -385,6 +421,8 @@ components:
               type: integer
             expires_at:
               type: integer
+            authenticated:
+              type: boolean
             user_id:
               type: integer
               nullable: true
@@ -405,6 +443,10 @@ components:
                 - invalid_payload
                 - session_not_found
                 - session_expired
+                - missing_target_port
+                - invalid_target
+                - relay_auth_required
+                - relay_error
                 - unsupported_transport
             message:
               type: string

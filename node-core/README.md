@@ -15,6 +15,7 @@ this MVP is to verify the node lifecycle:
 - Verify optional `xat.v1` HMAC client tokens.
 - Keep short-lived UDP probe sessions and echo `session.data` payloads for
   client integration testing.
+- Forward authenticated UDP `session.data` payloads to a target UDP endpoint.
 - Optionally post HMAC-signed health reports to the backend.
 - Support `--check-config` for installer validation.
 - Provide a stable place to add config sync, session, and relay modules.

@@ -50,11 +50,20 @@ Done in `v0.6.0`:
 - Record active UDP sessions, session rx/tx, missing session, and expired
   session counters in `/health`.
 
+Done in `v0.7.0`:
+
+- Add authenticated UDP target relay for `session.data`.
+- Resolve `target_addr` or `target_host` + `target_port` from client packets.
+- Return upstream UDP response payloads to the client.
+- Keep UDP listener receive loop non-blocking while relay packets wait for
+  upstream responses.
+- Record UDP relay tx/rx, timeout, and error counters in `/health`.
+
 Next:
 
 - Add structured bind error reporting.
 - Add backend-issued client token API.
-- Forward UDP session packets to real game target addresses.
+- Bind UDP target forwarding to backend-issued connect-intents and game rules.
 
 ## P3: Control Plane
 
@@ -76,8 +85,7 @@ Goals:
 
 Goals:
 
-- Extend UDP session table for target mappings.
-- Forward UDP packets to target address.
+- Bind target mappings from backend connect-intents.
 - Add idle timeout and LRU cleanup.
 - Count traffic per session.
 

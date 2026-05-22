@@ -85,6 +85,12 @@ pub struct SessionSnapshot {
     pub udp_session_tx_bytes: u64,
     pub udp_session_miss: u64,
     pub udp_session_expired: u64,
+    pub udp_relay_tx_packets: u64,
+    pub udp_relay_tx_bytes: u64,
+    pub udp_relay_rx_packets: u64,
+    pub udp_relay_rx_bytes: u64,
+    pub udp_relay_timeout: u64,
+    pub udp_relay_error: u64,
     pub last_probe_session_id: Option<String>,
 }
 
@@ -123,6 +129,12 @@ pub struct RuntimeStats {
     udp_session_tx_bytes: AtomicU64,
     udp_session_miss: AtomicU64,
     udp_session_expired: AtomicU64,
+    udp_relay_tx_packets: AtomicU64,
+    udp_relay_tx_bytes: AtomicU64,
+    udp_relay_rx_packets: AtomicU64,
+    udp_relay_rx_bytes: AtomicU64,
+    udp_relay_timeout: AtomicU64,
+    udp_relay_error: AtomicU64,
     last_probe_session_id: Mutex<Option<String>>,
     control_last_success_at: AtomicU64,
     control_last_failure_at: AtomicU64,
@@ -315,6 +327,24 @@ impl RuntimeStats {
         self.udp_session_expired.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_udp_relay_tx(&self, bytes: u64) {
+        self.udp_relay_tx_packets.fetch_add(1, Ordering::Relaxed);
+        self.udp_relay_tx_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn record_udp_relay_rx(&self, bytes: u64) {
+        self.udp_relay_rx_packets.fetch_add(1, Ordering::Relaxed);
+        self.udp_relay_rx_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn record_udp_relay_timeout(&self) {
+        self.udp_relay_timeout.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_udp_relay_error(&self) {
+        self.udp_relay_error.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_control_success(&self, http_status: u16) {
         self.control_report_ok.fetch_add(1, Ordering::Relaxed);
         self.control_last_success_at
@@ -372,6 +402,12 @@ impl RuntimeStats {
             udp_session_tx_bytes: self.udp_session_tx_bytes.load(Ordering::Relaxed),
             udp_session_miss: self.udp_session_miss.load(Ordering::Relaxed),
             udp_session_expired: self.udp_session_expired.load(Ordering::Relaxed),
+            udp_relay_tx_packets: self.udp_relay_tx_packets.load(Ordering::Relaxed),
+            udp_relay_tx_bytes: self.udp_relay_tx_bytes.load(Ordering::Relaxed),
+            udp_relay_rx_packets: self.udp_relay_rx_packets.load(Ordering::Relaxed),
+            udp_relay_rx_bytes: self.udp_relay_rx_bytes.load(Ordering::Relaxed),
+            udp_relay_timeout: self.udp_relay_timeout.load(Ordering::Relaxed),
+            udp_relay_error: self.udp_relay_error.load(Ordering::Relaxed),
             last_probe_session_id,
         }
     }

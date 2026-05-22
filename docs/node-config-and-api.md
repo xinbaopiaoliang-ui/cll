@@ -280,7 +280,7 @@ Response:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.6.0",
+  "node_version": "0.7.0",
   "server_time": 1779250000,
   "transport": "udp",
   "requested_transport": "udp",
@@ -302,6 +302,7 @@ Response:
     "udp_probe",
     "token_auth_hmac_v1",
     "udp_session_echo",
+    "udp_target_relay",
     "session_stats"
   ]
 }
@@ -388,7 +389,7 @@ Response:
   "type": "session.data.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.6.0",
+  "node_version": "0.7.0",
   "server_time": 1779250001,
   "transport": "udp",
   "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
@@ -399,6 +400,7 @@ Response:
   "session": {
     "created_at": 1779250000,
     "expires_at": 1779250030,
+    "authenticated": true,
     "user_id": 1001,
     "device_id": "pc-001",
     "game_id": 8888
@@ -407,8 +409,8 @@ Response:
 ```
 
 Errors return `session.error` with codes such as `missing_session_id`,
-`missing_payload`, `invalid_payload`, `session_not_found`, `session_expired`, or
-`unsupported_transport`.
+`missing_payload`, `invalid_payload`, `session_not_found`, `session_expired`,
+or `unsupported_transport`.
 
 Health adds these counters under `sessions`:
 
@@ -424,8 +426,71 @@ Health adds these counters under `sessions`:
 }
 ```
 
-The `session.data` response is still an echo integration check. The next relay
-step is to attach a real game target mapping and forward packets.
+When no target is provided, the `session.data` response is an echo integration
+check.
+
+## v0.7.0 UDP Target Relay Contract
+
+Authenticated UDP sessions can include a target endpoint. The node forwards the
+decoded payload to that UDP endpoint, waits for one upstream UDP response, and
+returns the upstream payload to the client.
+
+Request with `target_host` and `target_port`:
+
+```json
+{
+  "type": "session.data",
+  "protocol": "xaccel/1",
+  "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
+  "client_nonce": "packet-random",
+  "payload": "aGVsbG8=",
+  "target_host": "127.0.0.1",
+  "target_port": 7777,
+  "response_timeout_ms": 200
+}
+```
+
+`target_addr` is also accepted when the endpoint already includes a port:
+
+```json
+{
+  "target_addr": "127.0.0.1:7777"
+}
+```
+
+Response with an upstream payload:
+
+```json
+{
+  "type": "session.data.ok",
+  "protocol": "xaccel/1",
+  "node_version": "0.7.0",
+  "transport": "udp",
+  "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
+  "status": "forwarded",
+  "payload": "dXBzdHJlYW06aGVsbG8=",
+  "payload_bytes": 14,
+  "request_payload_bytes": 5,
+  "target": {
+    "address": "127.0.0.1:7777"
+  },
+  "relay": {
+    "mode": "udp_target",
+    "timeout_ms": 200,
+    "timed_out": false,
+    "upstream_tx_bytes": 5,
+    "upstream_rx_bytes": 14
+  }
+}
+```
+
+If the upstream endpoint does not respond before `response_timeout_ms`, the node
+returns `status = "upstream_timeout"` with an empty payload and increments
+`sessions.udp_relay_timeout`.
+
+Target relay currently requires a token-authenticated probe session. Untrusted
+or token-missing sessions can still use echo mode but receive
+`relay_auth_required` when they attempt target forwarding.
 
 ## 客户端连接意图
 
