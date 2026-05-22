@@ -33,18 +33,25 @@ jobs:
         working-directory: control-api
         run: cargo test --locked
 
-      - name: Package release
+      - name: Package node release
         run: bash scripts/package-release.sh
+
+      - name: Package control API release
+        run: bash scripts/package-control-api-release.sh
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: xaccel-node-linux-x86_64
+          name: xaccel-linux-x86_64
           path: |
             dist/xaccel-node-linux-x86_64.tar.gz
             dist/xaccel-node-linux-x86_64.tar.gz.sha256
             dist/xaccel-node-*-linux-x86_64.tar.gz
             dist/xaccel-node-*-linux-x86_64.sha256
+            dist/xaccel-control-api-linux-x86_64.tar.gz
+            dist/xaccel-control-api-linux-x86_64.tar.gz.sha256
+            dist/xaccel-control-api-*-linux-x86_64.tar.gz
+            dist/xaccel-control-api-*-linux-x86_64.sha256
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -57,11 +64,19 @@ jobs:
             dist/xaccel-node-linux-x86_64.tar.gz.sha256 \
             dist/xaccel-node-*-linux-x86_64.tar.gz \
             dist/xaccel-node-*-linux-x86_64.sha256 \
+            dist/xaccel-control-api-linux-x86_64.tar.gz \
+            dist/xaccel-control-api-linux-x86_64.tar.gz.sha256 \
+            dist/xaccel-control-api-*-linux-x86_64.tar.gz \
+            dist/xaccel-control-api-*-linux-x86_64.sha256 \
             --title "$TAG_NAME" \
-            --notes "Automated xaccel-node Linux x86_64 release." \
+            --notes "Automated XAccel Linux x86_64 release." \
           || gh release upload "$TAG_NAME" \
             dist/xaccel-node-linux-x86_64.tar.gz \
             dist/xaccel-node-linux-x86_64.tar.gz.sha256 \
             dist/xaccel-node-*-linux-x86_64.tar.gz \
             dist/xaccel-node-*-linux-x86_64.sha256 \
+            dist/xaccel-control-api-linux-x86_64.tar.gz \
+            dist/xaccel-control-api-linux-x86_64.tar.gz.sha256 \
+            dist/xaccel-control-api-*-linux-x86_64.tar.gz \
+            dist/xaccel-control-api-*-linux-x86_64.sha256 \
             --clobber

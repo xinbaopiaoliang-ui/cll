@@ -84,6 +84,14 @@ Done in `v0.10.0`:
 - Store issued connect intents for audit and future billing.
 - Keep `xat.v1` token signing compatible with `xaccel-node`.
 
+Done in `v0.11.0`:
+
+- Package `xaccel-control-api` as a Linux release artifact.
+- Add one-click control-api installer and uninstall script.
+- Add systemd service template and secure environment file handling.
+- Publish node and control-api binaries in the same GitHub Release.
+- Document same-server deployment with `xaccel-node`, MySQL, and control-api.
+
 Next:
 
 - Add structured bind error reporting.

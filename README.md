@@ -60,8 +60,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.10.0
-git push origin v0.10.0
+git tag v0.11.0
+git push origin v0.11.0
 ```
 
 GitHub Actions will build `xaccel-node-linux-x86_64.tar.gz` and attach it to
@@ -78,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.10.0` keeps the legacy TCP/UDP `ping` probe, supports
+next stage. Version `0.11.0` keeps the legacy TCP/UDP `ping` probe, supports
 JSON `xaccel/1` client probe responses, verifies optional `xat.v1` HMAC client
 tokens, keeps a short-lived UDP session table, echoes `session.data` packets for
 client integration testing, binds backend-style connect-intent routes from
@@ -87,6 +87,7 @@ target address, exposes probe/auth/session/relay counters in `/health`, and
 includes the optional HMAC-signed control-plane report loop. It also includes a
 development `backend-mock` service that issues production-shaped
 `/api/client/v1/connect-intent` responses with route-bound client tokens, plus
-a Rust + MySQL `control-api` service for production-shaped scheduling.
+a Rust + MySQL `control-api` service and one-click installer for
+production-shaped scheduling.
 Standalone mode leaves backend reporting disabled unless `--enable-control-plane`
 is passed with a real backend URL.

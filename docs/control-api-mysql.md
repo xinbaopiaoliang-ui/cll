@@ -43,6 +43,29 @@ The seed creates:
 
 ## Run
 
+Recommended for the same-server MVP: install the release binary as a systemd
+service after MySQL is ready.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \
+  --database-url 'mysql://xaccel:password@127.0.0.1:3306/xaccel' \
+  --listen 127.0.0.1:18080
+```
+
+This keeps the API bound to localhost while auth is still MVP-level. Put Nginx,
+TLS, and client authentication in front before exposing it publicly.
+
+Useful commands:
+
+```bash
+systemctl status xaccel-control-api
+journalctl -u xaccel-control-api -f
+sudo cat /etc/xaccel-control-api/control-api.env
+curl http://127.0.0.1:18080/health
+```
+
+For source-level development:
+
 ```bash
 export DATABASE_URL='mysql://xaccel:password@127.0.0.1:3306/xaccel'
 

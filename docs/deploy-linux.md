@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.10.0`.
+Current version: `v0.11.0`.
 
 The node can:
 
@@ -30,8 +30,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.10.0
-git push origin v0.10.0
+git tag v0.11.0
+git push origin v0.11.0
 ```
 
 GitHub Actions will publish:
@@ -149,7 +149,7 @@ Expected response shape:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.10.0",
+  "node_version": "0.11.0",
   "transport": "udp",
   "requested_transport": "udp",
   "session": {
@@ -233,7 +233,7 @@ Expected response shape:
 {
   "type": "session.data.ok",
   "protocol": "xaccel/1",
-  "node_version": "0.10.0",
+  "node_version": "0.11.0",
   "transport": "udp",
   "session_id": "ps-udp-...",
   "status": "echo",
@@ -259,7 +259,7 @@ Call health again and check:
 
 Without a target endpoint this remains an echo integration check.
 
-Authenticated sessions can also test real UDP target forwarding. In `v0.10.0`,
+Authenticated sessions can also test real UDP target forwarding. In `v0.11.0`,
 the preferred path is to put the target route into the signed token, which
 models a backend-issued connect-intent. Start a tiny UDP echo target on the node
 server in another shell:
@@ -308,7 +308,7 @@ Expected response shape:
 ```json
 {
   "type": "session.data.ok",
-  "node_version": "0.10.0",
+  "node_version": "0.11.0",
   "status": "forwarded",
   "payload": "dXBzdHJlYW06aGVsbG8=",
   "payload_bytes": 14,
@@ -383,7 +383,37 @@ that token in the UDP `probe` packet. The node will bind the target route to the
 returned `session_id`, so later `session.data` packets no longer need target
 fields.
 
-## 9. Optional Control Plane Report
+## 9. Install Control API On The Same Server
+
+For the MVP, the same Linux server can run:
+
+```text
+xaccel-node          103.201.131.99:666
+MySQL                127.0.0.1:3306
+xaccel-control-api   127.0.0.1:18080
+```
+
+After MySQL is installed and `db/schema.sql` plus
+`db/control-api.seed.example.sql` are loaded, install the control API:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \
+  --database-url 'mysql://xaccel:password@127.0.0.1:3306/xaccel' \
+  --listen 127.0.0.1:18080
+```
+
+Check it:
+
+```bash
+systemctl status xaccel-control-api
+journalctl -u xaccel-control-api -f
+curl http://127.0.0.1:18080/health
+```
+
+Keep it bound to `127.0.0.1` until client API authentication and HTTPS reverse
+proxying are added.
+
+## 10. Optional Control Plane Report
 
 Standalone installs keep backend reporting disabled by default because
 `https://api.example.com` is only a placeholder. When the real backend endpoint
@@ -417,7 +447,7 @@ X-Node-Signature
 
 Health exposes report status under `control_plane`.
 
-## 10. Placeholder Mode
+## 11. Placeholder Mode
 
 Only use this when the GitHub Release is not ready and you want to test the
 installer/systemd path:
@@ -432,7 +462,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
   --allow-placeholder
 ```
 
-## 11. Uninstall
+## 12. Uninstall
 
 Keep data and logs:
 

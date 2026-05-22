@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+INSTALLER_VERSION="0.11.0"
+SERVICE_NAME="xaccel-control-api"
+INSTALL_DIR="/usr/local/bin"
+CONFIG_DIR="/etc/xaccel-control-api"
+LOG_DIR="/var/log/xaccel-control-api"
+ENV_FILE="${CONFIG_DIR}/control-api.env"
+SYSTEMD_UNIT="/etc/systemd/system/${SERVICE_NAME}.service"
+GITHUB_REPO="xinbaopiaoliang-ui/cll"
+RELEASE_BASE_URL="https://github.com/${GITHUB_REPO}/releases/latest/download"
+
+DATABASE_URL=""
+LISTEN="127.0.0.1:18080"
+TOKEN_TTL_SEC="120"
+MAX_DB_CONNECTIONS="8"
+ARTIFACT_URL=""
+SHA256_URL=""
+DRY_RUN="0"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  control-api-install.sh --database-url URL [options]
+
+Options:
+  --database-url URL       MySQL URL, for example mysql://xaccel:password@127.0.0.1:3306/xaccel.
+  --listen ADDR           HTTP listen address. Default: 127.0.0.1:18080.
+  --token-ttl-sec SEC     Client token TTL. Default: 120.
+  --max-db-connections N  MySQL connection pool size. Default: 8.
+  --artifact-url URL      Override xaccel-control-api tar.gz download URL.
+  --sha256-url URL        Override xaccel-control-api sha256 download URL.
+  --dry-run               Run preflight only and print planned actions.
+  -h, --help              Show this help.
+USAGE
+}
+
+log() {
+  printf '[xaccel-control-installer] %s\n' "$*"
+}
+
+fail() {
+  printf '[xaccel-control-installer] ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --database-url)
+      DATABASE_URL="${2:-}"
+      shift 2
+      ;;
+    --listen)
+      LISTEN="${2:-}"
+      shift 2
+      ;;
+    --token-ttl-sec)
+      TOKEN_TTL_SEC="${2:-}"
+      shift 2
+      ;;
+    --max-db-connections)
+      MAX_DB_CONNECTIONS="${2:-}"
+      shift 2
+      ;;
+    --artifact-url)
+      ARTIFACT_URL="${2:-}"
+      shift 2
+      ;;
+    --sha256-url)
+      SHA256_URL="${2:-}"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN="1"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fail "unknown argument: $1"
+      ;;
+  esac
+done
+
+require_root() {
+  [[ "$(id -u)" == "0" ]] || fail "please run as root"
+}
+
+detect_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo "x86_64" ;;
+    aarch64|arm64) echo "aarch64" ;;
+    *) fail "unsupported arch: $(uname -m)" ;;
+  esac
+}
+
+preflight() {
+  require_root
+  command -v systemctl >/dev/null 2>&1 || fail "systemd is required"
+  command -v curl >/dev/null 2>&1 || fail "curl is required"
+  command -v tar >/dev/null 2>&1 || fail "tar is required"
+
+  [[ -n "$DATABASE_URL" ]] || fail "--database-url is required"
+  [[ -n "$LISTEN" ]] || fail "--listen is required"
+  [[ "$TOKEN_TTL_SEC" =~ ^[0-9]+$ ]] || fail "--token-ttl-sec must be numeric"
+  [[ "$MAX_DB_CONNECTIONS" =~ ^[0-9]+$ ]] || fail "--max-db-connections must be numeric"
+  (( TOKEN_TTL_SEC >= 1 )) || fail "--token-ttl-sec must be positive"
+  (( MAX_DB_CONNECTIONS >= 1 )) || fail "--max-db-connections must be positive"
+}
+
+env_escape() {
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+}
+
+install_binary_release() {
+  local arch artifact_name artifact_url sha_url tmp_dir tar_file sha_file extracted_bin
+  arch="$(detect_arch)"
+  artifact_name="xaccel-control-api-linux-${arch}.tar.gz"
+  artifact_url="${ARTIFACT_URL:-${RELEASE_BASE_URL}/${artifact_name}}"
+  sha_url="${SHA256_URL:-${artifact_url}.sha256}"
+  tmp_dir="$(mktemp -d)"
+  tar_file="${tmp_dir}/${artifact_name}"
+  sha_file="${tar_file}.sha256"
+
+  log "download control-api release: ${artifact_url}"
+  curl -fsSL "$artifact_url" -o "$tar_file" || {
+    rm -rf "$tmp_dir"
+    fail "failed to download release artifact"
+  }
+
+  log "download checksum: ${sha_url}"
+  curl -fsSL "$sha_url" -o "$sha_file" || {
+    rm -rf "$tmp_dir"
+    fail "failed to download sha256 file"
+  }
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$tmp_dir" && sha256sum -c "$(basename "$sha_file")")
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "$tmp_dir" && shasum -a 256 -c "$(basename "$sha_file")")
+  else
+    rm -rf "$tmp_dir"
+    fail "sha256sum or shasum is required"
+  fi
+
+  tar -xzf "$tar_file" -C "$tmp_dir"
+  extracted_bin="$(find "$tmp_dir" -type f -name "$SERVICE_NAME" | head -n 1)"
+  [[ -n "$extracted_bin" ]] || {
+    rm -rf "$tmp_dir"
+    fail "release artifact does not contain ${SERVICE_NAME}"
+  }
+
+  install -m 0755 "$extracted_bin" "${INSTALL_DIR}/${SERVICE_NAME}"
+  rm -rf "$tmp_dir"
+  log "installed ${INSTALL_DIR}/${SERVICE_NAME}"
+}
+
+write_env() {
+  mkdir -p "$CONFIG_DIR" "$LOG_DIR"
+  chmod 0755 "$CONFIG_DIR" "$LOG_DIR"
+  cat > "$ENV_FILE" <<EOF
+DATABASE_URL='$(env_escape "$DATABASE_URL")'
+XACCEL_CONTROL_LISTEN='$(env_escape "$LISTEN")'
+XACCEL_TOKEN_TTL_SEC='$(env_escape "$TOKEN_TTL_SEC")'
+XACCEL_MAX_DB_CONNECTIONS='$(env_escape "$MAX_DB_CONNECTIONS")'
+RUST_LOG='xaccel_control_api=info'
+EOF
+  chmod 0600 "$ENV_FILE"
+}
+
+write_systemd_unit() {
+  cat > "$SYSTEMD_UNIT" <<EOF
+[Unit]
+Description=XAccel Control API
+After=network-online.target mysql.service mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=${ENV_FILE}
+ExecStart=${INSTALL_DIR}/${SERVICE_NAME} --listen \${XACCEL_CONTROL_LISTEN} --token-ttl-sec \${XACCEL_TOKEN_TTL_SEC} --max-db-connections \${XACCEL_MAX_DB_CONNECTIONS}
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+enable_service() {
+  systemctl daemon-reload
+  systemctl enable "$SERVICE_NAME"
+  systemctl restart "$SERVICE_NAME"
+}
+
+health_check() {
+  local host_port host port health_url
+  host_port="$LISTEN"
+  host="${host_port%:*}"
+  port="${host_port##*:}"
+  if [[ "$host" == "0.0.0.0" || "$host" == "::" || "$host" == "[::]" ]]; then
+    host="127.0.0.1"
+  fi
+  health_url="http://${host}:${port}/health"
+
+  log "service started"
+  for _ in 1 2 3 4 5; do
+    if curl -fsSL "$health_url" >/dev/null 2>&1; then
+      log "health ok: ${health_url}"
+      return 0
+    fi
+    sleep 1
+  done
+  log "health not ready yet: ${health_url}"
+  systemctl --no-pager --full status "$SERVICE_NAME" || true
+}
+
+main() {
+  preflight
+  log "installer=${INSTALLER_VERSION} arch=$(detect_arch) listen=${LISTEN}"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    log "dry-run passed"
+    exit 0
+  fi
+
+  install_binary_release
+  write_env
+  write_systemd_unit
+  enable_service
+  health_check
+
+  log "installed"
+  log "service: systemctl status ${SERVICE_NAME}"
+  log "logs: journalctl -u ${SERVICE_NAME} -f"
+  log "env: ${ENV_FILE}"
+}
+
+main "$@"

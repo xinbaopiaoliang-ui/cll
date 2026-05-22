@@ -25,10 +25,13 @@ $required = @(
     "api\openapi-node.yaml",
     "db\schema.sql",
     "install\install.sh",
+    "install\control-api-install.sh",
     "install\uninstall.sh",
+    "install\control-api-uninstall.sh",
     "install\release-manifest.example.json",
     "install\config.example.toml",
     "install\systemd\xaccel-node.service",
+    "install\systemd\xaccel-control-api.service",
     "node-core\Cargo.toml",
     "node-core\src\main.rs",
     "node-core\src\listener.rs",
@@ -42,6 +45,7 @@ $required = @(
     "control-api\README.md",
     "db\control-api.seed.example.sql",
     "scripts\package-release.sh",
+    "scripts\package-control-api-release.sh",
     ".github\workflows\release.yml",
     "docs\local-validation.md"
 )

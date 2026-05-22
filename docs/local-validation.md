@@ -1,6 +1,7 @@
 # Local Validation
 
-This document verifies the research tree, installer assets, and Rust node MVP.
+This document verifies the research tree, installer assets, Rust services, and
+Linux runtime checks.
 
 ## Research Tree
 
@@ -14,40 +15,26 @@ inside Xboard.
 
 ## Rust Metadata
 
-On this Windows machine, `cargo test` may fail without the MSVC linker. The
-lightweight check is:
+On Windows, use the GNU Rust toolchain if the MSVC linker is not installed:
 
 ```powershell
-cd D:\项目\broad\game-accelerator-research\node-core
-cargo metadata --no-deps --format-version 1
-
-cd D:\项目\broad\game-accelerator-research\backend-mock
-cargo metadata --no-deps --format-version 1
-
-cd D:\项目\broad\game-accelerator-research\control-api
-cargo metadata --no-deps --format-version 1
+cd D:\项目\broad\game-accelerator-research
+cargo metadata --manifest-path node-core\Cargo.toml --locked --no-deps --format-version 1
+cargo metadata --manifest-path backend-mock\Cargo.toml --locked --no-deps --format-version 1
+cargo metadata --manifest-path control-api\Cargo.toml --locked --no-deps --format-version 1
 ```
 
 On Linux or a complete Rust toolchain:
 
 ```bash
-cd node-core
-cargo fmt --check
-cargo test --locked
-cargo run -- --check-config ../install/config.example.toml
-
-cd ../backend-mock
-cargo fmt --check
-cargo test --locked
-
-cd ../control-api
-cargo fmt --check
-cargo test --locked
+cargo test --manifest-path node-core/Cargo.toml --locked
+cargo test --manifest-path backend-mock/Cargo.toml --locked
+cargo test --manifest-path control-api/Cargo.toml --locked
 ```
 
 ## Linux Runtime Check
 
-After installing `v0.10.0`:
+After installing `v0.11.0`:
 
 ```bash
 systemctl status xaccel-node
@@ -55,32 +42,11 @@ curl http://127.0.0.1:9876/health
 ss -lntup | grep ':666'
 ```
 
-TCP probe:
+TCP and UDP probe:
 
 ```bash
 printf 'ping\n' | nc -w 2 103.201.131.99 666
-```
-
-UDP probe:
-
-```bash
 printf 'ping\n' | nc -u -w 2 103.201.131.99 666
-```
-
-Health should show:
-
-```json
-{
-  "status": "ready",
-  "listeners": {
-    "udp_listening": true,
-    "tcp_listening": true
-  },
-  "traffic": {
-    "udp_rx_packets": 1,
-    "tcp_accepted": 1
-  }
-}
 ```
 
 ## Package Release
@@ -89,6 +55,7 @@ On Linux or WSL:
 
 ```bash
 bash scripts/package-release.sh
+bash scripts/package-control-api-release.sh
 ```
 
 Output:
@@ -96,6 +63,8 @@ Output:
 ```text
 dist/xaccel-node-linux-x86_64.tar.gz
 dist/xaccel-node-linux-x86_64.tar.gz.sha256
+dist/xaccel-control-api-linux-x86_64.tar.gz
+dist/xaccel-control-api-linux-x86_64.tar.gz.sha256
 ```
 
 ## Backend Connect-Intent Mock
@@ -112,14 +81,6 @@ cargo run --manifest-path backend-mock/Cargo.toml -- \
   --target-addr 127.0.0.1:7777
 ```
 
-Then request a route-bound client token:
-
-```bash
-curl -fsSL http://127.0.0.1:18080/api/client/v1/connect-intent \
-  -H 'Content-Type: application/json' \
-  -d '{"user_id":1001,"device_id":"pc-001","game_id":8888,"platform":"pc","client_isp":"telecom","client_ip":"127.0.0.1","bandwidth_quality":"fast"}'
-```
-
 ## Rust MySQL Control API
 
 The production-shaped connect-intent service is in `control-api`.
@@ -131,8 +92,9 @@ mysql -uroot -p -e "GRANT ALL PRIVILEGES ON xaccel.* TO 'xaccel'@'%';"
 mysql -uroot -p xaccel < db/schema.sql
 mysql -uroot -p xaccel < db/control-api.seed.example.sql
 
-export DATABASE_URL='mysql://xaccel:password@127.0.0.1:3306/xaccel'
-cargo run --manifest-path control-api/Cargo.toml -- --listen 127.0.0.1:18080
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \
+  --database-url 'mysql://xaccel:password@127.0.0.1:3306/xaccel' \
+  --listen 127.0.0.1:18080
 ```
 
 Then call:
@@ -147,7 +109,6 @@ curl -fsSL http://127.0.0.1:18080/api/client/v1/connect-intent \
 
 - The installer still does not parse production bootstrap JSON into all config
   fields.
-- The node forwards UDP session data to token-bound route targets, but full
-  game tunnel framing is still pending.
-- Control-plane config sync, production scheduling, user/device auth, and QUIC
-  tunnel are pending.
+- The node forwards UDP session data to token-bound route targets, but full game
+  tunnel framing is still pending.
+- Control-plane config sync, user/device auth, and QUIC tunnel are pending.

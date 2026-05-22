@@ -1,0 +1,18 @@
+[Unit]
+Description=XAccel Control API
+After=network-online.target mysql.service mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/xaccel-control-api/control-api.env
+ExecStart=/usr/local/bin/xaccel-control-api --listen ${XACCEL_CONTROL_LISTEN} --token-ttl-sec ${XACCEL_TOKEN_TTL_SEC} --max-db-connections ${XACCEL_MAX_DB_CONNECTIONS}
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
