@@ -6,6 +6,7 @@ mod health;
 mod identity;
 mod listener;
 mod session;
+mod session_store;
 mod state;
 
 use anyhow::Context;

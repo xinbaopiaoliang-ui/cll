@@ -176,8 +176,6 @@ mod tests {
     fn accepts_valid_token() {
         let token = sign_client_token(&claims(), "secret").expect("test token signs");
         let request = ClientProbeRequest {
-            message_type: Some("probe".to_string()),
-            protocol: Some("xaccel/1".to_string()),
             client_nonce: None,
             user_id: Some(1001),
             device_id: Some("pc-001".to_string()),
@@ -196,8 +194,6 @@ mod tests {
     fn rejects_mismatched_claim() {
         let token = sign_client_token(&claims(), "secret").expect("test token signs");
         let request = ClientProbeRequest {
-            message_type: Some("probe".to_string()),
-            protocol: Some("xaccel/1".to_string()),
             client_nonce: None,
             user_id: Some(1002),
             device_id: Some("pc-001".to_string()),
@@ -218,8 +214,6 @@ mod tests {
     #[test]
     fn treats_absent_token_as_missing() {
         let request = ClientProbeRequest {
-            message_type: Some("probe".to_string()),
-            protocol: Some("xaccel/1".to_string()),
             client_nonce: None,
             user_id: None,
             device_id: None,

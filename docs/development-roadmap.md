@@ -42,11 +42,19 @@ Done in `v0.5.0`:
 - Reject malformed, expired, mismatched, or incorrectly signed tokens.
 - Record auth missing, auth ok, and auth failed counters in `/health`.
 
+Done in `v0.6.0`:
+
+- Store short-lived UDP probe sessions in an in-memory session table.
+- Accept UDP `session.data` packets by `session_id`.
+- Echo base64 payloads for client integration testing.
+- Record active UDP sessions, session rx/tx, missing session, and expired
+  session counters in `/health`.
+
 Next:
 
 - Add structured bind error reporting.
 - Add backend-issued client token API.
-- Store active UDP sessions with idle expiry.
+- Forward UDP session packets to real game target addresses.
 
 ## P3: Control Plane
 
@@ -68,7 +76,7 @@ Goals:
 
 Goals:
 
-- Implement UDP session table.
+- Extend UDP session table for target mappings.
 - Forward UDP packets to target address.
 - Add idle timeout and LRU cleanup.
 - Count traffic per session.

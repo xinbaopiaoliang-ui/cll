@@ -1,8 +1,8 @@
 use crate::{
     config::{NetworkConfig, NodeConfig},
     session::{
-        build_probe_error, build_probe_response, parse_client_message, ParsedClientMessage,
-        TransportKind,
+        build_probe_error, build_probe_response, build_session_data_response, parse_client_message,
+        ParsedClientMessage, TransportKind,
     },
     state::RuntimeState,
 };
@@ -145,6 +145,9 @@ fn handle_client_payload(
         }),
         ParsedClientMessage::Probe(request) => {
             build_probe_response(state, transport, peer, request)
+        }
+        ParsedClientMessage::SessionData(request) => {
+            build_session_data_response(state, transport, peer, request)
         }
         ParsedClientMessage::Invalid(message) => build_probe_error(state, transport, message),
     }

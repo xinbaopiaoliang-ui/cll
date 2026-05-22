@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.5.0
+  version: 0.6.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -323,6 +323,89 @@ components:
           properties:
             code:
               type: string
+            message:
+              type: string
+    ClientSessionDataRequest:
+      type: object
+      description: UDP packet sent after a successful probe session is allocated.
+      required:
+        - type
+        - protocol
+        - session_id
+        - payload
+      properties:
+        type:
+          type: string
+          enum: [session.data]
+        protocol:
+          type: string
+          enum: [xaccel/1]
+        session_id:
+          type: string
+        client_nonce:
+          type: string
+        payload:
+          type: string
+          description: Base64 payload. v0.6.0 echoes this payload for integration testing.
+    ClientSessionDataResponse:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [session.data.ok, session.error]
+        protocol:
+          type: string
+          enum: [xaccel/1]
+        node_id:
+          type: integer
+          nullable: true
+        node_version:
+          type: string
+        server_time:
+          type: integer
+        transport:
+          type: string
+          enum: [udp]
+        session_id:
+          type: string
+        client_nonce:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [echo]
+        payload:
+          type: string
+        payload_bytes:
+          type: integer
+        session:
+          type: object
+          properties:
+            created_at:
+              type: integer
+            expires_at:
+              type: integer
+            user_id:
+              type: integer
+              nullable: true
+            device_id:
+              type: string
+              nullable: true
+            game_id:
+              type: integer
+              nullable: true
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              enum:
+                - missing_session_id
+                - missing_payload
+                - invalid_payload
+                - session_not_found
+                - session_expired
+                - unsupported_transport
             message:
               type: string
     ClientProbeRequest:

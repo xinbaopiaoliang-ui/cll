@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.5.0`.
+Current version: `v0.6.0`.
 
 The node can:
 
@@ -16,6 +16,7 @@ The node can:
 - answer structured `xaccel/1` client probe requests with a short-lived
   probe session id;
 - verify optional `xat.v1` HMAC client tokens;
+- keep short-lived UDP probe sessions and answer `session.data` echo packets;
 - optionally report signed health snapshots to the backend control plane.
 
 It does not yet implement real game traffic forwarding.
@@ -25,8 +26,8 @@ It does not yet implement real game traffic forwarding.
 From the local repository:
 
 ```bash
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.6.0
+git push origin v0.6.0
 ```
 
 GitHub Actions will publish:
@@ -144,7 +145,7 @@ Expected response shape:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.5.0",
+  "node_version": "0.6.0",
   "transport": "udp",
   "requested_transport": "udp",
   "session": {
@@ -211,7 +212,50 @@ Expected token fields in the response:
 
 Invalid tokens return `probe.error` and increment `sessions.auth_failed`.
 
-## 7. Optional Control Plane Report
+## 7. Check UDP Session Data
+
+After a successful UDP probe, copy the returned `session.session_id` and use it
+quickly. Probe sessions currently expire after 30 seconds.
+
+Send a small base64 payload. `aGVsbG8=` is `hello`.
+
+```bash
+printf '{"type":"session.data","protocol":"xaccel/1","session_id":"PASTE_SESSION_ID","client_nonce":"d1","payload":"aGVsbG8="}\n' | nc -u -w 2 YOUR_SERVER_IP 666
+```
+
+Expected response shape:
+
+```json
+{
+  "type": "session.data.ok",
+  "protocol": "xaccel/1",
+  "node_version": "0.6.0",
+  "transport": "udp",
+  "session_id": "ps-udp-...",
+  "status": "echo",
+  "payload": "aGVsbG8=",
+  "payload_bytes": 5
+}
+```
+
+Call health again and check:
+
+```json
+{
+  "sessions": {
+    "active_udp_sessions": 1,
+    "udp_session_rx_packets": 1,
+    "udp_session_rx_bytes": 5,
+    "udp_session_tx_packets": 1,
+    "udp_session_miss": 0,
+    "udp_session_expired": 0
+  }
+}
+```
+
+This is still an echo MVP. Real game target forwarding comes next.
+
+## 8. Optional Control Plane Report
 
 Standalone installs keep backend reporting disabled by default because
 `https://api.example.com` is only a placeholder. When the real backend endpoint
@@ -245,7 +289,7 @@ X-Node-Signature
 
 Health exposes report status under `control_plane`.
 
-## 8. Placeholder Mode
+## 9. Placeholder Mode
 
 Only use this when the GitHub Release is not ready and you want to test the
 installer/systemd path:
@@ -260,7 +304,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
   --allow-placeholder
 ```
 
-## 9. Uninstall
+## 10. Uninstall
 
 Keep data and logs:
 
@@ -278,6 +322,8 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 - GitHub Actions currently builds Linux `x86_64` only.
 - TCP/UDP listener currently returns legacy and structured probe responses.
+- UDP `session.data` currently verifies the session id and echoes payload for
+  client integration testing; it does not yet forward to a game target.
 - Token auth verifies `xat.v1` HMAC tokens when provided, but missing tokens
   are still allowed for standalone testing.
 - Control-plane reporting is implemented, but backend config sync and websocket

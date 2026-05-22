@@ -1,4 +1,4 @@
-use crate::{config::NodeConfig, identity::IdentityState};
+use crate::{config::NodeConfig, identity::IdentityState, session_store::SessionStore};
 use serde::Serialize;
 use std::{
     sync::{
@@ -19,6 +19,7 @@ struct RuntimeStateInner {
     started_at: u64,
     status: NodeStatus,
     stats: Arc<RuntimeStats>,
+    sessions: Arc<SessionStore>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -72,11 +73,18 @@ pub struct TrafficSnapshot {
 #[derive(Debug, Serialize)]
 pub struct SessionSnapshot {
     pub active_tcp_connections: u64,
+    pub active_udp_sessions: u64,
     pub probe_sessions_total: u64,
     pub probe_rejected: u64,
     pub auth_missing: u64,
     pub auth_ok: u64,
     pub auth_failed: u64,
+    pub udp_session_rx_packets: u64,
+    pub udp_session_rx_bytes: u64,
+    pub udp_session_tx_packets: u64,
+    pub udp_session_tx_bytes: u64,
+    pub udp_session_miss: u64,
+    pub udp_session_expired: u64,
     pub last_probe_session_id: Option<String>,
 }
 
@@ -109,6 +117,12 @@ pub struct RuntimeStats {
     auth_missing: AtomicU64,
     auth_ok: AtomicU64,
     auth_failed: AtomicU64,
+    udp_session_rx_packets: AtomicU64,
+    udp_session_rx_bytes: AtomicU64,
+    udp_session_tx_packets: AtomicU64,
+    udp_session_tx_bytes: AtomicU64,
+    udp_session_miss: AtomicU64,
+    udp_session_expired: AtomicU64,
     last_probe_session_id: Mutex<Option<String>>,
     control_last_success_at: AtomicU64,
     control_last_failure_at: AtomicU64,
@@ -133,6 +147,7 @@ impl RuntimeState {
                 started_at: now_unix(),
                 status,
                 stats: Arc::new(RuntimeStats::default()),
+                sessions: Arc::new(SessionStore::default()),
             }),
         }
     }
@@ -147,6 +162,10 @@ impl RuntimeState {
 
     pub fn stats(&self) -> &RuntimeStats {
         &self.inner.stats
+    }
+
+    pub fn sessions(&self) -> &SessionStore {
+        &self.inner.sessions
     }
 
     pub fn status(&self) -> &'static str {
@@ -186,7 +205,10 @@ impl RuntimeState {
                 listen_addr,
             },
             traffic: self.inner.stats.traffic_snapshot(),
-            sessions: self.inner.stats.session_snapshot(),
+            sessions: self
+                .inner
+                .stats
+                .session_snapshot(self.inner.sessions.active_udp_session_count()),
             control_plane: self.inner.stats.control_plane_snapshot(
                 self.inner
                     .config
@@ -273,6 +295,26 @@ impl RuntimeStats {
         self.auth_failed.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_udp_session_rx(&self, bytes: u64) {
+        self.udp_session_rx_packets.fetch_add(1, Ordering::Relaxed);
+        self.udp_session_rx_bytes
+            .fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn record_udp_session_tx(&self, bytes: u64) {
+        self.udp_session_tx_packets.fetch_add(1, Ordering::Relaxed);
+        self.udp_session_tx_bytes
+            .fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn record_udp_session_miss(&self) {
+        self.udp_session_miss.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_udp_session_expired(&self) {
+        self.udp_session_expired.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_control_success(&self, http_status: u16) {
         self.control_report_ok.fetch_add(1, Ordering::Relaxed);
         self.control_last_success_at
@@ -309,7 +351,7 @@ impl RuntimeStats {
         }
     }
 
-    pub fn session_snapshot(&self) -> SessionSnapshot {
+    pub fn session_snapshot(&self, active_udp_sessions: u64) -> SessionSnapshot {
         let last_probe_session_id = self
             .last_probe_session_id
             .lock()
@@ -318,11 +360,18 @@ impl RuntimeStats {
 
         SessionSnapshot {
             active_tcp_connections: self.tcp_active.load(Ordering::Relaxed),
+            active_udp_sessions,
             probe_sessions_total: self.probe_sessions_total.load(Ordering::Relaxed),
             probe_rejected: self.probe_rejected.load(Ordering::Relaxed),
             auth_missing: self.auth_missing.load(Ordering::Relaxed),
             auth_ok: self.auth_ok.load(Ordering::Relaxed),
             auth_failed: self.auth_failed.load(Ordering::Relaxed),
+            udp_session_rx_packets: self.udp_session_rx_packets.load(Ordering::Relaxed),
+            udp_session_rx_bytes: self.udp_session_rx_bytes.load(Ordering::Relaxed),
+            udp_session_tx_packets: self.udp_session_tx_packets.load(Ordering::Relaxed),
+            udp_session_tx_bytes: self.udp_session_tx_bytes.load(Ordering::Relaxed),
+            udp_session_miss: self.udp_session_miss.load(Ordering::Relaxed),
+            udp_session_expired: self.udp_session_expired.load(Ordering::Relaxed),
             last_probe_session_id,
         }
     }

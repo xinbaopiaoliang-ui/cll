@@ -280,7 +280,7 @@ Response:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.5.0",
+  "node_version": "0.6.0",
   "server_time": 1779250000,
   "transport": "udp",
   "requested_transport": "udp",
@@ -301,6 +301,7 @@ Response:
     "tcp_probe",
     "udp_probe",
     "token_auth_hmac_v1",
+    "udp_session_echo",
     "session_stats"
   ]
 }
@@ -361,6 +362,70 @@ During standalone development, the node can mint a short-lived test token:
 
 Production clients should get this token from the backend connect-intent API.
 The node-side minting command is only a development/testing helper.
+
+## v0.6.0 UDP Session Data Contract
+
+When a UDP `probe.ok` response returns a `session.session_id`, the node stores a
+short-lived UDP session. During this MVP stage the client can send a
+`session.data` packet to verify that the client and node agree on the session.
+
+Request:
+
+```json
+{
+  "type": "session.data",
+  "protocol": "xaccel/1",
+  "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
+  "client_nonce": "packet-random",
+  "payload": "aGVsbG8="
+}
+```
+
+Response:
+
+```json
+{
+  "type": "session.data.ok",
+  "protocol": "xaccel/1",
+  "node_id": 1,
+  "node_version": "0.6.0",
+  "server_time": 1779250001,
+  "transport": "udp",
+  "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
+  "client_nonce": "packet-random",
+  "status": "echo",
+  "payload": "aGVsbG8=",
+  "payload_bytes": 5,
+  "session": {
+    "created_at": 1779250000,
+    "expires_at": 1779250030,
+    "user_id": 1001,
+    "device_id": "pc-001",
+    "game_id": 8888
+  }
+}
+```
+
+Errors return `session.error` with codes such as `missing_session_id`,
+`missing_payload`, `invalid_payload`, `session_not_found`, `session_expired`, or
+`unsupported_transport`.
+
+Health adds these counters under `sessions`:
+
+```json
+{
+  "active_udp_sessions": 1,
+  "udp_session_rx_packets": 1,
+  "udp_session_rx_bytes": 5,
+  "udp_session_tx_packets": 1,
+  "udp_session_tx_bytes": 260,
+  "udp_session_miss": 0,
+  "udp_session_expired": 0
+}
+```
+
+The `session.data` response is still an echo integration check. The next relay
+step is to attach a real game target mapping and forward packets.
 
 ## 客户端连接意图
 
