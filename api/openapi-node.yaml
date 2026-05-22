@@ -1,11 +1,30 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.8.0
+  version: 0.9.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
 paths:
+  /api/client/v1/connect-intent:
+    post:
+      summary: Issue a short-lived client connect intent.
+      description: Returns candidate acceleration nodes and an xat.v1 token that binds the selected UDP route.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectIntentRequest'
+      responses:
+        '200':
+          description: Candidate nodes and route-bound credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectIntentResponse'
+        '400':
+          description: Invalid client, device, game, or scheduling request.
   /api/node/v1/bootstrap:
     post:
       summary: Exchange a one-time bootstrap token for node identity.
@@ -96,6 +115,146 @@ components:
       name: X-Node-Signature
       description: HMAC-SHA256 over method, path, timestamp, nonce, and base64 body sha256.
   schemas:
+    ConnectIntentRequest:
+      type: object
+      required:
+        - user_id
+        - device_id
+        - game_id
+      properties:
+        user_id:
+          type: integer
+          minimum: 1
+        device_id:
+          type: string
+          minLength: 1
+        game_id:
+          type: integer
+          minimum: 1
+        platform:
+          type: string
+          nullable: true
+          example: pc
+        client_isp:
+          type: string
+          nullable: true
+          example: telecom
+        client_ip:
+          type: string
+          nullable: true
+          example: 203.0.113.20
+        bandwidth_quality:
+          type: string
+          nullable: true
+          enum: [fast, normal, slow]
+    ConnectIntentResponse:
+      type: object
+      required:
+        - intent_id
+        - ttl_sec
+        - client
+        - candidates
+      properties:
+        intent_id:
+          type: string
+        ttl_sec:
+          type: integer
+        client:
+          type: object
+          properties:
+            platform:
+              type: string
+              nullable: true
+            client_isp:
+              type: string
+              nullable: true
+            client_ip:
+              type: string
+              nullable: true
+            bandwidth_quality:
+              type: string
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeCandidate'
+    NodeCandidate:
+      type: object
+      required:
+        - node_id
+        - area
+        - tag
+        - host
+        - port
+        - transports
+        - bandwidth_quality
+        - probe
+        - route
+        - credential
+      properties:
+        node_id:
+          type: integer
+        area:
+          type: string
+        tag:
+          type: string
+        host:
+          type: string
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        transports:
+          type: array
+          items:
+            type: string
+            enum: [udp, tcp, quic_udp, tcp_tls]
+        bandwidth_quality:
+          type: string
+        probe:
+          $ref: '#/components/schemas/ProbeInfo'
+        route:
+          $ref: '#/components/schemas/ClientRoute'
+        credential:
+          $ref: '#/components/schemas/CredentialInfo'
+    ProbeInfo:
+      type: object
+      properties:
+        udp:
+          type: boolean
+        tcp:
+          type: boolean
+        protocol:
+          type: string
+          enum: [xaccel/1]
+    ClientRoute:
+      type: object
+      required:
+        - target_addr
+        - protocol
+      properties:
+        target_addr:
+          type: string
+          example: 127.0.0.1:7777
+        protocol:
+          type: string
+          enum: [udp]
+    CredentialInfo:
+      type: object
+      required:
+        - token
+        - expires_at
+        - intent_id
+        - route
+      properties:
+        token:
+          type: string
+          description: xat.v1 base64url payload plus HMAC-SHA256 signature.
+        expires_at:
+          type: integer
+        intent_id:
+          type: string
+        route:
+          $ref: '#/components/schemas/ClientRoute'
     BootstrapRequest:
       type: object
       required:

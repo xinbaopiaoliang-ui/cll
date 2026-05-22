@@ -31,6 +31,10 @@ $required = @(
     "node-core\Cargo.toml",
     "node-core\src\main.rs",
     "node-core\src\listener.rs",
+    "backend-mock\Cargo.toml",
+    "backend-mock\Cargo.lock",
+    "backend-mock\src\main.rs",
+    "backend-mock\README.md",
     "scripts\package-release.sh",
     ".github\workflows\release.yml",
     "docs\local-validation.md"

@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.8.0`.
+Current version: `v0.9.0`.
 
 The node can:
 
@@ -19,6 +19,7 @@ The node can:
 - keep short-lived UDP probe sessions and answer `session.data` echo packets;
 - bind connect-intent target routes from signed client tokens;
 - forward authenticated UDP `session.data` packets to the bound UDP endpoint;
+- issue development connect-intent responses through `backend-mock`;
 - optionally report signed health snapshots to the backend control plane.
 
 It does not yet fetch production game rules or connect-intents from a real
@@ -29,8 +30,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.8.0
-git push origin v0.8.0
+git tag v0.9.0
+git push origin v0.9.0
 ```
 
 GitHub Actions will publish:
@@ -148,7 +149,7 @@ Expected response shape:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.8.0",
+  "node_version": "0.9.0",
   "transport": "udp",
   "requested_transport": "udp",
   "session": {
@@ -232,7 +233,7 @@ Expected response shape:
 {
   "type": "session.data.ok",
   "protocol": "xaccel/1",
-  "node_version": "0.8.0",
+  "node_version": "0.9.0",
   "transport": "udp",
   "session_id": "ps-udp-...",
   "status": "echo",
@@ -258,7 +259,7 @@ Call health again and check:
 
 Without a target endpoint this remains an echo integration check.
 
-Authenticated sessions can also test real UDP target forwarding. In `v0.8.0`,
+Authenticated sessions can also test real UDP target forwarding. In `v0.9.0`,
 the preferred path is to put the target route into the signed token, which
 models a backend-issued connect-intent. Start a tiny UDP echo target on the node
 server in another shell:
@@ -307,7 +308,7 @@ Expected response shape:
 ```json
 {
   "type": "session.data.ok",
-  "node_version": "0.8.0",
+  "node_version": "0.9.0",
   "status": "forwarded",
   "payload": "dXBzdHJlYW06aGVsbG8=",
   "payload_bytes": 14,
@@ -343,10 +344,46 @@ Health should include relay counters:
 }
 ```
 
-This is still a relay MVP. The next production step is to bind target forwarding
-to backend-issued connect-intents and game rules.
+This is still a relay MVP. The next production step is to replace the mock
+backend with production scheduling, storage, and game rules.
 
-## 8. Optional Control Plane Report
+## 8. Check Backend Connect-Intent Mock
+
+`v0.9.0` adds a small development backend that signs the same `xat.v1` token the
+node verifies. Run it from a repository checkout on a machine with Rust
+installed. Use the same node secret that standalone install wrote on the Linux
+server:
+
+```bash
+NODE_SECRET=$(sudo sed -n 's/.*"node_secret": "\([^"]*\)".*/\1/p' /var/lib/xaccel-node/bootstrap-response.json | head -n 1)
+```
+
+Start the mock backend:
+
+```bash
+XACCEL_NODE_SECRET="$NODE_SECRET" cargo run --manifest-path backend-mock/Cargo.toml -- \
+  --listen 127.0.0.1:18080 \
+  --node-id 1 \
+  --node-host YOUR_SERVER_IP \
+  --node-port 666 \
+  --target-addr 127.0.0.1:7777
+```
+
+Request a client connect-intent:
+
+```bash
+curl -fsSL http://127.0.0.1:18080/api/client/v1/connect-intent \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":1001,"device_id":"pc-001","game_id":8888,"platform":"pc","client_isp":"telecom","client_ip":"127.0.0.1","bandwidth_quality":"fast"}'
+```
+
+The response includes `candidates[0].host`, `candidates[0].port`,
+`candidates[0].route.target_addr`, and `candidates[0].credential.token`. Use
+that token in the UDP `probe` packet. The node will bind the target route to the
+returned `session_id`, so later `session.data` packets no longer need target
+fields.
+
+## 9. Optional Control Plane Report
 
 Standalone installs keep backend reporting disabled by default because
 `https://api.example.com` is only a placeholder. When the real backend endpoint
@@ -380,7 +417,7 @@ X-Node-Signature
 
 Health exposes report status under `control_plane`.
 
-## 9. Placeholder Mode
+## 10. Placeholder Mode
 
 Only use this when the GitHub Release is not ready and you want to test the
 installer/systemd path:
@@ -395,7 +432,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
   --allow-placeholder
 ```
 
-## 10. Uninstall
+## 11. Uninstall
 
 Keep data and logs:
 
@@ -420,5 +457,5 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
   are still allowed for standalone testing.
 - Control-plane reporting is implemented, but backend config sync and websocket
   commands are still pending.
-- Production backend connect-intent API, game-rule lookup, relay-node chaining,
+- Production backend storage/scheduling, game-rule lookup, relay-node chaining,
   and token authentication enforcement for every client path are still pending.

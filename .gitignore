@@ -1,5 +1,6 @@
 /dist/
 /node-core/target/
+/backend-mock/target/
 *.log
 *.tmp
 *.local
@@ -16,4 +17,3 @@
 Thumbs.db
 .idea/
 .vscode/
-

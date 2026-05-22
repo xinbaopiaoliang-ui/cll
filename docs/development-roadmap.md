@@ -68,11 +68,19 @@ Done in `v0.8.0`:
   target fields.
 - Prefer token-bound routes over client-provided development targets.
 
+Done in `v0.9.0`:
+
+- Add `xaccel-backend-mock` as a standalone development backend service.
+- Implement `POST /api/client/v1/connect-intent` for issuing candidate nodes.
+- Sign route-bound `xat.v1` client tokens from backend-side node secrets.
+- Add backend mock tests and release workflow coverage.
+- Document the client-to-backend-to-node connect-intent flow.
+
 Next:
 
 - Add structured bind error reporting.
-- Add backend-issued client token API.
-- Add production backend connect-intent API and game-rule lookup.
+- Replace the mock with production backend storage and scheduling.
+- Add production game-rule lookup and policy enforcement.
 
 ## P3: Control Plane
 

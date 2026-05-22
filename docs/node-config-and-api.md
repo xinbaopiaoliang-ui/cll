@@ -280,7 +280,7 @@ Response:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.8.0",
+  "node_version": "0.9.0",
   "server_time": 1779250000,
   "transport": "udp",
   "requested_transport": "udp",
@@ -398,7 +398,7 @@ Response:
   "type": "session.data.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.8.0",
+  "node_version": "0.9.0",
   "server_time": 1779250001,
   "transport": "udp",
   "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
@@ -475,7 +475,7 @@ Response with an upstream payload:
 {
   "type": "session.data.ok",
   "protocol": "xaccel/1",
-  "node_version": "0.8.0",
+  "node_version": "0.9.0",
   "transport": "udp",
   "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
   "status": "forwarded",
@@ -528,6 +528,18 @@ the token and request provide a target, the token-bound route wins. This keeps
 the production path controlled by backend policy while preserving request-level
 targets for standalone development tests.
 
+## v0.9.0 Backend Connect-Intent Mock
+
+`xaccel-backend-mock` is a development-only backend service that implements the
+client connect-intent endpoint and signs route-bound `xat.v1` credentials using
+the same node secret as `xaccel-node`. This proves the production-shaped flow:
+
+1. Client asks backend for a connect intent.
+2. Backend selects a node and route target.
+3. Backend returns a short-lived route-bound token.
+4. Client probes the node with that token.
+5. Node stores the route in the session and forwards `session.data`.
+
 ## 客户端连接意图
 
 游戏规则不是直接给节点消费，而是客户端生成连接意图后由后台调度。
@@ -554,8 +566,14 @@ POST /api/client/v1/connect-intent
 
 ```json
 {
-  "intent_id": "uuid",
+  "intent_id": "intent-1001-8888-1779250000-1",
   "ttl_sec": 120,
+  "client": {
+    "platform": "pc",
+    "client_isp": "telecom",
+    "client_ip": "x.x.x.x",
+    "bandwidth_quality": "fast"
+  },
   "candidates": [
     {
       "node_id": 1,
@@ -563,17 +581,21 @@ POST /api/client/v1/connect-intent
       "tag": "free",
       "host": "1.2.3.5",
       "port": 666,
-      "transports": ["quic_udp", "tcp_tls"],
+      "transports": ["udp"],
       "bandwidth_quality": "normal",
       "probe": {
         "udp": true,
         "tcp": true,
-        "ping_payload": "base64"
+        "protocol": "xaccel/1"
+      },
+      "route": {
+        "target_addr": "203.0.113.10:27015",
+        "protocol": "udp"
       },
       "credential": {
-        "token": "short-lived-token",
+        "token": "xat.v1.payload.signature",
         "expires_at": 1779250120,
-        "intent_id": "uuid",
+        "intent_id": "intent-1001-8888-1779250000-1",
         "route": {
           "target_addr": "203.0.113.10:27015",
           "protocol": "udp"

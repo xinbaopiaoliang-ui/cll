@@ -25,6 +25,10 @@ jobs:
         working-directory: node-core
         run: cargo test --locked
 
+      - name: Test backend mock
+        working-directory: backend-mock
+        run: cargo test --locked
+
       - name: Package release
         run: bash scripts/package-release.sh
 
@@ -57,4 +61,3 @@ jobs:
             dist/xaccel-node-*-linux-x86_64.tar.gz \
             dist/xaccel-node-*-linux-x86_64.sha256 \
             --clobber
-
