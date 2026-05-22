@@ -59,11 +59,20 @@ Done in `v0.7.0`:
   upstream responses.
 - Record UDP relay tx/rx, timeout, and error counters in `/health`.
 
+Done in `v0.8.0`:
+
+- Extend `xat.v1` token claims with `intent_id` and `route.target_addr`.
+- Add development CLI flags for minting route-bound client tokens.
+- Bind token route targets to UDP probe sessions.
+- Let `session.data` forward to the session-bound route without client-provided
+  target fields.
+- Prefer token-bound routes over client-provided development targets.
+
 Next:
 
 - Add structured bind error reporting.
 - Add backend-issued client token API.
-- Bind UDP target forwarding to backend-issued connect-intents and game rules.
+- Add production backend connect-intent API and game-rule lookup.
 
 ## P3: Control Plane
 
@@ -85,7 +94,7 @@ Goals:
 
 Goals:
 
-- Bind target mappings from backend connect-intents.
+- Fetch target mappings from backend connect-intents.
 - Add idle timeout and LRU cleanup.
 - Count traffic per session.
 

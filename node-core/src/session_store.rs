@@ -17,6 +17,8 @@ pub struct UdpSession {
     pub device_id: Option<String>,
     pub game_id: Option<u64>,
     pub authenticated: bool,
+    pub intent_id: Option<String>,
+    pub route_target_addr: Option<String>,
     pub created_at: u64,
     pub expires_at: u64,
     pub last_seen_at: u64,
@@ -32,6 +34,8 @@ pub struct UdpSessionSnapshot {
     pub device_id: Option<String>,
     pub game_id: Option<u64>,
     pub authenticated: bool,
+    pub intent_id: Option<String>,
+    pub route_target_addr: Option<String>,
     pub created_at: u64,
     pub expires_at: u64,
 }
@@ -50,6 +54,8 @@ impl UdpSession {
         device_id: Option<String>,
         game_id: Option<u64>,
         authenticated: bool,
+        intent_id: Option<String>,
+        route_target_addr: Option<String>,
         ttl_sec: u64,
         peer: SocketAddr,
     ) -> Self {
@@ -61,6 +67,8 @@ impl UdpSession {
             device_id,
             game_id,
             authenticated,
+            intent_id,
+            route_target_addr,
             created_at: now,
             expires_at: now + ttl_sec,
             last_seen_at: now,
@@ -125,6 +133,8 @@ impl UdpSession {
             device_id: self.device_id.clone(),
             game_id: self.game_id,
             authenticated: self.authenticated,
+            intent_id: self.intent_id.clone(),
+            route_target_addr: self.route_target_addr.clone(),
             created_at: self.created_at,
             expires_at: self.expires_at,
         }
@@ -156,6 +166,8 @@ mod tests {
             Some("pc-001".to_string()),
             Some(8888),
             true,
+            Some("intent-test".to_string()),
+            Some("127.0.0.1:7777".to_string()),
             30,
             peer,
         ));
@@ -167,6 +179,8 @@ mod tests {
         assert_eq!(session.session_id, "s1");
         assert_eq!(session.user_id, Some(1001));
         assert!(session.authenticated);
+        assert_eq!(session.intent_id.as_deref(), Some("intent-test"));
+        assert_eq!(session.route_target_addr.as_deref(), Some("127.0.0.1:7777"));
         assert_eq!(store.active_udp_session_count(), 1);
     }
 

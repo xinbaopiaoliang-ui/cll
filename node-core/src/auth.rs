@@ -17,9 +17,17 @@ pub struct ClientTokenClaims {
     pub user_id: u64,
     pub device_id: String,
     pub game_id: u64,
+    pub intent_id: Option<String>,
+    pub route: Option<ClientRouteClaims>,
     pub expires_at: u64,
     pub issued_at: Option<u64>,
     pub nonce: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ClientRouteClaims {
+    pub target_addr: String,
+    pub protocol: String,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +107,15 @@ fn verify_token(
         bail!("token device_id is required");
     }
 
+    if let Some(route) = claims.route.as_ref() {
+        if route.target_addr.trim().is_empty() {
+            bail!("token route.target_addr is required when route is present");
+        }
+        if route.protocol != "udp" {
+            bail!("token route.protocol must be udp");
+        }
+    }
+
     Ok(claims)
 }
 
@@ -166,6 +183,11 @@ mod tests {
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
+            intent_id: Some("intent-test".to_string()),
+            route: Some(ClientRouteClaims {
+                target_addr: "127.0.0.1:7777".to_string(),
+                protocol: "udp".to_string(),
+            }),
             expires_at: now_unix() + 60,
             issued_at: Some(now_unix()),
             nonce: Some("n1".to_string()),
@@ -188,6 +210,33 @@ mod tests {
             verify_probe_token(&request, Some(1), Some("secret")),
             AuthDecision::Valid(_)
         ));
+    }
+
+    #[test]
+    fn keeps_connect_intent_route_claims() {
+        let token = sign_client_token(&claims(), "secret").expect("test token signs");
+        let request = ClientProbeRequest {
+            client_nonce: None,
+            user_id: Some(1001),
+            device_id: Some("pc-001".to_string()),
+            game_id: Some(8888),
+            transport: None,
+            token: Some(token),
+        };
+
+        let AuthDecision::Valid(claims) = verify_probe_token(&request, Some(1), Some("secret"))
+        else {
+            panic!("expected valid token");
+        };
+
+        assert_eq!(claims.intent_id.as_deref(), Some("intent-test"));
+        assert_eq!(
+            claims
+                .route
+                .as_ref()
+                .map(|route| route.target_addr.as_str()),
+            Some("127.0.0.1:7777")
+        );
     }
 
     #[test]

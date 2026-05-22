@@ -280,7 +280,7 @@ Response:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.7.0",
+  "node_version": "0.8.0",
   "server_time": 1779250000,
   "transport": "udp",
   "requested_transport": "udp",
@@ -337,6 +337,11 @@ Payload:
   "user_id": 1001,
   "device_id": "pc-001",
   "game_id": 8888,
+  "intent_id": "intent-local-udp-7777",
+  "route": {
+    "target_addr": "127.0.0.1:7777",
+    "protocol": "udp"
+  },
   "expires_at": 1779250120,
   "issued_at": 1779250000,
   "nonce": "random"
@@ -348,6 +353,8 @@ The node verifies:
 - HMAC signature with `node_secret`.
 - `node_id` matches this node.
 - `expires_at` is still in the future.
+- If `route` is present, `route.protocol` must be `udp` and
+  `route.target_addr` must be non-empty.
 - Optional request fields `user_id`, `device_id`, and `game_id` match token claims.
 
 During standalone development, the node can mint a short-lived test token:
@@ -358,7 +365,9 @@ During standalone development, the node can mint a short-lived test token:
   --token-user-id 1001 \
   --token-device-id pc-001 \
   --token-game-id 8888 \
-  --token-ttl-sec 120
+  --token-ttl-sec 120 \
+  --token-intent-id intent-local-udp-7777 \
+  --token-target-addr 127.0.0.1:7777
 ```
 
 Production clients should get this token from the backend connect-intent API.
@@ -389,7 +398,7 @@ Response:
   "type": "session.data.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.7.0",
+  "node_version": "0.8.0",
   "server_time": 1779250001,
   "transport": "udp",
   "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
@@ -401,6 +410,8 @@ Response:
     "created_at": 1779250000,
     "expires_at": 1779250030,
     "authenticated": true,
+    "intent_id": "intent-local-udp-7777",
+    "route_target_addr": "127.0.0.1:7777",
     "user_id": 1001,
     "device_id": "pc-001",
     "game_id": 8888
@@ -464,7 +475,7 @@ Response with an upstream payload:
 {
   "type": "session.data.ok",
   "protocol": "xaccel/1",
-  "node_version": "0.7.0",
+  "node_version": "0.8.0",
   "transport": "udp",
   "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
   "status": "forwarded",
@@ -491,6 +502,31 @@ returns `status = "upstream_timeout"` with an empty payload and increments
 Target relay currently requires a token-authenticated probe session. Untrusted
 or token-missing sessions can still use echo mode but receive
 `relay_auth_required` when they attempt target forwarding.
+
+## v0.8.0 Connect-Intent Route Binding
+
+The preferred target relay path is now token-bound. The backend connect-intent
+API should mint a short-lived token containing the route selected for this user,
+device, game, and node. During probe, the node stores `intent_id` and
+`route.target_addr` into the UDP session.
+
+After that, `session.data` does not need client-provided target fields:
+
+```json
+{
+  "type": "session.data",
+  "protocol": "xaccel/1",
+  "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
+  "client_nonce": "packet-random",
+  "payload": "aGVsbG8=",
+  "response_timeout_ms": 200
+}
+```
+
+The node resolves and forwards to the session-bound `route_target_addr`. If both
+the token and request provide a target, the token-bound route wins. This keeps
+the production path controlled by backend policy while preserving request-level
+targets for standalone development tests.
 
 ## 客户端连接意图
 
@@ -536,7 +572,12 @@ POST /api/client/v1/connect-intent
       },
       "credential": {
         "token": "short-lived-token",
-        "expires_at": 1779250120
+        "expires_at": 1779250120,
+        "intent_id": "uuid",
+        "route": {
+          "target_addr": "203.0.113.10:27015",
+          "protocol": "udp"
+        }
       }
     }
   ]

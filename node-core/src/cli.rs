@@ -31,4 +31,10 @@ pub struct Cli {
 
     #[arg(long = "token-nonce")]
     pub token_nonce: Option<String>,
+
+    #[arg(long = "token-intent-id")]
+    pub token_intent_id: Option<String>,
+
+    #[arg(long = "token-target-addr")]
+    pub token_target_addr: Option<String>,
 }

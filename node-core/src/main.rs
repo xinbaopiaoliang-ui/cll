@@ -9,8 +9,8 @@ mod session;
 mod session_store;
 mod state;
 
-use anyhow::Context;
-use auth::{sign_client_token, ClientTokenClaims};
+use anyhow::{bail, Context};
+use auth::{sign_client_token, ClientRouteClaims, ClientTokenClaims};
 use clap::Parser;
 use cli::Cli;
 use config::NodeConfig;
@@ -111,12 +111,24 @@ fn make_client_token(cli: &Cli, identity: &IdentityState) -> anyhow::Result<Stri
         .token_game_id
         .context("--token-game-id is required with --make-client-token")?;
     let issued_at = now_unix();
+    let route = match cli.token_target_addr.as_deref() {
+        Some(target_addr) if target_addr.trim().is_empty() => {
+            bail!("--token-target-addr must not be empty")
+        }
+        Some(target_addr) => Some(ClientRouteClaims {
+            target_addr: target_addr.trim().to_string(),
+            protocol: "udp".to_string(),
+        }),
+        None => None,
+    };
 
     let claims = ClientTokenClaims {
         node_id,
         user_id,
         device_id,
         game_id,
+        intent_id: cli.token_intent_id.clone(),
+        route,
         expires_at: issued_at + cli.token_ttl_sec.max(1),
         issued_at: Some(issued_at),
         nonce: cli.token_nonce.clone(),

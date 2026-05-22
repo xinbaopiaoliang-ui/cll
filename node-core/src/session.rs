@@ -86,6 +86,8 @@ struct ProbeSession {
     session_id: String,
     status: &'static str,
     ttl_sec: u64,
+    intent_id: Option<String>,
+    route_target_addr: Option<String>,
     auth_required: bool,
     credential_present: bool,
     credential_valid: bool,
@@ -134,6 +136,8 @@ struct SessionDataInfo {
     created_at: u64,
     expires_at: u64,
     authenticated: bool,
+    intent_id: Option<String>,
+    route_target_addr: Option<String>,
     user_id: Option<u64>,
     device_id: Option<String>,
     game_id: Option<u64>,
@@ -160,6 +164,8 @@ struct ProbeIdentity {
     credential_present: bool,
     credential_valid: bool,
     credential_expires_at: Option<u64>,
+    intent_id: Option<String>,
+    route_target_addr: Option<String>,
     user_id: Option<u64>,
     device_id: Option<String>,
     game_id: Option<u64>,
@@ -236,6 +242,8 @@ pub fn build_probe_response(
             identity.device_id.clone(),
             identity.game_id,
             identity.credential_valid,
+            identity.intent_id.clone(),
+            identity.route_target_addr.clone(),
             PROBE_TTL_SEC,
             peer,
         ));
@@ -254,6 +262,8 @@ pub fn build_probe_response(
             session_id,
             status: "probe_only",
             ttl_sec: PROBE_TTL_SEC,
+            intent_id: identity.intent_id,
+            route_target_addr: identity.route_target_addr,
             auth_required: true,
             credential_present: identity.credential_present,
             credential_valid: identity.credential_valid,
@@ -268,6 +278,7 @@ pub fn build_probe_response(
             "token_auth_hmac_v1",
             "udp_session_echo",
             "udp_target_relay",
+            "connect_intent_route",
             "session_stats",
         ],
     };
@@ -353,7 +364,9 @@ pub async fn build_session_data_response(
     let mut target_info = None;
     let mut relay_info = None;
 
-    if has_session_target(&request) && !session.authenticated {
+    if (has_session_target(&request) || session.route_target_addr.is_some())
+        && !session.authenticated
+    {
         state.stats().record_udp_relay_error();
         return build_session_error(
             state,
@@ -363,7 +376,8 @@ pub async fn build_session_data_response(
         );
     }
 
-    let target = match resolve_session_target(&request).await {
+    let target = match resolve_session_target(&request, session.route_target_addr.as_deref()).await
+    {
         Ok(target) => target,
         Err(error) => {
             state.stats().record_udp_relay_error();
@@ -432,6 +446,8 @@ pub async fn build_session_data_response(
             created_at: session.created_at,
             expires_at: session.expires_at,
             authenticated: session.authenticated,
+            intent_id: session.intent_id,
+            route_target_addr: session.route_target_addr,
             user_id: session.user_id,
             device_id: session.device_id,
             game_id: session.game_id,
@@ -449,6 +465,7 @@ pub async fn build_session_data_response(
     Ok(encoded)
 }
 
+#[derive(Debug)]
 struct TargetResolveError {
     code: &'static str,
     message: String,
@@ -473,7 +490,15 @@ fn has_session_target(request: &ClientSessionDataRequest) -> bool {
 
 async fn resolve_session_target(
     request: &ClientSessionDataRequest,
+    session_target_addr: Option<&str>,
 ) -> Result<Option<SocketAddr>, TargetResolveError> {
+    if let Some(session_target_addr) = session_target_addr
+        .map(str::trim)
+        .filter(|session_target_addr| !session_target_addr.is_empty())
+    {
+        return resolve_socket_addr(session_target_addr).await.map(Some);
+    }
+
     if let Some(target_addr) = request
         .target_addr
         .as_deref()
@@ -611,6 +636,8 @@ impl ProbeIdentity {
             credential_present: false,
             credential_valid: false,
             credential_expires_at: None,
+            intent_id: None,
+            route_target_addr: None,
             user_id: request.user_id,
             device_id: request.device_id.clone(),
             game_id: request.game_id,
@@ -622,6 +649,8 @@ impl ProbeIdentity {
             credential_present: true,
             credential_valid: true,
             credential_expires_at: Some(claims.expires_at),
+            intent_id: claims.intent_id,
+            route_target_addr: claims.route.map(|route| route.target_addr),
             user_id: Some(claims.user_id),
             device_id: Some(claims.device_id),
             game_id: Some(claims.game_id),
@@ -714,6 +743,26 @@ mod tests {
         assert_eq!(outcome.upstream_tx_bytes, 5);
         assert_eq!(outcome.payload, b"upstream:hello");
         handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn resolves_session_bound_target_before_request_target() {
+        let request = ClientSessionDataRequest {
+            session_id: Some("s1".to_string()),
+            client_nonce: None,
+            payload: Some("aGVsbG8=".to_string()),
+            target_addr: Some("127.0.0.1:9999".to_string()),
+            target_host: None,
+            target_port: None,
+            response_timeout_ms: None,
+        };
+
+        let target = resolve_session_target(&request, Some("127.0.0.1:7777"))
+            .await
+            .expect("target resolves")
+            .expect("target exists");
+
+        assert_eq!(target.port(), 7777);
     }
 
     #[test]

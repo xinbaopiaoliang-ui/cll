@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.7.0`.
+Current version: `v0.8.0`.
 
 The node can:
 
@@ -17,19 +17,20 @@ The node can:
   probe session id;
 - verify optional `xat.v1` HMAC client tokens;
 - keep short-lived UDP probe sessions and answer `session.data` echo packets;
-- forward authenticated UDP `session.data` packets to a target UDP endpoint;
+- bind connect-intent target routes from signed client tokens;
+- forward authenticated UDP `session.data` packets to the bound UDP endpoint;
 - optionally report signed health snapshots to the backend control plane.
 
-It does not yet bind forwarding to production game rules or backend
-connect-intents.
+It does not yet fetch production game rules or connect-intents from a real
+backend API.
 
 ## 1. Create A Release
 
 From the local repository:
 
 ```bash
-git tag v0.7.0
-git push origin v0.7.0
+git tag v0.8.0
+git push origin v0.8.0
 ```
 
 GitHub Actions will publish:
@@ -147,7 +148,7 @@ Expected response shape:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.7.0",
+  "node_version": "0.8.0",
   "transport": "udp",
   "requested_transport": "udp",
   "session": {
@@ -231,7 +232,7 @@ Expected response shape:
 {
   "type": "session.data.ok",
   "protocol": "xaccel/1",
-  "node_version": "0.7.0",
+  "node_version": "0.8.0",
   "transport": "udp",
   "session_id": "ps-udp-...",
   "status": "echo",
@@ -257,8 +258,10 @@ Call health again and check:
 
 Without a target endpoint this remains an echo integration check.
 
-Authenticated sessions can also test real UDP target forwarding. Start a tiny
-UDP echo target on the node server in another shell:
+Authenticated sessions can also test real UDP target forwarding. In `v0.8.0`,
+the preferred path is to put the target route into the signed token, which
+models a backend-issued connect-intent. Start a tiny UDP echo target on the node
+server in another shell:
 
 ```bash
 python3 - <<'PY'
@@ -273,11 +276,30 @@ while True:
 PY
 ```
 
-Send `session.data` with a target. Use the `session_id` from a token-authenticated
-UDP probe, because target forwarding requires `credential_valid = true`.
+Generate a token that includes a connect-intent id and target route:
 
 ```bash
-printf '{"type":"session.data","protocol":"xaccel/1","session_id":"PASTE_SESSION_ID","client_nonce":"d2","payload":"aGVsbG8=","target_host":"127.0.0.1","target_port":7777,"response_timeout_ms":200}\n' | nc -u -w 2 YOUR_SERVER_IP 666
+TOKEN=$(/usr/local/bin/xaccel-node --config /etc/xaccel-node/config.toml \
+  --make-client-token \
+  --token-user-id 1001 \
+  --token-device-id pc-001 \
+  --token-game-id 8888 \
+  --token-ttl-sec 120 \
+  --token-intent-id intent-local-udp-7777 \
+  --token-target-addr 127.0.0.1:7777)
+```
+
+Use that token in a UDP probe and copy the returned `session_id`:
+
+```bash
+printf '{"type":"probe","protocol":"xaccel/1","client_nonce":"n4","user_id":1001,"device_id":"pc-001","game_id":8888,"transport":"udp","token":"'"$TOKEN"'"}\n' | nc -u -w 2 YOUR_SERVER_IP 666
+```
+
+Then send `session.data` without any target fields. The node uses the route
+bound to the session during probe:
+
+```bash
+printf '{"type":"session.data","protocol":"xaccel/1","session_id":"PASTE_SESSION_ID","client_nonce":"d2","payload":"aGVsbG8=","response_timeout_ms":200}\n' | nc -u -w 2 YOUR_SERVER_IP 666
 ```
 
 Expected response shape:
@@ -285,7 +307,7 @@ Expected response shape:
 ```json
 {
   "type": "session.data.ok",
-  "node_version": "0.7.0",
+  "node_version": "0.8.0",
   "status": "forwarded",
   "payload": "dXBzdHJlYW06aGVsbG8=",
   "payload_bytes": 14,
@@ -301,6 +323,10 @@ Expected response shape:
   }
 }
 ```
+
+For development only, `session.data` may still carry `target_addr` or
+`target_host` + `target_port` when the token does not include a route. A
+token-bound route takes priority over client-provided target fields.
 
 Health should include relay counters:
 
@@ -388,10 +414,11 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 - GitHub Actions currently builds Linux `x86_64` only.
 - TCP/UDP listener currently returns legacy and structured probe responses.
 - UDP `session.data` verifies the session id, echoes payload when no target is
-  provided, and can forward authenticated packets to a target UDP endpoint.
+  bound, and forwards authenticated packets to the route target from the signed
+  token.
 - Token auth verifies `xat.v1` HMAC tokens when provided, but missing tokens
   are still allowed for standalone testing.
 - Control-plane reporting is implemented, but backend config sync and websocket
   commands are still pending.
-- Production game-rule binding, relay-node chaining, and token authentication
-  enforcement for every client path are still pending.
+- Production backend connect-intent API, game-rule lookup, relay-node chaining,
+  and token authentication enforcement for every client path are still pending.

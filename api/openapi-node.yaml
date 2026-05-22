@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.7.0
+  version: 0.8.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -349,7 +349,7 @@ components:
           description: Base64 payload. Echoed when no target is provided; forwarded when a target is present.
         target_addr:
           type: string
-          description: Optional target UDP endpoint such as 127.0.0.1:7777.
+          description: Optional development target UDP endpoint such as 127.0.0.1:7777. Token-bound route wins when present.
         target_host:
           type: string
           description: Optional target host or IP used with target_port.
@@ -423,6 +423,12 @@ components:
               type: integer
             authenticated:
               type: boolean
+            intent_id:
+              type: string
+              nullable: true
+            route_target_addr:
+              type: string
+              nullable: true
             user_id:
               type: integer
               nullable: true
@@ -521,6 +527,12 @@ components:
               type: boolean
             credential_expires_at:
               type: integer
+              nullable: true
+            intent_id:
+              type: string
+              nullable: true
+            route_target_addr:
+              type: string
               nullable: true
             user_id:
               type: integer
