@@ -76,11 +76,20 @@ Done in `v0.9.0`:
 - Add backend mock tests and release workflow coverage.
 - Document the client-to-backend-to-node connect-intent flow.
 
+Done in `v0.10.0`:
+
+- Add `xaccel-control-api`, a Rust backend service for connect-intent.
+- Use Axum for HTTP and SQLx with MySQL for data access.
+- Select online nodes and game route rules from MySQL.
+- Store issued connect intents for audit and future billing.
+- Keep `xat.v1` token signing compatible with `xaccel-node`.
+
 Next:
 
 - Add structured bind error reporting.
-- Replace the mock with production backend storage and scheduling.
-- Add production game-rule lookup and policy enforcement.
+- Add user entitlement checks before issuing connect-intents.
+- Add production scheduler policy for ISP, region, latency, and node load.
+- Add API authentication for clients and admin callers.
 
 ## P3: Control Plane
 

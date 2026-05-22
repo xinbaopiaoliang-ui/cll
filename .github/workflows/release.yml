@@ -29,6 +29,10 @@ jobs:
         working-directory: backend-mock
         run: cargo test --locked
 
+      - name: Test control API
+        working-directory: control-api
+        run: cargo test --locked
+
       - name: Package release
         run: bash scripts/package-release.sh
 

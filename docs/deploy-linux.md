@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.9.0`.
+Current version: `v0.10.0`.
 
 The node can:
 
@@ -30,8 +30,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.9.0
-git push origin v0.9.0
+git tag v0.10.0
+git push origin v0.10.0
 ```
 
 GitHub Actions will publish:
@@ -149,7 +149,7 @@ Expected response shape:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.9.0",
+  "node_version": "0.10.0",
   "transport": "udp",
   "requested_transport": "udp",
   "session": {
@@ -233,7 +233,7 @@ Expected response shape:
 {
   "type": "session.data.ok",
   "protocol": "xaccel/1",
-  "node_version": "0.9.0",
+  "node_version": "0.10.0",
   "transport": "udp",
   "session_id": "ps-udp-...",
   "status": "echo",
@@ -259,7 +259,7 @@ Call health again and check:
 
 Without a target endpoint this remains an echo integration check.
 
-Authenticated sessions can also test real UDP target forwarding. In `v0.9.0`,
+Authenticated sessions can also test real UDP target forwarding. In `v0.10.0`,
 the preferred path is to put the target route into the signed token, which
 models a backend-issued connect-intent. Start a tiny UDP echo target on the node
 server in another shell:
@@ -308,7 +308,7 @@ Expected response shape:
 ```json
 {
   "type": "session.data.ok",
-  "node_version": "0.9.0",
+  "node_version": "0.10.0",
   "status": "forwarded",
   "payload": "dXBzdHJlYW06aGVsbG8=",
   "payload_bytes": 14,
@@ -349,7 +349,7 @@ backend with production scheduling, storage, and game rules.
 
 ## 8. Check Backend Connect-Intent Mock
 
-`v0.9.0` adds a small development backend that signs the same `xat.v1` token the
+`v0.9.0` added a small development backend that signs the same `xat.v1` token the
 node verifies. Run it from a repository checkout on a machine with Rust
 installed. Use the same node secret that standalone install wrote on the Linux
 server:

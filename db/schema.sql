@@ -28,6 +28,9 @@ CREATE TABLE accel_nodes (
     'disabled'
   ) NOT NULL DEFAULT 'pending_install',
   node_secret_hash VARCHAR(255) NULL,
+  -- MVP: control-api needs the node secret to sign xat.v1 client tokens.
+  -- Production should store this encrypted or fetch it from a secret manager.
+  node_secret VARCHAR(255) NULL,
   installed_at TIMESTAMP NULL,
   last_seen_at TIMESTAMP NULL,
   last_report_at TIMESTAMP NULL,
@@ -41,6 +44,53 @@ CREATE TABLE accel_nodes (
   INDEX idx_area_quality (area, bandwidth_quality),
   INDEX idx_tag (tag),
   UNIQUE KEY uniq_server_endpoint (server_ip, server_port)
+);
+
+CREATE TABLE game_route_rules (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  game_id BIGINT UNSIGNED NOT NULL,
+  node_id BIGINT UNSIGNED NOT NULL,
+  target_addr VARCHAR(255) NOT NULL,
+  protocol ENUM('udp') NOT NULL DEFAULT 'udp',
+  area VARCHAR(32) NULL,
+  tag VARCHAR(64) NULL,
+  priority INT UNSIGNED NOT NULL DEFAULT 100,
+  status ENUM('enabled', 'disabled') NOT NULL DEFAULT 'enabled',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_game_status_priority (game_id, status, priority),
+  INDEX idx_node_id (node_id),
+  UNIQUE KEY uniq_game_node_target (game_id, node_id, target_addr, protocol),
+  CONSTRAINT fk_route_node
+    FOREIGN KEY (node_id) REFERENCES accel_nodes(id)
+    ON DELETE CASCADE
+);
+
+CREATE TABLE connect_intents (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  intent_id VARCHAR(96) NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  device_id VARCHAR(128) NOT NULL,
+  game_id BIGINT UNSIGNED NOT NULL,
+  node_id BIGINT UNSIGNED NOT NULL,
+  target_addr VARCHAR(255) NOT NULL,
+  protocol ENUM('udp') NOT NULL DEFAULT 'udp',
+  client_ip VARCHAR(64) NULL,
+  client_isp VARCHAR(64) NULL,
+  platform VARCHAR(32) NULL,
+  bandwidth_quality ENUM('fast', 'normal', 'slow') NOT NULL DEFAULT 'normal',
+  expires_at TIMESTAMP NOT NULL,
+  consumed_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_intent_id (intent_id),
+  INDEX idx_user_created (user_id, created_at),
+  INDEX idx_device_created (device_id, created_at),
+  INDEX idx_game_created (game_id, created_at),
+  INDEX idx_node_created (node_id, created_at),
+  INDEX idx_expires_at (expires_at),
+  CONSTRAINT fk_intent_node
+    FOREIGN KEY (node_id) REFERENCES accel_nodes(id)
+    ON DELETE CASCADE
 );
 
 CREATE TABLE node_bootstrap_tokens (
@@ -130,4 +180,3 @@ CREATE TABLE node_audit_logs (
     FOREIGN KEY (node_id) REFERENCES accel_nodes(id)
     ON DELETE CASCADE
 );
-

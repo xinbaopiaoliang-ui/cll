@@ -1,6 +1,7 @@
 /dist/
 /node-core/target/
 /backend-mock/target/
+/control-api/target/
 *.log
 *.tmp
 *.local

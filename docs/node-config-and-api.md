@@ -280,7 +280,7 @@ Response:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.9.0",
+  "node_version": "0.10.0",
   "server_time": 1779250000,
   "transport": "udp",
   "requested_transport": "udp",
@@ -398,7 +398,7 @@ Response:
   "type": "session.data.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.9.0",
+  "node_version": "0.10.0",
   "server_time": 1779250001,
   "transport": "udp",
   "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
@@ -475,7 +475,7 @@ Response with an upstream payload:
 {
   "type": "session.data.ok",
   "protocol": "xaccel/1",
-  "node_version": "0.9.0",
+  "node_version": "0.10.0",
   "transport": "udp",
   "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
   "status": "forwarded",
@@ -539,6 +539,18 @@ the same node secret as `xaccel-node`. This proves the production-shaped flow:
 3. Backend returns a short-lived route-bound token.
 4. Client probes the node with that token.
 5. Node stores the route in the session and forwards `session.data`.
+
+## v0.10.0 Rust MySQL Control API
+
+`xaccel-control-api` is the production-shaped implementation of the same
+connect-intent contract. It uses Rust, Axum, SQLx, and MySQL.
+
+The service reads `accel_nodes` and `game_route_rules`, stores issued rows in
+`connect_intents`, and returns the same candidate shape as `backend-mock`.
+Scheduling is still intentionally small: it chooses an online UDP-capable node
+by requested bandwidth quality, route priority, recent `last_seen_at`, and node
+id. The next step is to add user entitlement, ISP-aware scheduling, latency
+measurements, and load-based selection.
 
 ## 客户端连接意图
 
