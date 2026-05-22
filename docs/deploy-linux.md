@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.4.0`.
+Current version: `v0.5.0`.
 
 The node can:
 
@@ -15,6 +15,7 @@ The node can:
 - count basic TCP/UDP traffic;
 - answer structured `xaccel/1` client probe requests with a short-lived
   probe session id;
+- verify optional `xat.v1` HMAC client tokens;
 - optionally report signed health snapshots to the backend control plane.
 
 It does not yet implement real game traffic forwarding.
@@ -24,8 +25,8 @@ It does not yet implement real game traffic forwarding.
 From the local repository:
 
 ```bash
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 GitHub Actions will publish:
@@ -143,7 +144,7 @@ Expected response shape:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.4.0",
+  "node_version": "0.5.0",
   "transport": "udp",
   "requested_transport": "udp",
   "session": {
@@ -152,6 +153,8 @@ Expected response shape:
     "ttl_sec": 30,
     "auth_required": true,
     "credential_present": false,
+    "credential_valid": false,
+    "credential_expires_at": null,
     "user_id": 1001,
     "device_id": "pc-001",
     "game_id": 8888
@@ -165,12 +168,50 @@ Call health again and check:
 {
   "sessions": {
     "probe_sessions_total": 2,
-    "probe_rejected": 0
+    "probe_rejected": 0,
+    "auth_missing": 2,
+    "auth_ok": 0,
+    "auth_failed": 0
   }
 }
 ```
 
-## 6. Optional Control Plane Report
+## 6. Check Token Auth
+
+During standalone testing, the node can generate a short-lived client token
+from its local identity. Production clients should receive this token from the
+backend, not from the node shell.
+
+```bash
+TOKEN=$(/usr/local/bin/xaccel-node --config /etc/xaccel-node/config.toml \
+  --make-client-token \
+  --token-user-id 1001 \
+  --token-device-id pc-001 \
+  --token-game-id 8888 \
+  --token-ttl-sec 120)
+```
+
+Use the token in a probe:
+
+```bash
+printf '{"type":"probe","protocol":"xaccel/1","client_nonce":"n3","user_id":1001,"device_id":"pc-001","game_id":8888,"transport":"udp","token":"'"$TOKEN"'"}\n' | nc -u -w 2 YOUR_SERVER_IP 666
+```
+
+Expected token fields in the response:
+
+```json
+{
+  "session": {
+    "credential_present": true,
+    "credential_valid": true,
+    "credential_expires_at": 1779250120
+  }
+}
+```
+
+Invalid tokens return `probe.error` and increment `sessions.auth_failed`.
+
+## 7. Optional Control Plane Report
 
 Standalone installs keep backend reporting disabled by default because
 `https://api.example.com` is only a placeholder. When the real backend endpoint
@@ -204,7 +245,7 @@ X-Node-Signature
 
 Health exposes report status under `control_plane`.
 
-## 7. Placeholder Mode
+## 8. Placeholder Mode
 
 Only use this when the GitHub Release is not ready and you want to test the
 installer/systemd path:
@@ -219,7 +260,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
   --allow-placeholder
 ```
 
-## 8. Uninstall
+## 9. Uninstall
 
 Keep data and logs:
 
@@ -237,6 +278,8 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 - GitHub Actions currently builds Linux `x86_64` only.
 - TCP/UDP listener currently returns legacy and structured probe responses.
+- Token auth verifies `xat.v1` HMAC tokens when provided, but missing tokens
+  are still allowed for standalone testing.
 - Control-plane reporting is implemented, but backend config sync and websocket
   commands are still pending.
 - Real game acceleration, relay forwarding, and token authentication enforcement

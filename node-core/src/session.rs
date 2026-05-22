@@ -1,4 +1,7 @@
-use crate::state::RuntimeState;
+use crate::{
+    auth::{verify_probe_token, AuthDecision, ClientTokenClaims},
+    state::RuntimeState,
+};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -67,6 +70,8 @@ struct ProbeSession {
     ttl_sec: u64,
     auth_required: bool,
     credential_present: bool,
+    credential_valid: bool,
+    credential_expires_at: Option<u64>,
     user_id: Option<u64>,
     device_id: Option<String>,
     game_id: Option<u64>,
@@ -87,6 +92,15 @@ struct ClientProbeError {
 struct ProbeErrorBody {
     code: &'static str,
     message: String,
+}
+
+struct ProbeIdentity {
+    credential_present: bool,
+    credential_valid: bool,
+    credential_expires_at: Option<u64>,
+    user_id: Option<u64>,
+    device_id: Option<String>,
+    game_id: Option<u64>,
 }
 
 pub fn parse_client_message(payload: &[u8]) -> ParsedClientMessage {
@@ -128,12 +142,27 @@ pub fn build_probe_response(
     peer: SocketAddr,
     request: ClientProbeRequest,
 ) -> anyhow::Result<Vec<u8>> {
+    let identity = match verify_probe_token(
+        &request,
+        state.identity().node_id,
+        state.identity().node_secret(),
+    ) {
+        AuthDecision::Missing => {
+            state.stats().record_auth_missing();
+            ProbeIdentity::from_request(&request)
+        }
+        AuthDecision::Valid(claims) => {
+            state.stats().record_auth_ok();
+            ProbeIdentity::from_claims(claims)
+        }
+        AuthDecision::Invalid { code, message } => {
+            state.stats().record_auth_failed();
+            return build_probe_error_with_code(state, transport, code, message);
+        }
+    };
+
     let sequence = state.stats().next_probe_sequence();
     let session_id = build_session_id(transport, peer, sequence);
-    let credential_present = request
-        .token
-        .as_deref()
-        .is_some_and(|token| !token.trim().is_empty());
     state.stats().record_probe_session(session_id.clone());
 
     let response = ClientProbeResponse {
@@ -150,15 +179,17 @@ pub fn build_probe_response(
             status: "probe_only",
             ttl_sec: PROBE_TTL_SEC,
             auth_required: true,
-            credential_present,
-            user_id: request.user_id,
-            device_id: request.device_id,
-            game_id: request.game_id,
+            credential_present: identity.credential_present,
+            credential_valid: identity.credential_valid,
+            credential_expires_at: identity.credential_expires_at,
+            user_id: identity.user_id,
+            device_id: identity.device_id,
+            game_id: identity.game_id,
         },
         capabilities: vec![
             "tcp_probe",
             "udp_probe",
-            "token_auth_placeholder",
+            "token_auth_hmac_v1",
             "session_stats",
         ],
     };
@@ -171,6 +202,15 @@ pub fn build_probe_error(
     transport: TransportKind,
     message: String,
 ) -> anyhow::Result<Vec<u8>> {
+    build_probe_error_with_code(state, transport, "invalid_probe", message)
+}
+
+fn build_probe_error_with_code(
+    state: &RuntimeState,
+    transport: TransportKind,
+    code: &'static str,
+    message: String,
+) -> anyhow::Result<Vec<u8>> {
     state.stats().record_probe_rejected();
     let response = ClientProbeError {
         message_type: "probe.error",
@@ -178,13 +218,34 @@ pub fn build_probe_error(
         node_version: env!("CARGO_PKG_VERSION"),
         server_time: now_unix(),
         transport,
-        error: ProbeErrorBody {
-            code: "invalid_probe",
-            message,
-        },
+        error: ProbeErrorBody { code, message },
     };
 
     encode_json_line(&response)
+}
+
+impl ProbeIdentity {
+    fn from_request(request: &ClientProbeRequest) -> Self {
+        Self {
+            credential_present: false,
+            credential_valid: false,
+            credential_expires_at: None,
+            user_id: request.user_id,
+            device_id: request.device_id.clone(),
+            game_id: request.game_id,
+        }
+    }
+
+    fn from_claims(claims: ClientTokenClaims) -> Self {
+        Self {
+            credential_present: true,
+            credential_valid: true,
+            credential_expires_at: Some(claims.expires_at),
+            user_id: Some(claims.user_id),
+            device_id: Some(claims.device_id),
+            game_id: Some(claims.game_id),
+        }
+    }
 }
 
 fn encode_json_line(value: &impl Serialize) -> anyhow::Result<Vec<u8>> {

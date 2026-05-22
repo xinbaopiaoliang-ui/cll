@@ -280,7 +280,7 @@ Response:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.4.0",
+  "node_version": "0.5.0",
   "server_time": 1779250000,
   "transport": "udp",
   "requested_transport": "udp",
@@ -291,6 +291,8 @@ Response:
     "ttl_sec": 30,
     "auth_required": true,
     "credential_present": true,
+    "credential_valid": true,
+    "credential_expires_at": 1779250120,
     "user_id": 1001,
     "device_id": "pc-001",
     "game_id": 8888
@@ -298,7 +300,7 @@ Response:
   "capabilities": [
     "tcp_probe",
     "udp_probe",
-    "token_auth_placeholder",
+    "token_auth_hmac_v1",
     "session_stats"
   ]
 }
@@ -317,9 +319,48 @@ Invalid structured requests return:
 }
 ```
 
-The token is currently accepted as a placeholder only. The next backend stage
-must issue short-lived tokens and the node must verify them before creating
-real forwarding sessions.
+## v0.5.0 Client Token Contract
+
+The client token format is:
+
+```text
+xat.v1.base64url(payload_json).base64url(hmac_sha256(secret, "xat.v1.base64url(payload_json)"))
+```
+
+Payload:
+
+```json
+{
+  "node_id": 1,
+  "user_id": 1001,
+  "device_id": "pc-001",
+  "game_id": 8888,
+  "expires_at": 1779250120,
+  "issued_at": 1779250000,
+  "nonce": "random"
+}
+```
+
+The node verifies:
+
+- HMAC signature with `node_secret`.
+- `node_id` matches this node.
+- `expires_at` is still in the future.
+- Optional request fields `user_id`, `device_id`, and `game_id` match token claims.
+
+During standalone development, the node can mint a short-lived test token:
+
+```bash
+/usr/local/bin/xaccel-node --config /etc/xaccel-node/config.toml \
+  --make-client-token \
+  --token-user-id 1001 \
+  --token-device-id pc-001 \
+  --token-game-id 8888 \
+  --token-ttl-sec 120
+```
+
+Production clients should get this token from the backend connect-intent API.
+The node-side minting command is only a development/testing helper.
 
 ## 客户端连接意图
 

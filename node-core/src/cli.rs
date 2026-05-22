@@ -13,4 +13,22 @@ pub struct Cli {
 
     #[arg(long)]
     pub version: bool,
+
+    #[arg(long = "make-client-token")]
+    pub make_client_token: bool,
+
+    #[arg(long = "token-user-id")]
+    pub token_user_id: Option<u64>,
+
+    #[arg(long = "token-device-id")]
+    pub token_device_id: Option<String>,
+
+    #[arg(long = "token-game-id")]
+    pub token_game_id: Option<u64>,
+
+    #[arg(long = "token-ttl-sec", default_value_t = 120)]
+    pub token_ttl_sec: u64,
+
+    #[arg(long = "token-nonce")]
+    pub token_nonce: Option<String>,
 }

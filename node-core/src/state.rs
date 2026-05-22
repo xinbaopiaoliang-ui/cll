@@ -74,6 +74,9 @@ pub struct SessionSnapshot {
     pub active_tcp_connections: u64,
     pub probe_sessions_total: u64,
     pub probe_rejected: u64,
+    pub auth_missing: u64,
+    pub auth_ok: u64,
+    pub auth_failed: u64,
     pub last_probe_session_id: Option<String>,
 }
 
@@ -103,6 +106,9 @@ pub struct RuntimeStats {
     probe_sequence: AtomicU64,
     probe_sessions_total: AtomicU64,
     probe_rejected: AtomicU64,
+    auth_missing: AtomicU64,
+    auth_ok: AtomicU64,
+    auth_failed: AtomicU64,
     last_probe_session_id: Mutex<Option<String>>,
     control_last_success_at: AtomicU64,
     control_last_failure_at: AtomicU64,
@@ -255,6 +261,18 @@ impl RuntimeStats {
         self.probe_rejected.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_auth_missing(&self) {
+        self.auth_missing.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_auth_ok(&self) {
+        self.auth_ok.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_auth_failed(&self) {
+        self.auth_failed.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_control_success(&self, http_status: u16) {
         self.control_report_ok.fetch_add(1, Ordering::Relaxed);
         self.control_last_success_at
@@ -302,6 +320,9 @@ impl RuntimeStats {
             active_tcp_connections: self.tcp_active.load(Ordering::Relaxed),
             probe_sessions_total: self.probe_sessions_total.load(Ordering::Relaxed),
             probe_rejected: self.probe_rejected.load(Ordering::Relaxed),
+            auth_missing: self.auth_missing.load(Ordering::Relaxed),
+            auth_ok: self.auth_ok.load(Ordering::Relaxed),
+            auth_failed: self.auth_failed.load(Ordering::Relaxed),
             last_probe_session_id,
         }
     }

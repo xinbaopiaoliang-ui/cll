@@ -68,6 +68,10 @@ impl IdentityState {
             self.node_secret.as_deref()?,
         ))
     }
+
+    pub fn node_secret(&self) -> Option<&str> {
+        self.node_secret.as_deref()
+    }
 }
 
 #[cfg(test)]

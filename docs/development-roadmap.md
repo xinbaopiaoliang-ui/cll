@@ -35,10 +35,17 @@ Done in `v0.4.0`:
 - Return short-lived probe session ids.
 - Record accepted and rejected probe session counters in `/health`.
 
+Done in `v0.5.0`:
+
+- Add `xat.v1` HMAC client token verification.
+- Add a development CLI command to mint short-lived client tokens from node identity.
+- Reject malformed, expired, mismatched, or incorrectly signed tokens.
+- Record auth missing, auth ok, and auth failed counters in `/health`.
+
 Next:
 
 - Add structured bind error reporting.
-- Enforce short-lived client tokens.
+- Add backend-issued client token API.
 - Store active UDP sessions with idle expiry.
 
 ## P3: Control Plane
