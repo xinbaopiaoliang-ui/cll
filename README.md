@@ -57,8 +57,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 GitHub Actions will build `xaccel-node-linux-x86_64.tar.gz` and attach it to
@@ -75,7 +75,8 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.3.0` starts TCP/UDP listeners on `server_ip:server_port`,
-exposes basic counters in `/health`, and includes an optional HMAC-signed
-control-plane report loop. Standalone mode leaves that loop disabled unless
-`--enable-control-plane` is passed with a real backend URL.
+next stage. Version `0.4.0` keeps the legacy TCP/UDP `ping` probe, adds a
+JSON `xaccel/1` client probe response with a short-lived `session_id`, exposes
+probe session counters in `/health`, and includes the optional HMAC-signed
+control-plane report loop. Standalone mode leaves backend reporting disabled
+unless `--enable-control-plane` is passed with a real backend URL.

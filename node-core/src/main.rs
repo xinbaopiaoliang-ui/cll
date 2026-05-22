@@ -4,6 +4,7 @@ mod control_plane;
 mod health;
 mod identity;
 mod listener;
+mod session;
 mod state;
 
 use anyhow::Context;

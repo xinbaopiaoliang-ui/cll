@@ -10,6 +10,8 @@ this MVP is to verify the node lifecycle:
 - Expose a local health endpoint.
 - Listen on the configured TCP/UDP server endpoint.
 - Record basic TCP/UDP counters.
+- Return legacy `ping` probe responses and structured `xaccel/1` probe
+  sessions.
 - Optionally post HMAC-signed health reports to the backend.
 - Support `--check-config` for installer validation.
 - Provide a stable place to add config sync, session, and relay modules.

@@ -28,11 +28,18 @@ Done in `v0.2.0`:
 - Return simple TCP/UDP probe responses.
 - Record basic TCP/UDP counters in `/health`.
 
+Done in `v0.4.0`:
+
+- Keep legacy TCP/UDP `ping` probe compatibility.
+- Add JSON `xaccel/1` client probe request and `probe.ok` response.
+- Return short-lived probe session ids.
+- Record accepted and rejected probe session counters in `/health`.
+
 Next:
 
-- Add structured listener health and bind error reporting.
-- Add per-client session keys.
-- Add per-user/device/game fields to session state.
+- Add structured bind error reporting.
+- Enforce short-lived client tokens.
+- Store active UDP sessions with idle expiry.
 
 ## P3: Control Plane
 

@@ -249,6 +249,78 @@ base64(sha256(body))
 The JSON body includes `node_id`, `config_revision`, `node_version`, `status`,
 `timestamp`, and a full health snapshot.
 
+## v0.4.0 Client Probe Contract
+
+The TCP/UDP listener still accepts the legacy text payload:
+
+```text
+ping
+```
+
+and returns the old readiness string. New clients should send a JSON probe
+packet over TCP or UDP:
+
+```json
+{
+  "type": "probe",
+  "protocol": "xaccel/1",
+  "client_nonce": "client-random",
+  "user_id": 1001,
+  "device_id": "pc-001",
+  "game_id": 8888,
+  "transport": "udp",
+  "token": "short-lived-token"
+}
+```
+
+Response:
+
+```json
+{
+  "type": "probe.ok",
+  "protocol": "xaccel/1",
+  "node_id": 1,
+  "node_version": "0.4.0",
+  "server_time": 1779250000,
+  "transport": "udp",
+  "requested_transport": "udp",
+  "client_nonce": "client-random",
+  "session": {
+    "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
+    "status": "probe_only",
+    "ttl_sec": 30,
+    "auth_required": true,
+    "credential_present": true,
+    "user_id": 1001,
+    "device_id": "pc-001",
+    "game_id": 8888
+  },
+  "capabilities": [
+    "tcp_probe",
+    "udp_probe",
+    "token_auth_placeholder",
+    "session_stats"
+  ]
+}
+```
+
+Invalid structured requests return:
+
+```json
+{
+  "type": "probe.error",
+  "protocol": "xaccel/1",
+  "error": {
+    "code": "invalid_probe",
+    "message": "protocol must be xaccel/1"
+  }
+}
+```
+
+The token is currently accepted as a placeholder only. The next backend stage
+must issue short-lived tokens and the node must verify them before creating
+real forwarding sessions.
+
 ## 客户端连接意图
 
 游戏规则不是直接给节点消费，而是客户端生成连接意图后由后台调度。

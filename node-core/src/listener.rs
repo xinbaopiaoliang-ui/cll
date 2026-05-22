@@ -1,5 +1,9 @@
 use crate::{
     config::{NetworkConfig, NodeConfig},
+    session::{
+        build_probe_error, build_probe_response, parse_client_message, ParsedClientMessage,
+        TransportKind,
+    },
     state::RuntimeState,
 };
 use anyhow::{bail, Context};
@@ -76,9 +80,15 @@ async fn run_udp_listener(socket: UdpSocket, state: RuntimeState) -> anyhow::Res
         state.stats().record_udp_rx(size as u64);
         debug!(%peer, size, "UDP packet received");
 
-        match socket.send_to(UDP_PROBE_RESPONSE, peer).await {
+        let response = handle_client_payload(&buf[..size], &state, TransportKind::Udp, peer)
+            .unwrap_or_else(|error| {
+                warn!(%peer, ?error, "failed to build UDP response");
+                UDP_PROBE_RESPONSE.to_vec()
+            });
+
+        match socket.send_to(&response, peer).await {
             Ok(sent) => state.stats().record_udp_tx(sent as u64),
-            Err(error) => warn!(%peer, ?error, "failed to send UDP probe response"),
+            Err(error) => warn!(%peer, ?error, "failed to send UDP response"),
         }
     }
 }
@@ -105,8 +115,37 @@ async fn handle_tcp_connection(mut stream: TcpStream, state: RuntimeState) -> an
     let size = stream.read(&mut buf).await?;
     state.stats().record_tcp_rx(size as u64);
 
-    stream.write_all(TCP_PROBE_RESPONSE).await?;
-    state.stats().record_tcp_tx(TCP_PROBE_RESPONSE.len() as u64);
+    let response = handle_client_payload(
+        &buf[..size],
+        &state,
+        TransportKind::Tcp,
+        stream.peer_addr()?,
+    )
+    .unwrap_or_else(|error| {
+        warn!(?error, "failed to build TCP response");
+        TCP_PROBE_RESPONSE.to_vec()
+    });
+
+    stream.write_all(&response).await?;
+    state.stats().record_tcp_tx(response.len() as u64);
     stream.shutdown().await?;
     Ok(())
+}
+
+fn handle_client_payload(
+    payload: &[u8],
+    state: &RuntimeState,
+    transport: TransportKind,
+    peer: SocketAddr,
+) -> anyhow::Result<Vec<u8>> {
+    match parse_client_message(payload) {
+        ParsedClientMessage::LegacyPing => Ok(match transport {
+            TransportKind::Tcp => TCP_PROBE_RESPONSE.to_vec(),
+            TransportKind::Udp => UDP_PROBE_RESPONSE.to_vec(),
+        }),
+        ParsedClientMessage::Probe(request) => {
+            build_probe_response(state, transport, peer, request)
+        }
+        ParsedClientMessage::Invalid(message) => build_probe_error(state, transport, message),
+    }
 }

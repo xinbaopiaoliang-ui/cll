@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.3.0`.
+Current version: `v0.4.0`.
 
 The node can:
 
@@ -13,6 +13,8 @@ The node can:
 - expose `127.0.0.1:9876/health`;
 - listen on the configured TCP/UDP `server_ip:server_port`;
 - count basic TCP/UDP traffic;
+- answer structured `xaccel/1` client probe requests with a short-lived
+  probe session id;
 - optionally report signed health snapshots to the backend control plane.
 
 It does not yet implement real game traffic forwarding.
@@ -22,8 +24,8 @@ It does not yet implement real game traffic forwarding.
 From the local repository:
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 GitHub Actions will publish:
@@ -116,7 +118,59 @@ Expected fields:
 }
 ```
 
-## 5. Optional Control Plane Report
+## 5. Check Structured Client Probe
+
+The legacy `ping` probe is kept for quick manual checks. Clients should use a
+JSON probe request so the node can allocate a probe session and return its
+runtime capabilities.
+
+TCP:
+
+```bash
+printf '{"type":"probe","protocol":"xaccel/1","client_nonce":"n1","user_id":1001,"device_id":"pc-001","game_id":8888,"transport":"tcp"}\n' | nc -w 2 YOUR_SERVER_IP 666
+```
+
+UDP:
+
+```bash
+printf '{"type":"probe","protocol":"xaccel/1","client_nonce":"n2","user_id":1001,"device_id":"pc-001","game_id":8888,"transport":"udp"}\n' | nc -u -w 2 YOUR_SERVER_IP 666
+```
+
+Expected response shape:
+
+```json
+{
+  "type": "probe.ok",
+  "protocol": "xaccel/1",
+  "node_id": 1,
+  "node_version": "0.4.0",
+  "transport": "udp",
+  "requested_transport": "udp",
+  "session": {
+    "session_id": "ps-udp-...",
+    "status": "probe_only",
+    "ttl_sec": 30,
+    "auth_required": true,
+    "credential_present": false,
+    "user_id": 1001,
+    "device_id": "pc-001",
+    "game_id": 8888
+  }
+}
+```
+
+Call health again and check:
+
+```json
+{
+  "sessions": {
+    "probe_sessions_total": 2,
+    "probe_rejected": 0
+  }
+}
+```
+
+## 6. Optional Control Plane Report
 
 Standalone installs keep backend reporting disabled by default because
 `https://api.example.com` is only a placeholder. When the real backend endpoint
@@ -150,7 +204,7 @@ X-Node-Signature
 
 Health exposes report status under `control_plane`.
 
-## 6. Placeholder Mode
+## 7. Placeholder Mode
 
 Only use this when the GitHub Release is not ready and you want to test the
 installer/systemd path:
@@ -165,7 +219,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
   --allow-placeholder
 ```
 
-## 7. Uninstall
+## 8. Uninstall
 
 Keep data and logs:
 
@@ -182,7 +236,8 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 ## Current Limits
 
 - GitHub Actions currently builds Linux `x86_64` only.
-- TCP/UDP listener currently returns probe responses and records counters.
+- TCP/UDP listener currently returns legacy and structured probe responses.
 - Control-plane reporting is implemented, but backend config sync and websocket
   commands are still pending.
-- Real game acceleration, relay, and user authentication are still pending.
+- Real game acceleration, relay forwarding, and token authentication enforcement
+  are still pending.

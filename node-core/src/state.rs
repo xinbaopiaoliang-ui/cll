@@ -72,6 +72,9 @@ pub struct TrafficSnapshot {
 #[derive(Debug, Serialize)]
 pub struct SessionSnapshot {
     pub active_tcp_connections: u64,
+    pub probe_sessions_total: u64,
+    pub probe_rejected: u64,
+    pub last_probe_session_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -97,6 +100,10 @@ pub struct RuntimeStats {
     tcp_active: AtomicU64,
     tcp_rx_bytes: AtomicU64,
     tcp_tx_bytes: AtomicU64,
+    probe_sequence: AtomicU64,
+    probe_sessions_total: AtomicU64,
+    probe_rejected: AtomicU64,
+    last_probe_session_id: Mutex<Option<String>>,
     control_last_success_at: AtomicU64,
     control_last_failure_at: AtomicU64,
     control_last_http_status: AtomicU64,
@@ -233,6 +240,21 @@ impl RuntimeStats {
         self.tcp_tx_bytes.fetch_add(bytes, Ordering::Relaxed);
     }
 
+    pub fn next_probe_sequence(&self) -> u64 {
+        self.probe_sequence.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    pub fn record_probe_session(&self, session_id: String) {
+        self.probe_sessions_total.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut last_probe_session_id) = self.last_probe_session_id.lock() {
+            *last_probe_session_id = Some(session_id);
+        }
+    }
+
+    pub fn record_probe_rejected(&self) {
+        self.probe_rejected.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_control_success(&self, http_status: u16) {
         self.control_report_ok.fetch_add(1, Ordering::Relaxed);
         self.control_last_success_at
@@ -270,8 +292,17 @@ impl RuntimeStats {
     }
 
     pub fn session_snapshot(&self) -> SessionSnapshot {
+        let last_probe_session_id = self
+            .last_probe_session_id
+            .lock()
+            .ok()
+            .and_then(|last_probe_session_id| last_probe_session_id.clone());
+
         SessionSnapshot {
             active_tcp_connections: self.tcp_active.load(Ordering::Relaxed),
+            probe_sessions_total: self.probe_sessions_total.load(Ordering::Relaxed),
+            probe_rejected: self.probe_rejected.load(Ordering::Relaxed),
+            last_probe_session_id,
         }
     }
 

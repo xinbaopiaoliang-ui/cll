@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.3.0
+  version: 0.4.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -318,6 +318,93 @@ components:
           type: object
         system:
           type: object
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+    ClientProbeRequest:
+      type: object
+      description: JSON packet sent by the client directly to a node TCP/UDP listener.
+      required:
+        - type
+        - protocol
+      properties:
+        type:
+          type: string
+          enum: [probe]
+        protocol:
+          type: string
+          enum: [xaccel/1]
+        client_nonce:
+          type: string
+        user_id:
+          type: integer
+        device_id:
+          type: string
+        game_id:
+          type: integer
+        transport:
+          type: string
+          enum: [tcp, udp]
+        token:
+          type: string
+          description: Short-lived client credential. Placeholder in v0.4.0.
+    ClientProbeResponse:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [probe.ok, probe.error]
+        protocol:
+          type: string
+          enum: [xaccel/1]
+        node_id:
+          type: integer
+          nullable: true
+        node_version:
+          type: string
+        server_time:
+          type: integer
+        transport:
+          type: string
+          enum: [tcp, udp]
+        requested_transport:
+          type: string
+          nullable: true
+          enum: [tcp, udp]
+        client_nonce:
+          type: string
+          nullable: true
+        session:
+          type: object
+          properties:
+            session_id:
+              type: string
+            status:
+              type: string
+              enum: [probe_only]
+            ttl_sec:
+              type: integer
+            auth_required:
+              type: boolean
+            credential_present:
+              type: boolean
+            user_id:
+              type: integer
+              nullable: true
+            device_id:
+              type: string
+              nullable: true
+            game_id:
+              type: integer
+              nullable: true
+        capabilities:
+          type: array
+          items:
+            type: string
         error:
           type: object
           properties:
