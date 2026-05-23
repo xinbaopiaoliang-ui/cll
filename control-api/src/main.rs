@@ -324,7 +324,7 @@ struct AdminNodeRow {
     area: String,
     tag: Option<String>,
     bandwidth_quality: String,
-    disable_quic: u8,
+    disable_quic: i8,
     status: String,
     kernel_version: Option<String>,
     config_revision: u64,

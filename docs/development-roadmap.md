@@ -125,7 +125,7 @@ Done in `v0.13.0`:
   runtime status from signed reports.
 - Keep standalone reinstall identity data consistent when changing panel URLs.
 
-Done in `v0.14.0`:
+Done in `v0.14.1`:
 
 - Add token-protected admin node list and detail endpoints.
 - Add admin node status update endpoint for draining, disabling, and recovery
