@@ -1,0 +1,846 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>XAccel 控制台</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --panel: #ffffff;
+        --panel-soft: #fbfcfd;
+        --text: #17212b;
+        --muted: #637083;
+        --faint: #8b97a8;
+        --line: #dce3ea;
+        --line-strong: #c9d3de;
+        --accent: #17786f;
+        --accent-strong: #0f5f58;
+        --ok: #13835f;
+        --warn: #a96717;
+        --bad: #b42318;
+        --idle: #7a8492;
+        --shadow: 0 18px 45px -30px rgba(23, 33, 43, 0.36);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(246, 247, 249, 0)),
+          var(--bg);
+        color: var(--text);
+        font-family:
+          "Geist", "Satoshi", "Segoe UI", "Microsoft YaHei", system-ui,
+          sans-serif;
+        letter-spacing: 0;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        border: 1px solid var(--line-strong);
+        background: var(--panel);
+        color: var(--text);
+        min-height: 36px;
+        padding: 0 14px;
+        border-radius: 7px;
+        cursor: pointer;
+        transition:
+          transform 160ms ease,
+          border-color 160ms ease,
+          background 160ms ease;
+      }
+
+      button:hover {
+        border-color: var(--accent);
+      }
+
+      button:active {
+        transform: translateY(1px) scale(0.99);
+      }
+
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #ffffff;
+      }
+
+      input {
+        width: 100%;
+        min-height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 7px;
+        background: #ffffff;
+        color: var(--text);
+        outline: none;
+      }
+
+      input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(23, 120, 111, 0.13);
+      }
+
+      .shell {
+        max-width: 1380px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: minmax(260px, 1fr) minmax(420px, 0.86fr);
+        gap: 24px;
+        align-items: end;
+        margin-bottom: 22px;
+      }
+
+      .brand {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .eyebrow {
+        color: var(--accent-strong);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(28px, 4vw, 46px);
+        line-height: 1;
+        font-weight: 760;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .authbar {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 10px;
+        align-items: end;
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+
+      label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 680;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: 1.2fr repeat(4, minmax(120px, 0.65fr));
+        gap: 0;
+        margin-bottom: 18px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .summary-cell {
+        min-height: 84px;
+        padding: 16px 18px;
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 8px;
+      }
+
+      .summary-cell:last-child {
+        border-right: 0;
+      }
+
+      .summary-label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 680;
+      }
+
+      .summary-value {
+        font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+        font-size: 28px;
+        line-height: 1;
+        font-weight: 760;
+      }
+
+      .summary-note {
+        color: var(--faint);
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.54fr) minmax(360px, 0.86fr);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .panel-head {
+        min-height: 58px;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        align-items: center;
+      }
+
+      .panel-title {
+        font-size: 16px;
+        font-weight: 760;
+      }
+
+      .panel-meta {
+        color: var(--muted);
+        font-size: 12px;
+        font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+      }
+
+      .table-wrap {
+        overflow: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 760px;
+      }
+
+      th,
+      td {
+        padding: 13px 14px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: middle;
+        font-size: 13px;
+      }
+
+      th {
+        background: var(--panel-soft);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 760;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      tbody tr {
+        cursor: pointer;
+        transition: background 150ms ease;
+      }
+
+      tbody tr:hover,
+      tbody tr.selected {
+        background: #f2f7f6;
+      }
+
+      .node-name {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .strong {
+        font-weight: 720;
+      }
+
+      .mono {
+        font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-weight: 680;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--idle);
+        box-shadow: 0 0 0 3px rgba(122, 132, 146, 0.12);
+        flex: 0 0 auto;
+      }
+
+      .status.ok .dot {
+        background: var(--ok);
+        box-shadow: 0 0 0 3px rgba(19, 131, 95, 0.13);
+      }
+
+      .status.warn .dot {
+        background: var(--warn);
+        box-shadow: 0 0 0 3px rgba(169, 103, 23, 0.13);
+      }
+
+      .status.bad .dot {
+        background: var(--bad);
+        box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.13);
+      }
+
+      .detail-body {
+        padding: 0;
+      }
+
+      .detail-section {
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .detail-section:last-child {
+        border-bottom: 0;
+      }
+
+      .detail-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .metric {
+        border-top: 1px solid var(--line);
+        padding-top: 11px;
+        min-width: 0;
+      }
+
+      .metric-label {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 720;
+      }
+
+      .metric-value {
+        margin-top: 6px;
+        font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+        font-size: 18px;
+        font-weight: 760;
+        overflow-wrap: anywhere;
+      }
+
+      .report-list {
+        display: grid;
+        gap: 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .report-row {
+        display: grid;
+        grid-template-columns: 72px 1fr 92px;
+        gap: 10px;
+        padding: 11px 12px;
+        border-bottom: 1px solid var(--line);
+        font-size: 12px;
+      }
+
+      .report-row:last-child {
+        border-bottom: 0;
+      }
+
+      pre {
+        margin: 0;
+        max-height: 260px;
+        overflow: auto;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #111a22;
+        color: #d8e3ea;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .empty,
+      .error,
+      .loading {
+        padding: 36px 24px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .error {
+        color: var(--bad);
+      }
+
+      .skeleton {
+        display: block;
+        height: 14px;
+        border-radius: 5px;
+        background: linear-gradient(90deg, #eef2f5, #f8fafb, #eef2f5);
+        background-size: 220% 100%;
+        animation: shimmer 1.2s ease-in-out infinite;
+      }
+
+      @keyframes shimmer {
+        0% {
+          background-position: 100% 0;
+        }
+        100% {
+          background-position: -100% 0;
+        }
+      }
+
+      @media (max-width: 980px) {
+        .shell {
+          padding: 16px;
+        }
+
+        .topbar,
+        .layout,
+        .summary {
+          grid-template-columns: 1fr;
+        }
+
+        .summary-cell,
+        .summary-cell:last-child {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .summary-cell:last-child {
+          border-bottom: 0;
+        }
+
+        .authbar {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar">
+        <div class="brand">
+          <div class="eyebrow">XAccel Control</div>
+          <h1>节点控制台</h1>
+          <div class="subtitle" id="statusLine">等待连接控制面</div>
+        </div>
+        <div class="authbar">
+          <div class="field">
+            <label for="tokenInput">管理员 Token</label>
+            <input id="tokenInput" type="password" autocomplete="off" />
+          </div>
+          <button id="saveToken" class="primary" type="button">保存</button>
+          <button id="refreshNow" type="button">刷新</button>
+        </div>
+      </section>
+
+      <section class="summary" id="summary">
+        <div class="summary-cell">
+          <div class="summary-label">控制面</div>
+          <div class="summary-value">--</div>
+          <div class="summary-note">未加载</div>
+        </div>
+        <div class="summary-cell">
+          <div class="summary-label">节点数</div>
+          <div class="summary-value">--</div>
+          <div class="summary-note">total</div>
+        </div>
+        <div class="summary-cell">
+          <div class="summary-label">在线</div>
+          <div class="summary-value">--</div>
+          <div class="summary-note">online</div>
+        </div>
+        <div class="summary-cell">
+          <div class="summary-label">活跃会话</div>
+          <div class="summary-value">--</div>
+          <div class="summary-note">sessions</div>
+        </div>
+        <div class="summary-cell">
+          <div class="summary-label">最近上报</div>
+          <div class="summary-value">--</div>
+          <div class="summary-note">last report</div>
+        </div>
+      </section>
+
+      <section class="layout">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-title">节点列表</div>
+              <div class="panel-meta" id="listMeta">limit 500</div>
+            </div>
+            <button id="toggleAuto" type="button">自动刷新：开</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>节点</th>
+                  <th>状态</th>
+                  <th>入口</th>
+                  <th>版本</th>
+                  <th>区域</th>
+                  <th>上报</th>
+                  <th>会话</th>
+                </tr>
+              </thead>
+              <tbody id="nodeRows">
+                <tr>
+                  <td colspan="7"><span class="skeleton"></span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-title" id="detailTitle">节点详情</div>
+              <div class="panel-meta" id="detailMeta">未选择</div>
+            </div>
+          </div>
+          <div class="detail-body" id="detailBody">
+            <div class="empty">选择一个节点</div>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        token: localStorage.getItem("xaccel_admin_token") || "",
+        nodes: [],
+        selectedId: null,
+        serverTime: null,
+        autoRefresh: true,
+        timer: null,
+      };
+
+      const els = {
+        tokenInput: document.getElementById("tokenInput"),
+        saveToken: document.getElementById("saveToken"),
+        refreshNow: document.getElementById("refreshNow"),
+        toggleAuto: document.getElementById("toggleAuto"),
+        statusLine: document.getElementById("statusLine"),
+        summary: document.getElementById("summary"),
+        listMeta: document.getElementById("listMeta"),
+        nodeRows: document.getElementById("nodeRows"),
+        detailTitle: document.getElementById("detailTitle"),
+        detailMeta: document.getElementById("detailMeta"),
+        detailBody: document.getElementById("detailBody"),
+      };
+
+      els.tokenInput.value = state.token;
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function formatTime(unix) {
+        if (!unix) return "--";
+        return new Date(unix * 1000).toLocaleString("zh-CN", {
+          hour12: false,
+        });
+      }
+
+      function ageText(unix) {
+        if (!unix || !state.serverTime) return "--";
+        const delta = Math.max(0, state.serverTime - unix);
+        if (delta < 60) return `${delta}s`;
+        if (delta < 3600) return `${Math.floor(delta / 60)}m`;
+        return `${Math.floor(delta / 3600)}h`;
+      }
+
+      function statusClass(node) {
+        const age = node.last_report_at && state.serverTime
+          ? state.serverTime - node.last_report_at
+          : null;
+        if (node.status !== "online") return "bad";
+        if (age !== null && age > 90) return "warn";
+        return "ok";
+      }
+
+      async function api(path, options = {}) {
+        if (!state.token) {
+          throw new Error("管理员 Token 未设置");
+        }
+        const headers = {
+          Authorization: `Bearer ${state.token}`,
+          ...(options.headers || {}),
+        };
+        const response = await fetch(path, { ...options, headers });
+        const text = await response.text();
+        let data = null;
+        if (text) {
+          try {
+            data = JSON.parse(text);
+          } catch {
+            data = text;
+          }
+        }
+        if (!response.ok) {
+          const message = data?.error?.message || data?.error?.code || response.statusText;
+          throw new Error(message);
+        }
+        return data;
+      }
+
+      function renderSummary(data) {
+        const nodes = data.nodes || [];
+        const online = nodes.filter((node) => node.status === "online").length;
+        const stale = nodes.filter((node) => statusClass(node) === "warn").length;
+        const activeSessions = nodes.reduce(
+          (sum, node) => sum + (node.latest_report?.active_sessions || 0),
+          0,
+        );
+        const latestReport = nodes.reduce(
+          (max, node) => Math.max(max, node.last_report_at || 0),
+          0,
+        );
+
+        els.summary.innerHTML = `
+          <div class="summary-cell">
+            <div class="summary-label">控制面</div>
+            <div class="summary-value">${escapeHtml(data.server_time || "--")}</div>
+            <div class="summary-note">${escapeHtml(formatTime(data.server_time))}</div>
+          </div>
+          <div class="summary-cell">
+            <div class="summary-label">节点数</div>
+            <div class="summary-value">${nodes.length}</div>
+            <div class="summary-note">total</div>
+          </div>
+          <div class="summary-cell">
+            <div class="summary-label">在线</div>
+            <div class="summary-value">${online}</div>
+            <div class="summary-note">${stale} stale</div>
+          </div>
+          <div class="summary-cell">
+            <div class="summary-label">活跃会话</div>
+            <div class="summary-value">${activeSessions}</div>
+            <div class="summary-note">latest reports</div>
+          </div>
+          <div class="summary-cell">
+            <div class="summary-label">最近上报</div>
+            <div class="summary-value">${escapeHtml(ageText(latestReport))}</div>
+            <div class="summary-note">${escapeHtml(formatTime(latestReport))}</div>
+          </div>
+        `;
+      }
+
+      function renderNodes() {
+        if (!state.nodes.length) {
+          els.nodeRows.innerHTML = `<tr><td colspan="7" class="empty">暂无节点</td></tr>`;
+          return;
+        }
+
+        els.nodeRows.innerHTML = state.nodes
+          .map((node) => {
+            const selected = node.id === state.selectedId ? "selected" : "";
+            const report = node.latest_report || {};
+            return `
+              <tr class="${selected}" data-node-id="${node.id}">
+                <td>
+                  <div class="node-name">
+                    <span class="strong">${escapeHtml(node.name)}</span>
+                    <span class="muted mono">id ${node.id}</span>
+                  </div>
+                </td>
+                <td>
+                  <span class="status ${statusClass(node)}">
+                    <span class="dot"></span>
+                    ${escapeHtml(node.status)}
+                  </span>
+                </td>
+                <td class="mono">${escapeHtml(node.endpoint)}</td>
+                <td class="mono">${escapeHtml(node.kernel_version || "--")}</td>
+                <td>${escapeHtml(node.area)} ${node.tag ? `<span class="muted">/ ${escapeHtml(node.tag)}</span>` : ""}</td>
+                <td>
+                  <div class="mono">${escapeHtml(ageText(node.last_report_at))}</div>
+                  <div class="muted">${escapeHtml(formatTime(node.last_report_at))}</div>
+                </td>
+                <td class="mono">${report.active_sessions || 0}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      function metric(label, value) {
+        return `
+          <div class="metric">
+            <div class="metric-label">${escapeHtml(label)}</div>
+            <div class="metric-value">${escapeHtml(value)}</div>
+          </div>
+        `;
+      }
+
+      function renderDetail(data) {
+        const node = data.node;
+        const report = data.recent_reports?.[0];
+        const raw = report?.raw || {};
+        const health = raw.health || {};
+        const listeners = health.listeners || {};
+        const traffic = health.traffic || {};
+        const sessions = health.sessions || {};
+        const control = health.control_plane || {};
+
+        els.detailTitle.textContent = node.name;
+        els.detailMeta.textContent = `${node.endpoint} / id ${node.id}`;
+        els.detailBody.innerHTML = `
+          <div class="detail-section">
+            <div class="detail-grid">
+              ${metric("状态", node.status)}
+              ${metric("版本", node.kernel_version || "--")}
+              ${metric("监听", listeners.listen_addr || "--")}
+              ${metric("控制面", control.last_http_status || "--")}
+            </div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-grid">
+              ${metric("UDP RX", traffic.udp_rx_packets || 0)}
+              ${metric("UDP TX", traffic.udp_tx_packets || 0)}
+              ${metric("TCP Accepted", traffic.tcp_accepted || 0)}
+              ${metric("Active UDP", sessions.active_udp_sessions || 0)}
+              ${metric("Auth OK", sessions.auth_ok || 0)}
+              ${metric("Relay Timeout", sessions.udp_relay_timeout || 0)}
+            </div>
+          </div>
+          <div class="detail-section">
+            <div class="panel-title" style="margin-bottom: 12px;">最近上报</div>
+            <div class="report-list">
+              ${(data.recent_reports || [])
+                .slice(0, 8)
+                .map(
+                  (item) => `
+                    <div class="report-row">
+                      <span class="mono">#${item.id}</span>
+                      <span>${escapeHtml(item.status)}</span>
+                      <span class="mono">${escapeHtml(ageText(item.reported_at))}</span>
+                    </div>
+                  `,
+                )
+                .join("") || '<div class="empty">暂无上报</div>'}
+            </div>
+          </div>
+          <div class="detail-section">
+            <div class="panel-title" style="margin-bottom: 12px;">Health JSON</div>
+            <pre>${escapeHtml(JSON.stringify(health, null, 2))}</pre>
+          </div>
+        `;
+      }
+
+      async function loadNodes({ silent = false } = {}) {
+        if (!silent) {
+          els.statusLine.textContent = "正在加载";
+        }
+        const data = await api("/api/admin/v1/nodes?limit=500");
+        state.nodes = data.nodes || [];
+        state.serverTime = data.server_time;
+        if (!state.selectedId && state.nodes.length) {
+          state.selectedId = state.nodes[0].id;
+        }
+        renderSummary(data);
+        renderNodes();
+        els.listMeta.textContent = `${state.nodes.length} nodes / ${formatTime(data.server_time)}`;
+        els.statusLine.textContent = "已连接";
+        if (state.selectedId) {
+          await loadDetail(state.selectedId, { silent: true });
+        }
+      }
+
+      async function loadDetail(nodeId, { silent = false } = {}) {
+        state.selectedId = Number(nodeId);
+        renderNodes();
+        if (!silent) {
+          els.detailBody.innerHTML = `<div class="loading"><span class="skeleton"></span></div>`;
+        }
+        const data = await api(`/api/admin/v1/nodes/${nodeId}?limit=20`);
+        renderDetail(data);
+      }
+
+      function showError(error) {
+        els.statusLine.textContent = error.message;
+        els.nodeRows.innerHTML = `<tr><td colspan="7" class="error">${escapeHtml(error.message)}</td></tr>`;
+      }
+
+      function resetTimer() {
+        if (state.timer) {
+          clearInterval(state.timer);
+          state.timer = null;
+        }
+        if (state.autoRefresh) {
+          state.timer = setInterval(() => {
+            loadNodes({ silent: true }).catch(showError);
+          }, 30000);
+        }
+        els.toggleAuto.textContent = `自动刷新：${state.autoRefresh ? "开" : "关"}`;
+      }
+
+      els.saveToken.addEventListener("click", () => {
+        state.token = els.tokenInput.value.trim();
+        localStorage.setItem("xaccel_admin_token", state.token);
+        loadNodes().catch(showError);
+      });
+
+      els.refreshNow.addEventListener("click", () => {
+        loadNodes().catch(showError);
+      });
+
+      els.toggleAuto.addEventListener("click", () => {
+        state.autoRefresh = !state.autoRefresh;
+        resetTimer();
+      });
+
+      els.nodeRows.addEventListener("click", (event) => {
+        const row = event.target.closest("tr[data-node-id]");
+        if (row) {
+          loadDetail(row.dataset.nodeId).catch(showError);
+        }
+      });
+
+      resetTimer();
+      if (state.token) {
+        loadNodes().catch(showError);
+      }
+    </script>
+  </body>
+</html>

@@ -6,7 +6,8 @@ This service owns client `connect-intent` scheduling. It reads MySQL node and
 route tables through SQLx, selects an online node, signs a short-lived `xat.v1`
 credential, stores the intent, and returns the node candidate to the client.
 It also receives HMAC-signed node runtime reports and stores them in MySQL.
-Admin node management APIs are protected by an admin bearer token.
+Admin node management APIs are protected by an admin bearer token. The embedded
+dashboard is available at `/admin` and uses the same bearer token in the browser.
 
 ## Run
 
@@ -25,6 +26,7 @@ cargo run --manifest-path control-api/Cargo.toml -- \
 
 ```text
 GET  /health
+GET  /admin
 POST /api/client/v1/connect-intent
 POST /api/node/v1/report
 POST /api/admin/v1/nodes
@@ -48,6 +50,13 @@ is true. The request uses `X-Node-Id`, `X-Node-Timestamp`, `X-Node-Nonce`,
 `X-Node-Body-Sha256`, and `X-Node-Signature` headers.
 
 Admin requests use:
+
+```text
+http://CONTROL_PUBLIC_IP:18080/admin
+```
+
+The page stores the bearer token in browser local storage and calls the same
+admin APIs listed below.
 
 ```bash
 curl -fsSL http://127.0.0.1:18080/api/admin/v1/nodes \

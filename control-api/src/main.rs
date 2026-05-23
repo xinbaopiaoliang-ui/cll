@@ -3,7 +3,7 @@ use axum::{
     body::Bytes,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     routing::{get, patch, post},
     Json, Router,
 };
@@ -38,6 +38,7 @@ const MAX_BOOTSTRAP_TTL_SEC: u64 = 86_400;
 const DEFAULT_INSTALL_URL: &str =
     "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const ADMIN_DASHBOARD_HTML: &str = include_str!("../static/admin-dashboard.html");
 
 #[derive(Debug, Parser)]
 #[command(name = "xaccel-control-api")]
@@ -504,6 +505,7 @@ async fn main() -> anyhow::Result<()> {
             .map(trim_trailing_slash),
     };
     let app = Router::new()
+        .route("/admin", get(admin_dashboard))
         .route("/health", get(health))
         .route("/api/client/v1/connect-intent", post(connect_intent))
         .route(NODE_BOOTSTRAP_PATH, post(node_bootstrap))
@@ -533,6 +535,10 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("control api server stopped")?;
     Ok(())
+}
+
+async fn admin_dashboard() -> Html<&'static str> {
+    Html(ADMIN_DASHBOARD_HTML)
 }
 
 fn validate_cli(cli: &Cli) -> anyhow::Result<()> {
@@ -2247,6 +2253,12 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", "Bearer secret".parse().unwrap());
         assert_eq!(admin_token_from_headers(&headers), Some("secret"));
+    }
+
+    #[test]
+    fn embeds_admin_dashboard_html() {
+        assert!(ADMIN_DASHBOARD_HTML.contains("节点控制台"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
     }
 
     #[test]

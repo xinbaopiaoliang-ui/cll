@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.16.2`.
+Current version: `v0.17.0`.
 
 The node can:
 
@@ -24,6 +24,7 @@ The node can:
 - optionally report signed health snapshots to the backend control plane and
   store them in MySQL through `xaccel-control-api`;
 - expose token-protected admin node APIs for backend Web panels;
+- serve a browser dashboard at `/admin` backed by token-protected admin APIs;
 - validate the full flow with the packaged `xaccel-client-probe` binary.
 
 It does not yet fetch production game rules or connect-intents from a real
@@ -34,8 +35,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.16.2
-git push origin v0.16.2
+git tag v0.17.0
+git push origin v0.17.0
 ```
 
 GitHub Actions will publish:
@@ -503,6 +504,12 @@ curl -fsSL http://127.0.0.1:18080/api/admin/v1/nodes \
 
 curl -fsSL http://127.0.0.1:18080/api/admin/v1/nodes/1 \
   -H "Authorization: Bearer ${ADMIN_TOKEN}"
+```
+
+Open the browser dashboard and paste the same admin token:
+
+```text
+http://CONTROL_PUBLIC_IP:18080/admin
 ```
 
 Create a node record without loading seed SQL:

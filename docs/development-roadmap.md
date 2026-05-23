@@ -159,6 +159,12 @@ Done in `v0.16.0`:
 - Validate node endpoint, quality, relay, area, tag, and operator IP fields.
 - Return the created node in the same shape used by node list/detail APIs.
 
+Done in `v0.17.0`:
+
+- Add an embedded `/admin` dashboard to `xaccel-control-api`.
+- Show node status, endpoint, versions, report age, listener state, traffic,
+  sessions, and recent report JSON through existing admin APIs.
+
 Goals:
 
 - Implement backend handshake.
