@@ -1,11 +1,18 @@
-use crate::{config::ControlPlaneConfig, state::RuntimeState};
+use crate::{
+    config::{
+        persist_remote_network_config, BandwidthQuality, ControlPlaneConfig, NetworkConfig,
+        OperatorIps,
+    },
+    state::RuntimeState,
+};
 use anyhow::{bail, Context};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use hmac::{Hmac, Mac};
 use reqwest::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -18,9 +25,10 @@ use tracing::{info, warn};
 type HmacSha256 = Hmac<Sha256>;
 
 const REPORT_PATH: &str = "/api/node/v1/report";
+const CONFIG_PATH: &str = "/api/node/v1/config";
 static NONCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-pub fn spawn_control_plane(state: RuntimeState) -> Vec<JoinHandle<()>> {
+pub fn spawn_control_plane(state: RuntimeState, config_path: PathBuf) -> Vec<JoinHandle<()>> {
     let Some(control) = state.config().control.clone() else {
         info!("control plane disabled: missing [control] config");
         return Vec::new();
@@ -56,12 +64,18 @@ pub fn spawn_control_plane(state: RuntimeState) -> Vec<JoinHandle<()>> {
         .expect("reqwest client builds");
 
     let task_state = state.clone();
+    let config_state = state.clone();
     let panel_url = panel_url.trim_end_matches('/').to_string();
+    let config_panel_url = panel_url.clone();
     let node_secret = node_secret.to_string();
+    let config_node_secret = node_secret.clone();
+    let config_poll_interval_sec = control.config_poll_interval_sec.max(5);
+    let report_client = client.clone();
+    let config_client = client;
 
     let task = tokio::spawn(async move {
         run_report_loop(
-            client,
+            report_client,
             task_state,
             control,
             node_id,
@@ -72,7 +86,20 @@ pub fn spawn_control_plane(state: RuntimeState) -> Vec<JoinHandle<()>> {
         .await;
     });
 
-    vec![task]
+    let config_task = tokio::spawn(async move {
+        run_config_loop(
+            config_client,
+            config_state,
+            node_id,
+            config_panel_url,
+            config_node_secret,
+            config_poll_interval_sec,
+            config_path,
+        )
+        .await;
+    });
+
+    vec![task, config_task]
 }
 
 async fn run_report_loop(
@@ -96,17 +123,44 @@ async fn run_report_loop(
 
     loop {
         ticker.tick().await;
-        if let Err(error) = send_report(
+        if let Err(error) = send_report(&client, &state, node_id, &panel_url, &node_secret).await {
+            warn!(?error, "control plane report failed");
+        }
+    }
+}
+
+async fn run_config_loop(
+    client: Client,
+    state: RuntimeState,
+    node_id: u64,
+    panel_url: String,
+    node_secret: String,
+    config_poll_interval_sec: u64,
+    config_path: PathBuf,
+) {
+    info!(
+        %panel_url,
+        config_poll_interval_sec,
+        "control plane config sync loop started"
+    );
+
+    let mut ticker = interval(Duration::from_secs(config_poll_interval_sec));
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    loop {
+        ticker.tick().await;
+        if let Err(error) = fetch_and_apply_config(
             &client,
             &state,
             node_id,
             &panel_url,
             &node_secret,
-            control.config_revision,
+            &config_path,
         )
         .await
         {
-            warn!(?error, "control plane report failed");
+            state.stats().record_config_failure(None, error.to_string());
+            warn!(?error, "control plane config sync failed");
         }
     }
 }
@@ -127,11 +181,10 @@ async fn send_report(
     node_id: u64,
     panel_url: &str,
     node_secret: &str,
-    config_revision: u64,
 ) -> anyhow::Result<()> {
     let report = NodeReport {
         node_id,
-        config_revision,
+        config_revision: state.config_revision(),
         node_version: env!("CARGO_PKG_VERSION"),
         status: state.status(),
         timestamp: now_unix(),
@@ -179,6 +232,114 @@ async fn send_report(
         .stats()
         .record_control_failure(Some(status.as_u16()), message.clone());
     bail!("report rejected: http {} {}", status.as_u16(), message)
+}
+
+#[derive(Deserialize)]
+struct NodeConfigResponse {
+    config_revision: u64,
+    network: RemoteNetworkConfig,
+}
+
+#[derive(Deserialize)]
+struct RemoteNetworkConfig {
+    server_ip: String,
+    listen_ip: Option<String>,
+    server_port: u16,
+    relay_server_ip: Option<String>,
+    relay_server_port: Option<u16>,
+    is_support_ipv6: bool,
+    disable_quic: bool,
+    area: String,
+    bandwidth_quality: BandwidthQuality,
+    tag: Option<String>,
+    operator_ips: Option<OperatorIps>,
+}
+
+async fn fetch_and_apply_config(
+    client: &Client,
+    state: &RuntimeState,
+    node_id: u64,
+    panel_url: &str,
+    node_secret: &str,
+    config_path: &Path,
+) -> anyhow::Result<()> {
+    let body: &[u8] = b"";
+    let timestamp = now_unix();
+    let nonce = next_nonce(timestamp);
+    let signed = sign_request("GET", CONFIG_PATH, timestamp, &nonce, body, node_secret)?;
+    let url = format!("{panel_url}{CONFIG_PATH}");
+
+    let response = client
+        .get(url)
+        .header("X-Node-Id", node_id.to_string())
+        .header("X-Node-Timestamp", timestamp.to_string())
+        .header("X-Node-Nonce", &nonce)
+        .header("X-Node-Body-Sha256", signed.body_sha256)
+        .header("X-Node-Signature", signed.signature)
+        .send()
+        .await
+        .context("config request failed")?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let message = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "failed to read response body".to_string());
+        bail!(
+            "config sync rejected: http {} {}",
+            status.as_u16(),
+            trim_for_log(&message, 200)
+        );
+    }
+
+    let remote = response
+        .json::<NodeConfigResponse>()
+        .await
+        .context("failed to decode config response")?;
+    let network = NetworkConfig {
+        server_ip: remote.network.server_ip,
+        listen_ip: remote.network.listen_ip,
+        server_port: remote.network.server_port,
+        relay_server_ip: remote.network.relay_server_ip,
+        relay_server_port: remote.network.relay_server_port,
+        is_support_ipv6: remote.network.is_support_ipv6,
+        disable_quic: remote.network.disable_quic,
+        area: remote.network.area,
+        bandwidth_quality: remote.network.bandwidth_quality,
+        tag: remote.network.tag,
+        operator_ips: remote.network.operator_ips,
+    };
+
+    let should_apply = remote.config_revision > state.config_revision();
+    if should_apply {
+        if let Err(error) =
+            persist_remote_network_config(config_path, remote.config_revision, &network)
+        {
+            state.stats().record_config_failure(
+                Some(status.as_u16()),
+                format!("failed to persist remote node config: {error}"),
+            );
+            warn!(
+                ?error,
+                path = %config_path.display(),
+                "failed to persist remote node config for next restart"
+            );
+            bail!("failed to persist remote node config: {error}");
+        }
+    }
+
+    let result = state.apply_remote_network_config(remote.config_revision, network);
+    state.stats().record_config_success(status.as_u16());
+    if result.applied {
+        info!(
+            previous_revision = result.previous_revision,
+            current_revision = result.current_revision,
+            restart_required = result.restart_required,
+            "node config updated"
+        );
+    }
+    Ok(())
 }
 
 struct SignedRequest {

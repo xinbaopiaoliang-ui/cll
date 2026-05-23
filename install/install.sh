@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.18.0"
+INSTALLER_VERSION="0.19.0"
 SERVICE_NAME="xaccel-node"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-node"
@@ -295,7 +295,7 @@ bootstrap_standalone() {
   "server_port": $SERVER_PORT,
   "config_revision": 1,
   "release": {
-    "version": "0.18.0",
+      "version": "0.19.0",
     "manifest_url": ""
   },
   "standalone": true
@@ -444,6 +444,7 @@ response_file = "${DATA_DIR}/bootstrap-response.json"
 enabled = ${control_enabled}
 config_revision = ${CONFIG_REVISION}
 request_timeout_sec = 5
+config_poll_interval_sec = 30
 
 [report]
 interval_sec = 30

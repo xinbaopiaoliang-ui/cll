@@ -31,6 +31,7 @@ type HmacSha256 = Hmac<Sha256>;
 const TOKEN_PREFIX: &str = "xat";
 const TOKEN_VERSION: &str = "v1";
 const NODE_REPORT_PATH: &str = "/api/node/v1/report";
+const NODE_CONFIG_PATH: &str = "/api/node/v1/config";
 const NODE_REPORT_MAX_SKEW_SEC: u64 = 300;
 const NODE_BOOTSTRAP_PATH: &str = "/api/node/v1/bootstrap";
 const DEFAULT_BOOTSTRAP_TTL_SEC: u64 = 3600;
@@ -275,6 +276,8 @@ struct AdminCreateNodeRequest {
     tag: Option<String>,
 }
 
+type AdminUpdateNodeRequest = AdminCreateNodeRequest;
+
 #[derive(Debug, Deserialize)]
 struct AdminUpdateNodeStatusRequest {
     status: String,
@@ -323,6 +326,13 @@ struct AdminUpdateNodeStatusResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct AdminUpdateNodeResponse {
+    status: &'static str,
+    node: AdminNodeSummary,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
 struct AdminCreateBootstrapTokenResponse {
     status: &'static str,
     node_id: u64,
@@ -340,10 +350,16 @@ struct AdminNodeSummary {
     endpoint: String,
     server_ip: String,
     server_port: u32,
+    relay_server_ip: Option<String>,
+    relay_server_port: Option<u32>,
+    is_support_ipv6: bool,
     area: String,
     tag: Option<String>,
     bandwidth_quality: String,
     disable_quic: bool,
+    telecom_ip: Option<String>,
+    mobile_ip: Option<String>,
+    unicom_ip: Option<String>,
     status: String,
     kernel_version: Option<String>,
     config_revision: u64,
@@ -405,10 +421,16 @@ struct AdminNodeRow {
     name: String,
     server_ip: String,
     server_port: u32,
+    relay_server_ip: Option<String>,
+    relay_server_port: Option<u32>,
+    is_support_ipv6: i8,
     area: String,
     tag: Option<String>,
     bandwidth_quality: String,
     disable_quic: i8,
+    telecom_ip: Option<String>,
+    mobile_ip: Option<String>,
+    unicom_ip: Option<String>,
     status: String,
     kernel_version: Option<String>,
     config_revision: u64,
@@ -450,6 +472,55 @@ struct NormalizedCreateNode {
     mobile_ip: Option<String>,
     unicom_ip: Option<String>,
     tag: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct NodeConfigRow {
+    id: u64,
+    server_ip: String,
+    server_port: u32,
+    relay_server_ip: Option<String>,
+    relay_server_port: Option<u32>,
+    is_support_ipv6: i8,
+    bandwidth_quality: String,
+    disable_quic: i8,
+    area: String,
+    telecom_ip: Option<String>,
+    mobile_ip: Option<String>,
+    unicom_ip: Option<String>,
+    tag: Option<String>,
+    config_revision: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct NodeConfigResponse {
+    status: &'static str,
+    node_id: u64,
+    config_revision: u64,
+    server_time: u64,
+    network: NodeConfigNetworkResponse,
+}
+
+#[derive(Debug, Serialize)]
+struct NodeConfigNetworkResponse {
+    server_ip: String,
+    listen_ip: String,
+    server_port: u32,
+    relay_server_ip: Option<String>,
+    relay_server_port: Option<u32>,
+    is_support_ipv6: bool,
+    disable_quic: bool,
+    area: String,
+    bandwidth_quality: String,
+    tag: Option<String>,
+    operator_ips: NodeConfigOperatorIpsResponse,
+}
+
+#[derive(Debug, Serialize)]
+struct NodeConfigOperatorIpsResponse {
+    telecom_ip: Option<String>,
+    mobile_ip: Option<String>,
+    unicom_ip: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -509,12 +580,16 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health))
         .route("/api/client/v1/connect-intent", post(connect_intent))
         .route(NODE_BOOTSTRAP_PATH, post(node_bootstrap))
+        .route(NODE_CONFIG_PATH, get(node_config))
         .route(NODE_REPORT_PATH, post(node_report))
         .route(
             "/api/admin/v1/nodes",
             get(admin_list_nodes).post(admin_create_node),
         )
-        .route("/api/admin/v1/nodes/:node_id", get(admin_get_node))
+        .route(
+            "/api/admin/v1/nodes/:node_id",
+            get(admin_get_node).patch(admin_update_node),
+        )
         .route(
             "/api/admin/v1/nodes/:node_id/status",
             patch(admin_update_node_status),
@@ -637,7 +712,9 @@ async fn node_report(
     let node_secret = select_node_secret(&state.pool, header_node_id)
         .await?
         .ok_or_else(|| AppError::unauthorized("unknown_node", "node is not registered"))?;
-    verify_node_report_signature(
+    verify_node_signature(
+        "POST",
+        NODE_REPORT_PATH,
         &node_secret,
         timestamp,
         nonce,
@@ -662,6 +739,38 @@ async fn node_report(
         stored: true,
         server_time: now_unix(),
     }))
+}
+
+async fn node_config(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<NodeConfigResponse>, AppError> {
+    let node_id = required_header_u64(&headers, "X-Node-Id")?;
+    let timestamp = required_header_u64(&headers, "X-Node-Timestamp")?;
+    let nonce = required_header(&headers, "X-Node-Nonce")?;
+    let body_sha256 = required_header(&headers, "X-Node-Body-Sha256")?;
+    let signature = required_header(&headers, "X-Node-Signature")?;
+
+    validate_node_report_timestamp(timestamp)?;
+
+    let node_secret = select_node_secret(&state.pool, node_id)
+        .await?
+        .ok_or_else(|| AppError::unauthorized("unknown_node", "node is not registered"))?;
+    verify_node_signature(
+        "GET",
+        NODE_CONFIG_PATH,
+        &node_secret,
+        timestamp,
+        nonce,
+        body_sha256,
+        signature,
+        b"",
+    )?;
+
+    let row = select_node_config(&state.pool, node_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("node_not_found", "node does not exist"))?;
+    Ok(Json(NodeConfigResponse::from_row(row)))
 }
 
 async fn admin_list_nodes(
@@ -719,6 +828,25 @@ async fn admin_create_node(
         .ok_or_else(|| AppError::not_found("node_not_found", "created node does not exist"))?;
 
     Ok(Json(AdminCreateNodeResponse {
+        status: "ok",
+        node: AdminNodeSummary::from_row(node),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_update_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+    Json(request): Json<AdminUpdateNodeRequest>,
+) -> Result<Json<AdminUpdateNodeResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    update_admin_node_config(&state.pool, node_id, request).await?;
+    let node = select_admin_node(&state.pool, node_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("node_not_found", "updated node does not exist"))?;
+
+    Ok(Json(AdminUpdateNodeResponse {
         status: "ok",
         node: AdminNodeSummary::from_row(node),
         server_time: now_unix(),
@@ -1143,10 +1271,16 @@ SELECT
   n.name,
   n.server_ip,
   n.server_port,
+  n.relay_server_ip,
+  n.relay_server_port,
+  n.is_support_ipv6,
   n.area,
   n.tag,
   n.bandwidth_quality,
   n.disable_quic,
+  n.telecom_ip,
+  n.mobile_ip,
+  n.unicom_ip,
   n.status,
   n.kernel_version,
   n.config_revision,
@@ -1191,10 +1325,16 @@ SELECT
   n.name,
   n.server_ip,
   n.server_port,
+  n.relay_server_ip,
+  n.relay_server_port,
+  n.is_support_ipv6,
   n.area,
   n.tag,
   n.bandwidth_quality,
   n.disable_quic,
+  n.telecom_ip,
+  n.mobile_ip,
+  n.unicom_ip,
   n.status,
   n.kernel_version,
   n.config_revision,
@@ -1311,6 +1451,119 @@ INSERT INTO accel_nodes (
     }
 }
 
+async fn update_admin_node_config(
+    pool: &MySqlPool,
+    node_id: u64,
+    request: AdminUpdateNodeRequest,
+) -> Result<(), AppError> {
+    let node = normalize_create_node_request(&request)?;
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
+    let result = sqlx::query(
+        r#"
+UPDATE accel_nodes
+SET
+  name = ?,
+  server_ip = ?,
+  server_port = ?,
+  relay_server_ip = ?,
+  relay_server_port = ?,
+  is_support_ipv6 = ?,
+  bandwidth_quality = ?,
+  disable_quic = ?,
+  area = ?,
+  telecom_ip = ?,
+  mobile_ip = ?,
+  unicom_ip = ?,
+  tag = ?,
+  config_revision = config_revision + 1,
+  updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+"#,
+    )
+    .bind(&node.name)
+    .bind(&node.server_ip)
+    .bind(node.server_port)
+    .bind(&node.relay_server_ip)
+    .bind(node.relay_server_port)
+    .bind(node.is_support_ipv6)
+    .bind(&node.bandwidth_quality)
+    .bind(node.disable_quic)
+    .bind(&node.area)
+    .bind(&node.telecom_ip)
+    .bind(&node.mobile_ip)
+    .bind(&node.unicom_ip)
+    .bind(&node.tag)
+    .bind(node_id)
+    .execute(&mut *tx)
+    .await;
+
+    let result = match result {
+        Ok(result) => result,
+        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("1062") => {
+            return Err(AppError::conflict(
+                "node_endpoint_exists",
+                "a node with the same server_ip and server_port already exists",
+            ));
+        }
+        Err(error) => return Err(AppError::database(error)),
+    };
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::not_found("node_not_found", "node does not exist"));
+    }
+
+    let revision = sqlx::query_scalar::<_, u64>(
+        r#"
+SELECT config_revision
+FROM accel_nodes
+WHERE id = ?
+LIMIT 1
+"#,
+    )
+    .bind(node_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+    let config_json = serde_json::json!({
+        "network": {
+            "server_ip": node.server_ip,
+            "listen_ip": "0.0.0.0",
+            "server_port": node.server_port,
+            "relay_server_ip": node.relay_server_ip,
+            "relay_server_port": node.relay_server_port,
+            "is_support_ipv6": node.is_support_ipv6 != 0,
+            "disable_quic": node.disable_quic != 0,
+            "area": node.area,
+            "bandwidth_quality": node.bandwidth_quality,
+            "tag": node.tag,
+            "operator_ips": {
+                "telecom_ip": node.telecom_ip,
+                "mobile_ip": node.mobile_ip,
+                "unicom_ip": node.unicom_ip
+            }
+        }
+    });
+    sqlx::query(
+        r#"
+INSERT INTO node_config_revisions (
+  node_id,
+  revision,
+  config_json,
+  created_at
+) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(node_id)
+    .bind(revision)
+    .bind(config_json.to_string())
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    tx.commit().await.map_err(AppError::database)?;
+    Ok(())
+}
+
 async fn update_admin_node_status(
     pool: &MySqlPool,
     node_id: u64,
@@ -1390,6 +1643,38 @@ LIMIT 1
     .map_err(AppError::database)
 }
 
+async fn select_node_config(
+    pool: &MySqlPool,
+    node_id: u64,
+) -> Result<Option<NodeConfigRow>, AppError> {
+    sqlx::query_as::<_, NodeConfigRow>(
+        r#"
+SELECT
+  id,
+  server_ip,
+  server_port,
+  relay_server_ip,
+  relay_server_port,
+  is_support_ipv6,
+  bandwidth_quality,
+  disable_quic,
+  area,
+  telecom_ip,
+  mobile_ip,
+  unicom_ip,
+  tag,
+  config_revision
+FROM accel_nodes
+WHERE id = ?
+LIMIT 1
+"#,
+    )
+    .bind(node_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::database)
+}
+
 async fn persist_node_report(
     pool: &MySqlPool,
     report: &NodeReportRequest,
@@ -1440,7 +1725,7 @@ UPDATE accel_nodes
 SET
   status = ?,
   kernel_version = ?,
-  config_revision = ?,
+  config_revision = GREATEST(config_revision, ?),
   last_seen_at = FROM_UNIXTIME(?),
   last_report_at = CURRENT_TIMESTAMP
 WHERE id = ?
@@ -1656,7 +1941,9 @@ fn validate_node_report_timestamp(timestamp: u64) -> Result<(), AppError> {
     Ok(())
 }
 
-fn verify_node_report_signature(
+fn verify_node_signature(
+    method: &str,
+    path: &str,
     secret: &str,
     timestamp: u64,
     nonce: &str,
@@ -1682,7 +1969,7 @@ fn verify_node_report_signature(
     let signature = BASE64.decode(signature).map_err(|_| {
         AppError::unauthorized("invalid_signature", "node signature is not valid base64")
     })?;
-    let canonical = format!("POST\n{NODE_REPORT_PATH}\n{timestamp}\n{nonce}\n{body_sha256}");
+    let canonical = format!("{method}\n{path}\n{timestamp}\n{nonce}\n{body_sha256}");
     let mut mac = <HmacSha256 as Mac>::new_from_slice(secret.as_bytes()).map_err(|error| {
         AppError::internal(anyhow::anyhow!(
             "failed to initialize node report verifier: {error}"
@@ -2049,10 +2336,16 @@ impl AdminNodeSummary {
             name: row.name,
             server_ip: row.server_ip,
             server_port: row.server_port,
+            relay_server_ip: row.relay_server_ip,
+            relay_server_port: row.relay_server_port,
+            is_support_ipv6: row.is_support_ipv6 != 0,
             area: row.area,
             tag: row.tag,
             bandwidth_quality: row.bandwidth_quality,
             disable_quic: row.disable_quic != 0,
+            telecom_ip: row.telecom_ip,
+            mobile_ip: row.mobile_ip,
+            unicom_ip: row.unicom_ip,
             status: row.status,
             kernel_version: row.kernel_version,
             config_revision: row.config_revision,
@@ -2066,6 +2359,34 @@ impl AdminNodeSummary {
                 tcp_sessions: row.latest_tcp_sessions.unwrap_or_default(),
                 reported_at: row.latest_reported_at,
             }),
+        }
+    }
+}
+
+impl NodeConfigResponse {
+    fn from_row(row: NodeConfigRow) -> Self {
+        Self {
+            status: "ok",
+            node_id: row.id,
+            config_revision: row.config_revision.max(1),
+            server_time: now_unix(),
+            network: NodeConfigNetworkResponse {
+                server_ip: row.server_ip,
+                listen_ip: "0.0.0.0".to_string(),
+                server_port: row.server_port,
+                relay_server_ip: row.relay_server_ip,
+                relay_server_port: row.relay_server_port,
+                is_support_ipv6: row.is_support_ipv6 != 0,
+                disable_quic: row.disable_quic != 0,
+                area: row.area,
+                bandwidth_quality: row.bandwidth_quality,
+                tag: row.tag,
+                operator_ips: NodeConfigOperatorIpsResponse {
+                    telecom_ip: row.telecom_ip,
+                    mobile_ip: row.mobile_ip,
+                    unicom_ip: row.unicom_ip,
+                },
+            },
         }
     }
 }
@@ -2195,14 +2516,49 @@ mod tests {
         mac.update(canonical.as_bytes());
         let signature = BASE64.encode(mac.finalize().into_bytes());
 
-        verify_node_report_signature("secret", timestamp, nonce, &body_sha256, &signature, body)
-            .expect("signature verifies");
+        verify_node_signature(
+            "POST",
+            NODE_REPORT_PATH,
+            "secret",
+            timestamp,
+            nonce,
+            &body_sha256,
+            &signature,
+            body,
+        )
+        .expect("signature verifies");
+    }
+
+    #[test]
+    fn verifies_node_config_signature() {
+        let body = b"";
+        let timestamp = now_unix();
+        let nonce = "config-nonce";
+        let body_sha256 = BASE64.encode(Sha256::digest(body));
+        let canonical = format!("GET\n{NODE_CONFIG_PATH}\n{timestamp}\n{nonce}\n{body_sha256}");
+        let mut mac = <HmacSha256 as Mac>::new_from_slice(b"secret").expect("hmac");
+        mac.update(canonical.as_bytes());
+        let signature = BASE64.encode(mac.finalize().into_bytes());
+
+        verify_node_signature(
+            "GET",
+            NODE_CONFIG_PATH,
+            "secret",
+            timestamp,
+            nonce,
+            &body_sha256,
+            &signature,
+            body,
+        )
+        .expect("signature verifies");
     }
 
     #[test]
     fn rejects_node_report_body_hash_mismatch() {
         let timestamp = now_unix();
-        let error = verify_node_report_signature(
+        let error = verify_node_signature(
+            "POST",
+            NODE_REPORT_PATH,
             "secret",
             timestamp,
             "test-nonce",
@@ -2260,7 +2616,9 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("节点控制台"));
         assert!(ADMIN_DASHBOARD_HTML.contains("登录节点后台"));
         assert!(ADMIN_DASHBOARD_HTML.contains("新增节点"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("编辑配置"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("method: \"PATCH\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("bootstrap-token"));
     }
 

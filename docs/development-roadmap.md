@@ -177,12 +177,22 @@ Done in `v0.18.0`:
 - Add admin UI flows for creating nodes, changing node status, generating
   bootstrap install commands, and copying node install commands.
 
+Done in `v0.19.0`:
+
+- Add signed `/api/node/v1/config` for node config downlink.
+- Add admin PATCH node config API and dashboard edit form.
+- Add node-side config polling, config_revision tracking, and hot-apply for
+  safe network metadata fields.
+- Mark listener endpoint changes as `restart_required` in health until the node
+  service restarts.
+- Persist pulled network config back to the local TOML so restart-required
+  endpoint changes can take effect after `systemctl restart xaccel-node`.
+
 Goals:
 
 - Implement backend handshake.
 - Add nonce replay storage for node report requests.
 - Parse production bootstrap response.
-- Fetch node config and hot-apply safe fields.
 - Add websocket or long-poll events for drain, config update, and user kick.
 
 ## P4: UDP Relay MVP

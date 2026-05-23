@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.18.0
+  version: 0.19.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -63,29 +63,19 @@ paths:
                 $ref: '#/components/schemas/HandshakeResponse'
   /api/node/v1/config:
     get:
-      summary: Fetch node runtime configuration.
+      summary: Fetch signed node runtime configuration.
+      description: Nodes poll this endpoint with X-Node-* HMAC headers. The response contains the current network config_revision and hot-applyable fields.
       security:
         - NodeHmac: []
-      parameters:
-        - name: node_id
-          in: query
-          required: true
-          schema:
-            type: integer
-        - name: revision
-          in: query
-          required: false
-          schema:
-            type: integer
       responses:
         '200':
-          description: Full node config.
+          description: Current node config.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/NodeConfig'
-        '304':
-          description: Config unchanged.
+                $ref: '#/components/schemas/NodeConfigResponse'
+        '401':
+          description: Unknown node, stale timestamp, or invalid signature.
   /api/node/v1/report:
     post:
       summary: Report traffic, sessions, quality, system load, install errors, and status.
@@ -172,6 +162,34 @@ paths:
                 $ref: '#/components/schemas/AdminNodeDetailResponse'
         '404':
           description: Node does not exist.
+    patch:
+      summary: Update node configuration and increment config_revision.
+      description: Safe fields are picked up by the node config loop; endpoint/listener changes are marked restart_required in node health until the service restarts.
+      security:
+        - AdminBearer: []
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateNodeRequest'
+      responses:
+        '200':
+          description: Updated node summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUpdateNodeResponse'
+        '404':
+          description: Node does not exist.
+        '409':
+          description: Node endpoint already exists.
   /api/admin/v1/nodes/{node_id}/status:
     patch:
       summary: Update a managed node status.
@@ -506,6 +524,80 @@ components:
           type: object
         security:
           type: object
+    NodeConfigResponse:
+      type: object
+      required:
+        - status
+        - node_id
+        - config_revision
+        - server_time
+        - network
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        node_id:
+          type: integer
+        config_revision:
+          type: integer
+          minimum: 1
+        server_time:
+          type: integer
+        network:
+          $ref: '#/components/schemas/NodeRuntimeNetworkConfig'
+    NodeRuntimeNetworkConfig:
+      type: object
+      required:
+        - server_ip
+        - listen_ip
+        - server_port
+        - is_support_ipv6
+        - disable_quic
+        - area
+        - bandwidth_quality
+        - operator_ips
+      properties:
+        server_ip:
+          type: string
+        listen_ip:
+          type: string
+          example: 0.0.0.0
+        server_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        relay_server_ip:
+          type: string
+          nullable: true
+        relay_server_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          nullable: true
+        is_support_ipv6:
+          type: boolean
+        disable_quic:
+          type: boolean
+        area:
+          type: string
+        bandwidth_quality:
+          type: string
+          enum: [fast, normal, slow]
+        tag:
+          type: string
+          nullable: true
+        operator_ips:
+          type: object
+          properties:
+            telecom_ip:
+              type: string
+              nullable: true
+            mobile_ip:
+              type: string
+              nullable: true
+            unicom_ip:
+              type: string
+              nullable: true
     NodeFields:
       type: object
       required:
@@ -669,7 +761,20 @@ components:
         tag:
           type: string
           nullable: true
+    AdminUpdateNodeRequest:
+      allOf:
+        - $ref: '#/components/schemas/AdminCreateNodeRequest'
     AdminCreateNodeResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        node:
+          $ref: '#/components/schemas/AdminNodeSummary'
+        server_time:
+          type: integer
+    AdminUpdateNodeResponse:
       type: object
       properties:
         status:
@@ -764,6 +869,14 @@ components:
           type: string
         server_port:
           type: integer
+        relay_server_ip:
+          type: string
+          nullable: true
+        relay_server_port:
+          type: integer
+          nullable: true
+        is_support_ipv6:
+          type: boolean
         area:
           type: string
         tag:
@@ -773,6 +886,15 @@ components:
           type: string
         disable_quic:
           type: boolean
+        telecom_ip:
+          type: string
+          nullable: true
+        mobile_ip:
+          type: string
+          nullable: true
+        unicom_ip:
+          type: string
+          nullable: true
         status:
           type: string
         kernel_version:

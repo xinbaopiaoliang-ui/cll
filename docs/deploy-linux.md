@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.18.0`.
+Current version: `v0.19.0`.
 
 The node can:
 
@@ -23,8 +23,13 @@ The node can:
 - issue development connect-intent responses through `backend-mock`;
 - optionally report signed health snapshots to the backend control plane and
   store them in MySQL through `xaccel-control-api`;
+- poll signed node config from the control plane and hot-apply safe node
+  metadata changes;
+- write pulled network config back to `/etc/xaccel-node/config.toml` so endpoint
+  changes can take effect after a service restart;
 - expose token-protected admin node APIs for backend Web panels;
 - serve a browser dashboard at `/admin` backed by token-protected admin APIs;
+- edit node configuration from `/admin` and generate one-time install commands;
 - validate the full flow with the packaged `xaccel-client-probe` binary.
 
 It does not yet fetch production game rules or connect-intents from a real
@@ -35,8 +40,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.18.0
-git push origin v0.18.0
+git tag v0.19.0
+git push origin v0.19.0
 ```
 
 GitHub Actions will publish:

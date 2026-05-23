@@ -1186,6 +1186,14 @@
         return window.location.origin;
       }
 
+      function selectedAttr(value, expected) {
+        return value === expected ? "selected" : "";
+      }
+
+      function checkedAttr(value) {
+        return value ? "checked" : "";
+      }
+
       async function api(path, options = {}) {
         if (!state.token) {
           throw new Error("管理员 Token 未设置");
@@ -1321,6 +1329,7 @@
         const traffic = health.traffic || {};
         const sessions = health.sessions || {};
         const control = health.control_plane || {};
+        const config = health.config || {};
         const status = statusClass(node);
         const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
 
@@ -1332,6 +1341,8 @@
               <span class="chip ${status}">${escapeHtml(statusText(node))}</span>
               <span class="chip">监听 ${escapeHtml(listenText(listeners))}</span>
               <span class="chip ${Number(control.last_http_status) === 200 ? "ok" : "warn"}">控制面 ${escapeHtml(control.last_http_status || "--")}</span>
+              <span class="chip ${Number(control.config_last_http_status) === 200 ? "ok" : "warn"}">配置 ${escapeHtml(control.config_last_http_status || "--")}</span>
+              <span class="chip ${config.restart_required ? "warn" : "ok"}">重启 ${config.restart_required ? "需要" : "无需"}</span>
               <span class="chip ${ageClass(node.last_report_at)}">上报 ${escapeHtml(ageText(node.last_report_at))}</span>
             </div>
           </div>
@@ -1341,6 +1352,8 @@
               ${metric("监听地址", listeners.listen_addr || "--")}
               ${metric("版本", node.kernel_version || "--")}
               ${metric("区域", areaText(node))}
+              ${metric("配置版本", config.config_revision || node.config_revision || "--")}
+              ${metric("重启需求", config.restart_required ? "需要重启" : "无需重启")}
             </div>
           </div>
           <div class="detail-section">
@@ -1352,6 +1365,8 @@
               ${metric("Active UDP", sessions.active_udp_sessions || 0)}
               ${metric("Auth OK", sessions.auth_ok || 0)}
               ${metric("Relay Timeout", sessions.udp_relay_timeout || 0)}
+              ${metric("Config OK", control.config_ok || 0)}
+              ${metric("Config Failed", control.config_failed || 0)}
             </div>
           </div>
           <div class="detail-section">
@@ -1374,6 +1389,73 @@
           <div class="detail-section">
             <div class="section-title">节点操作</div>
             <div class="action-grid">
+              <div class="operation-card">
+                <div class="operation-title">编辑配置</div>
+                <form data-action="edit-node">
+                  <div class="form-grid">
+                    <div class="field">
+                      <label>节点名称</label>
+                      <input name="name" value="${escapeHtml(node.name)}" autocomplete="off" required />
+                    </div>
+                    <div class="field">
+                      <label>公网 IP</label>
+                      <input name="server_ip" value="${escapeHtml(node.server_ip)}" autocomplete="off" required />
+                    </div>
+                    <div class="field">
+                      <label>入口端口</label>
+                      <input name="server_port" type="number" min="1" max="65535" value="${escapeHtml(node.server_port)}" required />
+                    </div>
+                    <div class="field">
+                      <label>带宽质量</label>
+                      <select name="bandwidth_quality">
+                        <option value="normal" ${selectedAttr(node.bandwidth_quality, "normal")}>normal</option>
+                        <option value="fast" ${selectedAttr(node.bandwidth_quality, "fast")}>fast</option>
+                        <option value="slow" ${selectedAttr(node.bandwidth_quality, "slow")}>slow</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label>区域</label>
+                      <input name="area" value="${escapeHtml(node.area || "UNKNOWN")}" autocomplete="off" />
+                    </div>
+                    <div class="field">
+                      <label>标签</label>
+                      <input name="tag" value="${escapeHtml(node.tag || "")}" autocomplete="off" />
+                    </div>
+                    <div class="field">
+                      <label>中转 IP</label>
+                      <input name="relay_server_ip" value="${escapeHtml(node.relay_server_ip || "")}" autocomplete="off" />
+                    </div>
+                    <div class="field">
+                      <label>中转端口</label>
+                      <input name="relay_server_port" type="number" min="1" max="65535" value="${escapeHtml(node.relay_server_port || "")}" />
+                    </div>
+                    <div class="field">
+                      <label>电信 IP</label>
+                      <input name="telecom_ip" value="${escapeHtml(node.telecom_ip || "")}" autocomplete="off" />
+                    </div>
+                    <div class="field">
+                      <label>移动 IP</label>
+                      <input name="mobile_ip" value="${escapeHtml(node.mobile_ip || "")}" autocomplete="off" />
+                    </div>
+                    <div class="field">
+                      <label>联通 IP</label>
+                      <input name="unicom_ip" value="${escapeHtml(node.unicom_ip || "")}" autocomplete="off" />
+                    </div>
+                    <label class="checkbox">
+                      <input name="is_support_ipv6" type="checkbox" ${checkedAttr(node.is_support_ipv6)} />
+                      支持 IPv6
+                    </label>
+                    <label class="checkbox">
+                      <input name="disable_quic" type="checkbox" ${checkedAttr(node.disable_quic)} />
+                      禁用 QUIC
+                    </label>
+                  </div>
+                  <div class="message">保存后配置版本会递增；公网 IP、入口端口、监听地址变化需要重启节点才会真正重绑监听。</div>
+                  <div class="form-actions">
+                    <button class="primary" type="submit">保存配置</button>
+                  </div>
+                </form>
+              </div>
               <div class="operation-card">
                 <div class="operation-title">调整状态</div>
                 <form data-action="status">
@@ -1522,8 +1604,7 @@
         setLoggedIn(false);
       }
 
-      async function createNode(form) {
-        clearInlineError(els.createNodeError);
+      function nodePayloadFromForm(form) {
         const payload = {
           name: form.elements.name.value.trim(),
           server_ip: form.elements.server_ip.value.trim(),
@@ -1545,7 +1626,12 @@
         }
         const relayPort = numberOrNull(form.elements.relay_server_port.value);
         if (relayPort) payload.relay_server_port = relayPort;
+        return payload;
+      }
 
+      async function createNode(form) {
+        clearInlineError(els.createNodeError);
+        const payload = nodePayloadFromForm(form);
         const data = await api("/api/admin/v1/nodes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1553,6 +1639,18 @@
         });
         state.selectedId = data.node.id;
         closeCreateNodeModal();
+        await loadNodes();
+      }
+
+      async function updateNodeConfig(form) {
+        if (!state.selectedId) return;
+        const payload = nodePayloadFromForm(form);
+        const data = await api(`/api/admin/v1/nodes/${state.selectedId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        state.selectedId = data.node.id;
         await loadNodes();
       }
 
@@ -1652,6 +1750,9 @@
         event.preventDefault();
         if (form.dataset.action === "status") {
           updateNodeStatus(form).catch(showError);
+        }
+        if (form.dataset.action === "edit-node") {
+          updateNodeConfig(form).catch(showError);
         }
         if (form.dataset.action === "bootstrap") {
           createBootstrapCommand(form).catch(showError);

@@ -1,4 +1,8 @@
-use crate::{config::NodeConfig, identity::IdentityState, session_store::SessionStore};
+use crate::{
+    config::{BandwidthQuality, NetworkConfig, NodeConfig},
+    identity::IdentityState,
+    session_store::SessionStore,
+};
 use serde::Serialize;
 use std::{
     sync::{
@@ -20,6 +24,7 @@ struct RuntimeStateInner {
     status: NodeStatus,
     stats: Arc<RuntimeStats>,
     sessions: Arc<SessionStore>,
+    runtime_config: Mutex<RuntimeConfigState>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -48,8 +53,12 @@ pub struct HealthConfigSnapshot {
     pub channel: String,
     pub health_addr: String,
     pub network_loaded: bool,
+    pub config_revision: u64,
     pub disable_quic: Option<bool>,
     pub area: Option<String>,
+    pub bandwidth_quality: Option<BandwidthQuality>,
+    pub tag: Option<String>,
+    pub restart_required: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -103,6 +112,27 @@ pub struct ControlPlaneSnapshot {
     pub last_error: Option<String>,
     pub report_ok: u64,
     pub report_failed: u64,
+    pub config_last_success_at: Option<u64>,
+    pub config_last_failure_at: Option<u64>,
+    pub config_last_http_status: Option<u16>,
+    pub config_last_error: Option<String>,
+    pub config_ok: u64,
+    pub config_failed: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigApplyResult {
+    pub applied: bool,
+    pub restart_required: bool,
+    pub previous_revision: u64,
+    pub current_revision: u64,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeConfigState {
+    config_revision: u64,
+    network: Option<NetworkConfig>,
+    restart_required: bool,
 }
 
 #[derive(Default)]
@@ -142,6 +172,12 @@ pub struct RuntimeStats {
     control_report_ok: AtomicU64,
     control_report_failed: AtomicU64,
     control_last_error: Mutex<Option<String>>,
+    config_last_success_at: AtomicU64,
+    config_last_failure_at: AtomicU64,
+    config_last_http_status: AtomicU64,
+    config_ok: AtomicU64,
+    config_failed: AtomicU64,
+    config_last_error: Mutex<Option<String>>,
 }
 
 impl RuntimeState {
@@ -152,6 +188,14 @@ impl RuntimeState {
             NodeStatus::Ready
         };
 
+        let config_revision = config
+            .control
+            .as_ref()
+            .map(|control| control.config_revision)
+            .unwrap_or(1)
+            .max(1);
+        let network = config.network.clone();
+
         Self {
             inner: Arc::new(RuntimeStateInner {
                 config,
@@ -160,6 +204,11 @@ impl RuntimeState {
                 status,
                 stats: Arc::new(RuntimeStats::default()),
                 sessions: Arc::new(SessionStore::default()),
+                runtime_config: Mutex::new(RuntimeConfigState {
+                    config_revision,
+                    network,
+                    restart_required: false,
+                }),
             }),
         }
     }
@@ -180,6 +229,77 @@ impl RuntimeState {
         &self.inner.sessions
     }
 
+    pub fn config_revision(&self) -> u64 {
+        self.inner
+            .runtime_config
+            .lock()
+            .map(|config| config.config_revision)
+            .unwrap_or(1)
+    }
+
+    pub fn effective_network(&self) -> Option<NetworkConfig> {
+        self.inner
+            .runtime_config
+            .lock()
+            .ok()
+            .and_then(|config| config.network.clone())
+            .or_else(|| self.inner.config.network.clone())
+    }
+
+    pub fn apply_remote_network_config(
+        &self,
+        config_revision: u64,
+        remote_network: NetworkConfig,
+    ) -> ConfigApplyResult {
+        let Ok(mut config) = self.inner.runtime_config.lock() else {
+            return ConfigApplyResult {
+                applied: false,
+                restart_required: false,
+                previous_revision: self.config_revision(),
+                current_revision: self.config_revision(),
+            };
+        };
+        let previous_revision = config.config_revision;
+        if config_revision <= previous_revision {
+            return ConfigApplyResult {
+                applied: false,
+                restart_required: config.restart_required,
+                previous_revision,
+                current_revision: previous_revision,
+            };
+        }
+
+        let mut next_network = config
+            .network
+            .clone()
+            .unwrap_or_else(|| remote_network.clone());
+        let restart_required = network_listener_changed(&next_network, &remote_network);
+        if !restart_required {
+            next_network.server_ip = remote_network.server_ip.clone();
+            next_network.listen_ip = remote_network.listen_ip.clone();
+            next_network.server_port = remote_network.server_port;
+        }
+        next_network.relay_server_ip = remote_network.relay_server_ip.clone();
+        next_network.relay_server_port = remote_network.relay_server_port;
+        next_network.is_support_ipv6 = remote_network.is_support_ipv6;
+        next_network.disable_quic = remote_network.disable_quic;
+        next_network.area = remote_network.area.clone();
+        next_network.bandwidth_quality = remote_network.bandwidth_quality.clone();
+        next_network.tag = remote_network.tag.clone();
+        next_network.operator_ips = remote_network.operator_ips.clone();
+
+        config.config_revision = config_revision;
+        config.network = Some(next_network);
+        config.restart_required = config.restart_required || restart_required;
+
+        ConfigApplyResult {
+            applied: true,
+            restart_required: config.restart_required,
+            previous_revision,
+            current_revision: config_revision,
+        }
+    }
+
     pub fn status(&self) -> &'static str {
         match &self.inner.status {
             NodeStatus::Ready => "ready",
@@ -188,7 +308,18 @@ impl RuntimeState {
     }
 
     pub fn health_snapshot(&self) -> HealthSnapshot {
-        let network = self.inner.config.network.as_ref();
+        let runtime_config = self
+            .inner
+            .runtime_config
+            .lock()
+            .ok()
+            .map(|config| config.clone())
+            .unwrap_or(RuntimeConfigState {
+                config_revision: 1,
+                network: self.inner.config.network.clone(),
+                restart_required: false,
+            });
+        let network = runtime_config.network.as_ref();
 
         let listen_addr = network.map(|network| network.listen_endpoint());
 
@@ -202,8 +333,12 @@ impl RuntimeState {
                 channel: self.inner.config.runtime.channel.clone(),
                 health_addr: self.inner.config.runtime.health_addr.to_string(),
                 network_loaded: network.is_some(),
+                config_revision: runtime_config.config_revision,
                 disable_quic: network.map(|network| network.disable_quic),
                 area: network.map(|network| network.area.clone()),
+                bandwidth_quality: network.map(|network| network.bandwidth_quality.clone()),
+                tag: network.and_then(|network| network.tag.clone()),
+                restart_required: runtime_config.restart_required,
             },
             listeners: ListenerSnapshot {
                 udp_listening: self.inner.stats.udp_listening(),
@@ -225,6 +360,12 @@ impl RuntimeState {
             ),
         }
     }
+}
+
+fn network_listener_changed(current: &NetworkConfig, remote: &NetworkConfig) -> bool {
+    current.server_ip != remote.server_ip
+        || current.listen_ip != remote.listen_ip
+        || current.server_port != remote.server_port
 }
 
 impl RuntimeStats {
@@ -363,6 +504,30 @@ impl RuntimeStats {
         }
     }
 
+    pub fn record_config_success(&self, http_status: u16) {
+        self.config_ok.fetch_add(1, Ordering::Relaxed);
+        self.config_last_success_at
+            .store(now_unix(), Ordering::Relaxed);
+        self.config_last_http_status
+            .store(u64::from(http_status), Ordering::Relaxed);
+        if let Ok(mut last_error) = self.config_last_error.lock() {
+            *last_error = None;
+        }
+    }
+
+    pub fn record_config_failure(&self, http_status: Option<u16>, error: impl Into<String>) {
+        self.config_failed.fetch_add(1, Ordering::Relaxed);
+        self.config_last_failure_at
+            .store(now_unix(), Ordering::Relaxed);
+        if let Some(status) = http_status {
+            self.config_last_http_status
+                .store(u64::from(status), Ordering::Relaxed);
+        }
+        if let Ok(mut last_error) = self.config_last_error.lock() {
+            *last_error = Some(error.into());
+        }
+    }
+
     pub fn traffic_snapshot(&self) -> TrafficSnapshot {
         TrafficSnapshot {
             udp_rx_packets: self.udp_rx_packets.load(Ordering::Relaxed),
@@ -410,8 +575,18 @@ impl RuntimeStats {
         let last_success_at = unix_option(self.control_last_success_at.load(Ordering::Relaxed));
         let last_failure_at = unix_option(self.control_last_failure_at.load(Ordering::Relaxed));
         let last_http_status = self.control_last_http_status.load(Ordering::Relaxed);
+        let config_last_success_at =
+            unix_option(self.config_last_success_at.load(Ordering::Relaxed));
+        let config_last_failure_at =
+            unix_option(self.config_last_failure_at.load(Ordering::Relaxed));
+        let config_last_http_status = self.config_last_http_status.load(Ordering::Relaxed);
         let last_error = self
             .control_last_error
+            .lock()
+            .ok()
+            .and_then(|last_error| last_error.clone());
+        let config_last_error = self
+            .config_last_error
             .lock()
             .ok()
             .and_then(|last_error| last_error.clone());
@@ -428,6 +603,16 @@ impl RuntimeStats {
             last_error,
             report_ok: self.control_report_ok.load(Ordering::Relaxed),
             report_failed: self.control_report_failed.load(Ordering::Relaxed),
+            config_last_success_at,
+            config_last_failure_at,
+            config_last_http_status: if config_last_http_status == 0 {
+                None
+            } else {
+                Some(config_last_http_status as u16)
+            },
+            config_last_error,
+            config_ok: self.config_ok.load(Ordering::Relaxed),
+            config_failed: self.config_failed.load(Ordering::Relaxed),
         }
     }
 }
@@ -444,5 +629,111 @@ fn unix_option(value: u64) -> Option<u64> {
         None
     } else {
         Some(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{BootstrapConfig, ControlPlaneConfig, IdentityConfig, RuntimeConfig};
+    use std::net::SocketAddr;
+
+    fn base_network() -> NetworkConfig {
+        NetworkConfig {
+            server_ip: "103.201.131.99".to_string(),
+            listen_ip: Some("0.0.0.0".to_string()),
+            server_port: 666,
+            relay_server_ip: None,
+            relay_server_port: None,
+            is_support_ipv6: false,
+            disable_quic: false,
+            area: "UNKNOWN".to_string(),
+            bandwidth_quality: BandwidthQuality::Normal,
+            tag: Some("standalone".to_string()),
+            operator_ips: None,
+        }
+    }
+
+    fn state_with_network(network: NetworkConfig) -> RuntimeState {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config = NodeConfig {
+            identity: IdentityConfig {
+                node_id: Some(1),
+                panel_url: Some("http://127.0.0.1:18080".to_string()),
+                identity_file: temp_dir.path().join("identity.json").display().to_string(),
+            },
+            runtime: RuntimeConfig {
+                data_dir: temp_dir.path().display().to_string(),
+                log_dir: temp_dir.path().join("log").display().to_string(),
+                health_addr: "127.0.0.1:9876".parse::<SocketAddr>().unwrap(),
+                channel: "stable".to_string(),
+            },
+            bootstrap: Some(BootstrapConfig {
+                response_file: temp_dir
+                    .path()
+                    .join("bootstrap-response.json")
+                    .display()
+                    .to_string(),
+            }),
+            control: Some(ControlPlaneConfig {
+                enabled: true,
+                config_revision: 1,
+                request_timeout_sec: 5,
+                config_poll_interval_sec: 30,
+            }),
+            network: Some(network),
+            report: None,
+            limits: None,
+        };
+        let identity = IdentityState::from_config(&config).expect("identity loads");
+        RuntimeState::new(config, identity)
+    }
+
+    #[test]
+    fn applies_remote_config_without_listener_restart() {
+        let state = state_with_network(base_network());
+        let mut remote = base_network();
+        remote.area = "HK".to_string();
+        remote.bandwidth_quality = BandwidthQuality::Fast;
+        remote.disable_quic = true;
+        remote.tag = Some("premium".to_string());
+
+        let result = state.apply_remote_network_config(2, remote);
+        let network = state.effective_network().expect("network");
+        let health = state.health_snapshot();
+
+        assert!(result.applied);
+        assert!(!result.restart_required);
+        assert_eq!(result.previous_revision, 1);
+        assert_eq!(result.current_revision, 2);
+        assert_eq!(network.server_ip, "103.201.131.99");
+        assert_eq!(network.server_port, 666);
+        assert_eq!(network.area, "HK");
+        assert!(matches!(network.bandwidth_quality, BandwidthQuality::Fast));
+        assert_eq!(network.tag.as_deref(), Some("premium"));
+        assert!(network.disable_quic);
+        assert_eq!(health.config.config_revision, 2);
+        assert!(!health.config.restart_required);
+    }
+
+    #[test]
+    fn listener_change_requires_restart_and_preserves_bound_endpoint() {
+        let state = state_with_network(base_network());
+        let mut remote = base_network();
+        remote.server_ip = "47.83.160.126".to_string();
+        remote.server_port = 667;
+        remote.area = "SG".to_string();
+
+        let result = state.apply_remote_network_config(2, remote);
+        let network = state.effective_network().expect("network");
+        let health = state.health_snapshot();
+
+        assert!(result.applied);
+        assert!(result.restart_required);
+        assert_eq!(network.server_ip, "103.201.131.99");
+        assert_eq!(network.server_port, 666);
+        assert_eq!(network.area, "SG");
+        assert_eq!(health.config.config_revision, 2);
+        assert!(health.config.restart_required);
     }
 }

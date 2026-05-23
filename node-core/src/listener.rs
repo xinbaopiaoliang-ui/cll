@@ -1,5 +1,5 @@
 use crate::{
-    config::{NetworkConfig, NodeConfig},
+    config::NetworkConfig,
     session::{
         build_probe_error, build_probe_response, build_session_data_response, parse_client_message,
         ParsedClientMessage, TransportKind,
@@ -19,12 +19,12 @@ const UDP_PROBE_RESPONSE: &[u8] = b"xaccel-node udp listener ready\n";
 const TCP_PROBE_RESPONSE: &[u8] = b"xaccel-node tcp listener ready\n";
 
 pub async fn spawn_network_listeners(state: RuntimeState) -> anyhow::Result<Vec<JoinHandle<()>>> {
-    let Some(network) = state.config().network.as_ref() else {
+    let Some(network) = state.effective_network() else {
         warn!("network config is missing; server listener is disabled");
         return Ok(Vec::new());
     };
 
-    let listen_addr = listen_addr(state.config(), network)?;
+    let listen_addr = listen_addr(&network)?;
     let udp_socket = UdpSocket::bind(listen_addr)
         .await
         .with_context(|| format!("failed to bind UDP listener {listen_addr}"))?;
@@ -55,7 +55,7 @@ pub async fn spawn_network_listeners(state: RuntimeState) -> anyhow::Result<Vec<
     Ok(vec![udp_task, tcp_task])
 }
 
-fn listen_addr(_config: &NodeConfig, network: &NetworkConfig) -> anyhow::Result<SocketAddr> {
+fn listen_addr(network: &NetworkConfig) -> anyhow::Result<SocketAddr> {
     let listen_host = network.listen_host();
     if listen_host.is_empty() {
         bail!("network.listen_ip or network.server_ip is required");

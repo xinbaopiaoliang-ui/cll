@@ -73,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let listener_tasks = spawn_network_listeners(state.clone()).await?;
-    let control_plane_tasks = spawn_control_plane(state.clone());
+    let control_plane_tasks = spawn_control_plane(state.clone(), config_path.clone());
 
     let health_state = state.clone();
     let health_addr = state.config().runtime.health_addr;

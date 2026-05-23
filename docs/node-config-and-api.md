@@ -218,6 +218,7 @@ Config:
 enabled = true
 config_revision = 1
 request_timeout_sec = 5
+config_poll_interval_sec = 30
 
 [report]
 interval_sec = 30

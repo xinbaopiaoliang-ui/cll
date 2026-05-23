@@ -61,8 +61,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.18.0
-git push origin v0.18.0
+git tag v0.19.0
+git push origin v0.19.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -80,7 +80,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.18.0` keeps the legacy TCP/UDP `ping` probe, supports
+next stage. Version `0.19.0` keeps the legacy TCP/UDP `ping` probe, supports
 JSON `xaccel/1` client probe responses, verifies optional `xat.v1` HMAC client
 tokens, keeps a short-lived UDP session table, echoes `session.data` packets for
 client integration testing, binds backend-style connect-intent routes from
@@ -94,11 +94,17 @@ production-shaped scheduling. The control API can receive signed node runtime
 reports, persist health snapshots to MySQL, and expose token-protected admin
 node management APIs, create node records, and generate one-time bootstrap
 install commands for Linux nodes. It also serves a browser dashboard at `/admin`
-backed by token-protected admin APIs for live node visibility. Node installs
-default to binding the local listener on `0.0.0.0` while keeping the public
-`server_ip` for client scheduling,
-which supports cloud servers whose public IP is NATed. The `xaccel-client-probe`
-binary automates the full connect-intent, UDP probe, and session relay validation flow.
+backed by token-protected admin APIs for live node visibility, node creation,
+status changes, install commands, and config edits. Nodes can poll the signed
+`/api/node/v1/config` endpoint and hot-apply safe network metadata changes;
+listener endpoint changes are surfaced as `restart_required` until the systemd
+service is restarted. Node installs default to binding the local listener on
+`0.0.0.0` while keeping the public `server_ip` for client scheduling, which
+supports cloud servers whose public IP is NATed. Pulled configs are written back
+to the local node TOML so endpoint changes can take effect after a service
+restart. The `xaccel-client-probe`
+binary automates the full connect-intent, UDP probe, and session relay
+validation flow.
 Linux release binaries are built with musl so older glibc distributions can run
 the installer output without requiring a system libc upgrade.
 Standalone mode leaves backend reporting disabled unless `--enable-control-plane`
