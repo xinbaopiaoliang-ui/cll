@@ -91,21 +91,21 @@
       .shell {
         max-width: 1380px;
         margin: 0 auto;
-        padding: 24px;
+        padding: 18px 24px 28px;
       }
 
       .topbar {
         display: grid;
-        grid-template-columns: minmax(260px, 1fr) minmax(420px, 0.86fr);
-        gap: 24px;
-        align-items: end;
-        margin-bottom: 22px;
+        grid-template-columns: minmax(280px, 1fr) minmax(520px, 0.76fr);
+        gap: 18px;
+        align-items: center;
+        margin-bottom: 16px;
       }
 
       .brand {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 6px;
       }
 
       .eyebrow {
@@ -118,22 +118,49 @@
 
       h1 {
         margin: 0;
-        font-size: clamp(28px, 4vw, 46px);
+        font-size: clamp(28px, 3.2vw, 42px);
         line-height: 1;
         font-weight: 760;
         letter-spacing: 0;
       }
 
       .subtitle {
+        display: inline-flex;
+        width: fit-content;
+        align-items: center;
+        gap: 8px;
         color: var(--muted);
         font-size: 14px;
       }
 
+      .subtitle::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+        background: var(--idle);
+        box-shadow: 0 0 0 3px rgba(122, 132, 146, 0.12);
+      }
+
+      .subtitle.connected::before {
+        background: var(--ok);
+        box-shadow: 0 0 0 3px rgba(19, 131, 95, 0.13);
+      }
+
+      .subtitle.error-state::before {
+        background: var(--bad);
+        box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.13);
+      }
+
       .authbar {
         display: grid;
-        grid-template-columns: 1fr auto auto;
+        grid-template-columns: minmax(260px, 1fr) auto auto;
         gap: 10px;
         align-items: end;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.78);
       }
 
       .field {
@@ -150,7 +177,7 @@
 
       .summary {
         display: grid;
-        grid-template-columns: 1.2fr repeat(4, minmax(120px, 0.65fr));
+        grid-template-columns: 1.1fr repeat(4, minmax(132px, 0.72fr));
         gap: 0;
         margin-bottom: 18px;
         background: var(--panel);
@@ -161,8 +188,8 @@
       }
 
       .summary-cell {
-        min-height: 84px;
-        padding: 16px 18px;
+        min-height: 82px;
+        padding: 15px 18px;
         border-right: 1px solid var(--line);
         display: flex;
         flex-direction: column;
@@ -182,9 +209,17 @@
 
       .summary-value {
         font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
-        font-size: 28px;
+        font-size: 27px;
         line-height: 1;
         font-weight: 760;
+        white-space: nowrap;
+      }
+
+      .summary-value.text {
+        font-family:
+          "Geist", "Satoshi", "Segoe UI", "Microsoft YaHei", system-ui,
+          sans-serif;
+        font-size: 24px;
       }
 
       .summary-note {
@@ -197,7 +232,7 @@
 
       .layout {
         display: grid;
-        grid-template-columns: minmax(0, 1.54fr) minmax(360px, 0.86fr);
+        grid-template-columns: minmax(0, 1.52fr) minmax(390px, 0.86fr);
         gap: 18px;
         align-items: start;
       }
@@ -212,7 +247,7 @@
 
       .panel-head {
         min-height: 58px;
-        padding: 16px 18px;
+        padding: 15px 18px;
         border-bottom: 1px solid var(--line);
         display: flex;
         justify-content: space-between;
@@ -238,12 +273,12 @@
       table {
         width: 100%;
         border-collapse: collapse;
-        min-width: 760px;
+        min-width: 860px;
       }
 
       th,
       td {
-        padding: 13px 14px;
+        padding: 14px 14px;
         border-bottom: 1px solid var(--line);
         text-align: left;
         vertical-align: middle;
@@ -269,10 +304,22 @@
         background: #f2f7f6;
       }
 
+      tbody tr.selected {
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+
       .node-name {
         display: flex;
         flex-direction: column;
         gap: 4px;
+        min-width: 0;
+      }
+
+      .node-title {
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .strong {
@@ -291,6 +338,11 @@
         display: inline-flex;
         align-items: center;
         gap: 8px;
+        min-width: 72px;
+        padding: 4px 8px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #ffffff;
         color: var(--muted);
         font-weight: 680;
       }
@@ -309,9 +361,21 @@
         box-shadow: 0 0 0 3px rgba(19, 131, 95, 0.13);
       }
 
+      .status.ok {
+        border-color: rgba(19, 131, 95, 0.22);
+        color: var(--ok);
+        background: rgba(19, 131, 95, 0.06);
+      }
+
       .status.warn .dot {
         background: var(--warn);
         box-shadow: 0 0 0 3px rgba(169, 103, 23, 0.13);
+      }
+
+      .status.warn {
+        border-color: rgba(169, 103, 23, 0.22);
+        color: var(--warn);
+        background: rgba(169, 103, 23, 0.07);
       }
 
       .status.bad .dot {
@@ -319,12 +383,44 @@
         box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.13);
       }
 
+      .status.bad {
+        border-color: rgba(180, 35, 24, 0.22);
+        color: var(--bad);
+        background: rgba(180, 35, 24, 0.06);
+      }
+
+      .endpoint {
+        display: inline-block;
+        max-width: 180px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .cell-note {
+        margin-top: 4px;
+        color: var(--faint);
+        font-size: 12px;
+      }
+
+      .age.ok {
+        color: var(--ok);
+      }
+
+      .age.warn {
+        color: var(--warn);
+      }
+
+      .age.bad {
+        color: var(--bad);
+      }
+
       .detail-body {
         padding: 0;
       }
 
       .detail-section {
-        padding: 16px 18px;
+        padding: 15px 18px;
         border-bottom: 1px solid var(--line);
       }
 
@@ -336,6 +432,49 @@
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
+      }
+
+      .detail-hero {
+        display: grid;
+        gap: 10px;
+      }
+
+      .detail-kicker {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 26px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        background: var(--panel-soft);
+        font-size: 12px;
+        font-weight: 680;
+      }
+
+      .chip.ok {
+        color: var(--ok);
+        border-color: rgba(19, 131, 95, 0.2);
+        background: rgba(19, 131, 95, 0.06);
+      }
+
+      .chip.warn {
+        color: var(--warn);
+        border-color: rgba(169, 103, 23, 0.2);
+        background: rgba(169, 103, 23, 0.07);
+      }
+
+      .chip.bad {
+        color: var(--bad);
+        border-color: rgba(180, 35, 24, 0.2);
+        background: rgba(180, 35, 24, 0.06);
       }
 
       .metric {
@@ -353,9 +492,16 @@
       .metric-value {
         margin-top: 6px;
         font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
-        font-size: 18px;
+        font-size: 17px;
         font-weight: 760;
         overflow-wrap: anywhere;
+      }
+
+      .section-title {
+        margin-bottom: 12px;
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 760;
       }
 
       .report-list {
@@ -363,7 +509,8 @@
         gap: 0;
         border: 1px solid var(--line);
         border-radius: 8px;
-        overflow: hidden;
+        max-height: 190px;
+        overflow: auto;
       }
 
       .report-row {
@@ -381,7 +528,7 @@
 
       pre {
         margin: 0;
-        max-height: 260px;
+        max-height: 220px;
         overflow: auto;
         padding: 14px;
         border: 1px solid var(--line);
@@ -390,6 +537,33 @@
         color: #d8e3ea;
         font-size: 12px;
         line-height: 1.55;
+      }
+
+      details summary {
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 720;
+        list-style: none;
+      }
+
+      details summary::-webkit-details-marker {
+        display: none;
+      }
+
+      details summary::after {
+        content: "展开";
+        float: right;
+        color: var(--accent-strong);
+        font-size: 12px;
+      }
+
+      details[open] summary {
+        margin-bottom: 12px;
+      }
+
+      details[open] summary::after {
+        content: "收起";
       }
 
       .empty,
@@ -447,6 +621,29 @@
           grid-template-columns: 1fr;
         }
       }
+
+      @media (max-width: 640px) {
+        .shell {
+          padding: 12px;
+        }
+
+        h1 {
+          font-size: 30px;
+        }
+
+        .summary-value {
+          font-size: 24px;
+        }
+
+        .panel-head {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .detail-grid {
+          grid-template-columns: 1fr;
+        }
+      }
     </style>
   </head>
   <body>
@@ -463,23 +660,23 @@
             <input id="tokenInput" type="password" autocomplete="off" />
           </div>
           <button id="saveToken" class="primary" type="button">保存</button>
-          <button id="refreshNow" type="button">刷新</button>
+          <button id="refreshNow" type="button">立即刷新</button>
         </div>
       </section>
 
       <section class="summary" id="summary">
         <div class="summary-cell">
-          <div class="summary-label">控制面</div>
+          <div class="summary-label">连接状态</div>
           <div class="summary-value">--</div>
           <div class="summary-note">未加载</div>
         </div>
         <div class="summary-cell">
-          <div class="summary-label">节点数</div>
+          <div class="summary-label">节点总数</div>
           <div class="summary-value">--</div>
           <div class="summary-note">total</div>
         </div>
         <div class="summary-cell">
-          <div class="summary-label">在线</div>
+          <div class="summary-label">在线节点</div>
           <div class="summary-value">--</div>
           <div class="summary-note">online</div>
         </div>
@@ -513,7 +710,7 @@
                   <th>入口</th>
                   <th>版本</th>
                   <th>区域</th>
-                  <th>上报</th>
+                  <th>最近上报</th>
                   <th>会话</th>
                 </tr>
               </thead>
@@ -582,6 +779,13 @@
         });
       }
 
+      function formatClock(unix) {
+        if (!unix) return "--";
+        return new Date(unix * 1000).toLocaleTimeString("zh-CN", {
+          hour12: false,
+        });
+      }
+
       function ageText(unix) {
         if (!unix || !state.serverTime) return "--";
         const delta = Math.max(0, state.serverTime - unix);
@@ -590,13 +794,45 @@
         return `${Math.floor(delta / 3600)}h`;
       }
 
+      function ageClass(unix) {
+        if (!unix || !state.serverTime) return "bad";
+        const delta = Math.max(0, state.serverTime - unix);
+        if (delta > 180) return "bad";
+        if (delta > 90) return "warn";
+        return "ok";
+      }
+
       function statusClass(node) {
         const age = node.last_report_at && state.serverTime
           ? state.serverTime - node.last_report_at
           : null;
         if (node.status !== "online") return "bad";
+        if (age === null) return "warn";
+        if (age > 180) return "bad";
         if (age !== null && age > 90) return "warn";
         return "ok";
+      }
+
+      function statusText(node) {
+        const cls = statusClass(node);
+        if (cls === "warn") return "延迟";
+        if (node.status === "online") return "在线";
+        if (node.status === "pending_install") return "待安装";
+        if (node.status === "disabled") return "禁用";
+        if (node.status === "draining") return "排空";
+        return node.status || "未知";
+      }
+
+      function areaText(node) {
+        const area = node.area && node.area !== "UNKNOWN" ? node.area : "";
+        if (area && node.tag) return `${area} / ${node.tag}`;
+        return area || node.tag || "未分区";
+      }
+
+      function listenText(listeners) {
+        const udp = listeners.udp_listening ? "UDP" : "";
+        const tcp = listeners.tcp_listening ? "TCP" : "";
+        return [udp, tcp].filter(Boolean).join(" + ") || "未监听";
       }
 
       async function api(path, options = {}) {
@@ -628,6 +864,7 @@
         const nodes = data.nodes || [];
         const online = nodes.filter((node) => node.status === "online").length;
         const stale = nodes.filter((node) => statusClass(node) === "warn").length;
+        const offline = nodes.length - online;
         const activeSessions = nodes.reduce(
           (sum, node) => sum + (node.latest_report?.active_sessions || 0),
           0,
@@ -639,24 +876,24 @@
 
         els.summary.innerHTML = `
           <div class="summary-cell">
-            <div class="summary-label">控制面</div>
-            <div class="summary-value">${escapeHtml(data.server_time || "--")}</div>
-            <div class="summary-note">${escapeHtml(formatTime(data.server_time))}</div>
+            <div class="summary-label">连接状态</div>
+            <div class="summary-value text">正常</div>
+            <div class="summary-note">刷新于 ${escapeHtml(formatClock(data.server_time))}</div>
           </div>
           <div class="summary-cell">
-            <div class="summary-label">节点数</div>
+            <div class="summary-label">节点总数</div>
             <div class="summary-value">${nodes.length}</div>
-            <div class="summary-note">total</div>
+            <div class="summary-note">${offline} 个非在线</div>
           </div>
           <div class="summary-cell">
-            <div class="summary-label">在线</div>
+            <div class="summary-label">在线节点</div>
             <div class="summary-value">${online}</div>
-            <div class="summary-note">${stale} stale</div>
+            <div class="summary-note">${stale} 个上报延迟</div>
           </div>
           <div class="summary-cell">
             <div class="summary-label">活跃会话</div>
             <div class="summary-value">${activeSessions}</div>
-            <div class="summary-note">latest reports</div>
+            <div class="summary-note">来自最近上报</div>
           </div>
           <div class="summary-cell">
             <div class="summary-label">最近上报</div>
@@ -672,30 +909,41 @@
           return;
         }
 
-        els.nodeRows.innerHTML = state.nodes
+        const sortedNodes = [...state.nodes].sort((left, right) => {
+          const rank = { bad: 0, warn: 1, ok: 2 };
+          return (
+            (rank[statusClass(left)] ?? 3) - (rank[statusClass(right)] ?? 3) ||
+            right.id - left.id
+          );
+        });
+
+        els.nodeRows.innerHTML = sortedNodes
           .map((node) => {
             const selected = node.id === state.selectedId ? "selected" : "";
             const report = node.latest_report || {};
+            const cls = statusClass(node);
+            const ageCls = ageClass(node.last_report_at);
+            const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
             return `
               <tr class="${selected}" data-node-id="${node.id}">
                 <td>
                   <div class="node-name">
-                    <span class="strong">${escapeHtml(node.name)}</span>
+                    <span class="strong node-title" title="${escapeHtml(node.name)}">${escapeHtml(node.name)}</span>
                     <span class="muted mono">id ${node.id}</span>
                   </div>
                 </td>
                 <td>
-                  <span class="status ${statusClass(node)}">
+                  <span class="status ${cls}">
                     <span class="dot"></span>
-                    ${escapeHtml(node.status)}
+                    ${escapeHtml(statusText(node))}
                   </span>
                 </td>
-                <td class="mono">${escapeHtml(node.endpoint)}</td>
+                <td class="mono"><span class="endpoint" title="${escapeHtml(endpoint)}">${escapeHtml(endpoint)}</span></td>
                 <td class="mono">${escapeHtml(node.kernel_version || "--")}</td>
-                <td>${escapeHtml(node.area)} ${node.tag ? `<span class="muted">/ ${escapeHtml(node.tag)}</span>` : ""}</td>
+                <td>${escapeHtml(areaText(node))}</td>
                 <td>
-                  <div class="mono">${escapeHtml(ageText(node.last_report_at))}</div>
-                  <div class="muted">${escapeHtml(formatTime(node.last_report_at))}</div>
+                  <div class="mono age ${ageCls}">${escapeHtml(ageText(node.last_report_at))}</div>
+                  <div class="cell-note">${escapeHtml(formatTime(node.last_report_at))}</div>
                 </td>
                 <td class="mono">${report.active_sessions || 0}</td>
               </tr>
@@ -722,19 +970,30 @@
         const traffic = health.traffic || {};
         const sessions = health.sessions || {};
         const control = health.control_plane || {};
+        const status = statusClass(node);
+        const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
 
         els.detailTitle.textContent = node.name;
-        els.detailMeta.textContent = `${node.endpoint} / id ${node.id}`;
+        els.detailMeta.textContent = `${endpoint} / id ${node.id}`;
         els.detailBody.innerHTML = `
-          <div class="detail-section">
-            <div class="detail-grid">
-              ${metric("状态", node.status)}
-              ${metric("版本", node.kernel_version || "--")}
-              ${metric("监听", listeners.listen_addr || "--")}
-              ${metric("控制面", control.last_http_status || "--")}
+          <div class="detail-section detail-hero">
+            <div class="detail-kicker">
+              <span class="chip ${status}">${escapeHtml(statusText(node))}</span>
+              <span class="chip">监听 ${escapeHtml(listenText(listeners))}</span>
+              <span class="chip ${Number(control.last_http_status) === 200 ? "ok" : "warn"}">控制面 ${escapeHtml(control.last_http_status || "--")}</span>
+              <span class="chip ${ageClass(node.last_report_at)}">上报 ${escapeHtml(ageText(node.last_report_at))}</span>
             </div>
           </div>
           <div class="detail-section">
+            <div class="detail-grid">
+              ${metric("公网入口", endpoint)}
+              ${metric("监听地址", listeners.listen_addr || "--")}
+              ${metric("版本", node.kernel_version || "--")}
+              ${metric("区域", areaText(node))}
+            </div>
+          </div>
+          <div class="detail-section">
+            <div class="section-title">实时计数</div>
             <div class="detail-grid">
               ${metric("UDP RX", traffic.udp_rx_packets || 0)}
               ${metric("UDP TX", traffic.udp_tx_packets || 0)}
@@ -745,7 +1004,7 @@
             </div>
           </div>
           <div class="detail-section">
-            <div class="panel-title" style="margin-bottom: 12px;">最近上报</div>
+            <div class="section-title">最近上报</div>
             <div class="report-list">
               ${(data.recent_reports || [])
                 .slice(0, 8)
@@ -762,8 +1021,10 @@
             </div>
           </div>
           <div class="detail-section">
-            <div class="panel-title" style="margin-bottom: 12px;">Health JSON</div>
-            <pre>${escapeHtml(JSON.stringify(health, null, 2))}</pre>
+            <details>
+              <summary>Health JSON</summary>
+              <pre>${escapeHtml(JSON.stringify(health, null, 2))}</pre>
+            </details>
           </div>
         `;
       }
@@ -771,17 +1032,28 @@
       async function loadNodes({ silent = false } = {}) {
         if (!silent) {
           els.statusLine.textContent = "正在加载";
+          els.statusLine.classList.remove("connected", "error-state");
         }
         const data = await api("/api/admin/v1/nodes?limit=500");
         state.nodes = data.nodes || [];
         state.serverTime = data.server_time;
+        if (state.selectedId && !state.nodes.some((node) => node.id === state.selectedId)) {
+          state.selectedId = null;
+        }
         if (!state.selectedId && state.nodes.length) {
           state.selectedId = state.nodes[0].id;
         }
+        const latestReport = state.nodes.reduce(
+          (max, node) => Math.max(max, node.last_report_at || 0),
+          0,
+        );
+        const online = state.nodes.filter((node) => node.status === "online").length;
         renderSummary(data);
         renderNodes();
-        els.listMeta.textContent = `${state.nodes.length} nodes / ${formatTime(data.server_time)}`;
-        els.statusLine.textContent = "已连接";
+        els.listMeta.textContent = `${state.nodes.length} nodes / 刷新 ${formatClock(data.server_time)}`;
+        els.statusLine.textContent = `已连接 / ${online}/${state.nodes.length} 在线 / 最新 ${ageText(latestReport)}`;
+        els.statusLine.classList.add("connected");
+        els.statusLine.classList.remove("error-state");
         if (state.selectedId) {
           await loadDetail(state.selectedId, { silent: true });
         }
@@ -799,6 +1071,8 @@
 
       function showError(error) {
         els.statusLine.textContent = error.message;
+        els.statusLine.classList.add("error-state");
+        els.statusLine.classList.remove("connected");
         els.nodeRows.innerHTML = `<tr><td colspan="7" class="error">${escapeHtml(error.message)}</td></tr>`;
       }
 

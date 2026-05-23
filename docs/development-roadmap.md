@@ -165,6 +165,12 @@ Done in `v0.17.0`:
 - Show node status, endpoint, versions, report age, listener state, traffic,
   sessions, and recent report JSON through existing admin APIs.
 
+Done in `v0.17.1`:
+
+- Refine the `/admin` dashboard for operations use: compact header, human-readable
+  refresh time, localized node status, stale-report highlighting, and collapsed
+  Health JSON.
+
 Goals:
 
 - Implement backend handshake.
