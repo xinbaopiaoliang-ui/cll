@@ -24,14 +24,24 @@ esac
 ARTIFACT_NAME="xaccel-control-api-${VERSION}-linux-${RELEASE_ARCH}"
 GENERIC_ARTIFACT_NAME="xaccel-control-api-linux-${RELEASE_ARCH}"
 WORK_DIR="${DIST_DIR}/${ARTIFACT_NAME}"
+BUILD_TARGET="${CARGO_BUILD_TARGET:-}"
+BINARY_DIR="${CONTROL_DIR}/target/release"
+
+if [[ -n "$BUILD_TARGET" ]]; then
+  BINARY_DIR="${CONTROL_DIR}/target/${BUILD_TARGET}/release"
+fi
 
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR" "$DIST_DIR"
 
 cd "$CONTROL_DIR"
-cargo build --release
+if [[ -n "$BUILD_TARGET" ]]; then
+  cargo build --release --locked --target "$BUILD_TARGET"
+else
+  cargo build --release --locked
+fi
 
-cp "${CONTROL_DIR}/target/release/xaccel-control-api" "$WORK_DIR/"
+cp "${BINARY_DIR}/xaccel-control-api" "$WORK_DIR/"
 cp "${CONTROL_DIR}/README.md" "$WORK_DIR/"
 cp "${ROOT_DIR}/docs/control-api-mysql.md" "$WORK_DIR/"
 cp "${ROOT_DIR}/install/systemd/xaccel-control-api.service" "$WORK_DIR/"

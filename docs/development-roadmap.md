@@ -107,6 +107,11 @@ Done in `v0.16.1`:
 - Default the Linux installer to `listen_ip = "0.0.0.0"` for NATed cloud
   public IP environments.
 
+Done in `v0.16.2`:
+
+- Build Linux release binaries with `x86_64-unknown-linux-musl` to support
+  older glibc servers without OS upgrades.
+
 Next:
 
 - Add structured bind error reporting.

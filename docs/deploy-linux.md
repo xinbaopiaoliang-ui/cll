@@ -2,13 +2,14 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.16.1`.
+Current version: `v0.16.2`.
 
 The node can:
 
 - install through the GitHub-hosted one-click script;
 - download the latest GitHub Release artifact;
 - verify sha256;
+- run release binaries built with musl for older glibc distributions;
 - run as a systemd service;
 - expose `127.0.0.1:9876/health`;
 - listen on TCP/UDP `listen_ip:server_port`, defaulting to `0.0.0.0`;
@@ -33,8 +34,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.16.1
-git push origin v0.16.1
+git tag v0.16.2
+git push origin v0.16.2
 ```
 
 GitHub Actions will publish:

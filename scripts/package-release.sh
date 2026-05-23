@@ -24,14 +24,24 @@ esac
 ARTIFACT_NAME="xaccel-node-${VERSION}-linux-${RELEASE_ARCH}"
 GENERIC_ARTIFACT_NAME="xaccel-node-linux-${RELEASE_ARCH}"
 WORK_DIR="${DIST_DIR}/${ARTIFACT_NAME}"
+BUILD_TARGET="${CARGO_BUILD_TARGET:-}"
+BINARY_DIR="${NODE_DIR}/target/release"
+
+if [[ -n "$BUILD_TARGET" ]]; then
+  BINARY_DIR="${NODE_DIR}/target/${BUILD_TARGET}/release"
+fi
 
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR" "$DIST_DIR"
 
 cd "$NODE_DIR"
-cargo build --release
+if [[ -n "$BUILD_TARGET" ]]; then
+  cargo build --release --locked --target "$BUILD_TARGET"
+else
+  cargo build --release --locked
+fi
 
-cp "${NODE_DIR}/target/release/xaccel-node" "$WORK_DIR/"
+cp "${BINARY_DIR}/xaccel-node" "$WORK_DIR/"
 cp "${ROOT_DIR}/install/config.example.toml" "$WORK_DIR/"
 cp "${ROOT_DIR}/install/systemd/xaccel-node.service" "$WORK_DIR/"
 cp "${ROOT_DIR}/install/uninstall.sh" "$WORK_DIR/"
