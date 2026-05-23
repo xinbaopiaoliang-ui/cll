@@ -100,6 +100,13 @@ Done in `v0.12.0`:
 - Package the client probe binary in GitHub Releases.
 - Document the operator-facing client probe workflow.
 
+Done in `v0.16.1`:
+
+- Add `network.listen_ip` so nodes can bind `0.0.0.0` while keeping public
+  `server_ip` for scheduling.
+- Default the Linux installer to `listen_ip = "0.0.0.0"` for NATed cloud
+  public IP environments.
+
 Next:
 
 - Add structured bind error reporting.

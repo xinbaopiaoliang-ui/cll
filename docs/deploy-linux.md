@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.16.0`.
+Current version: `v0.16.1`.
 
 The node can:
 
@@ -11,7 +11,7 @@ The node can:
 - verify sha256;
 - run as a systemd service;
 - expose `127.0.0.1:9876/health`;
-- listen on the configured TCP/UDP `server_ip:server_port`;
+- listen on TCP/UDP `listen_ip:server_port`, defaulting to `0.0.0.0`;
 - count basic TCP/UDP traffic;
 - answer structured `xaccel/1` client probe requests with a short-lived
   probe session id;
@@ -33,8 +33,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.16.0
-git push origin v0.16.0
+git tag v0.16.1
+git push origin v0.16.1
 ```
 
 GitHub Actions will publish:
@@ -52,7 +52,9 @@ Wait until the `Release XAccel` workflow succeeds.
 
 ## 2. Install On Linux
 
-Replace `YOUR_SERVER_IP` with the Linux server public IP:
+Replace `YOUR_SERVER_IP` with the Linux server public IP. The installer writes
+`listen_ip = "0.0.0.0"` by default so cloud servers can accept traffic even when
+the public IP is NATed and not present on the local network interface.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh | sudo bash -s -- \
@@ -122,7 +124,7 @@ Expected fields:
   "listeners": {
     "udp_listening": true,
     "tcp_listening": true,
-    "listen_addr": "YOUR_SERVER_IP:666"
+    "listen_addr": "0.0.0.0:666"
   },
   "traffic": {
     "udp_rx_packets": 1,

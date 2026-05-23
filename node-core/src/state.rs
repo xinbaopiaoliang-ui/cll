@@ -190,13 +190,7 @@ impl RuntimeState {
     pub fn health_snapshot(&self) -> HealthSnapshot {
         let network = self.inner.config.network.as_ref();
 
-        let listen_addr = network.map(|network| {
-            if network.server_ip.contains(':') {
-                format!("[{}]:{}", network.server_ip, network.server_port)
-            } else {
-                format!("{}:{}", network.server_ip, network.server_port)
-            }
-        });
+        let listen_addr = network.map(|network| network.listen_endpoint());
 
         HealthSnapshot {
             status: self.inner.status.clone(),

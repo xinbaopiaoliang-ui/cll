@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.16.0"
+INSTALLER_VERSION="0.16.1"
 SERVICE_NAME="xaccel-node"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-node"
@@ -20,6 +20,7 @@ STANDALONE="0"
 NODE_ID=""
 PANEL_URL=""
 SERVER_IP=""
+LISTEN_IP="0.0.0.0"
 SERVER_PORT=""
 NODE_SECRET=""
 CONFIG_REVISION="1"
@@ -44,6 +45,7 @@ Options:
   --node-id ID            Node ID for standalone mode.
   --panel-url URL         Backend base URL for standalone mode.
   --server-ip IP          Node server IP for standalone mode.
+  --listen-ip IP          Local listener bind IP. Default: 0.0.0.0.
   --server-port PORT      Node server port for standalone mode.
   --node-secret SECRET    Optional node secret for standalone mode.
   --channel CHANNEL       Release channel. Default: stable.
@@ -90,6 +92,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --server-ip)
       SERVER_IP="${2:-}"
+      shift 2
+      ;;
+    --listen-ip)
+      LISTEN_IP="${2:-}"
       shift 2
       ;;
     --server-port)
@@ -174,6 +180,7 @@ preflight() {
   command -v ip >/dev/null 2>&1 || fail "iproute2 is required"
   command -v curl >/dev/null 2>&1 || fail "curl is required"
   command -v tar >/dev/null 2>&1 || fail "tar is required"
+  [[ -n "$LISTEN_IP" ]] || fail "--listen-ip must not be empty"
 
   if [[ "$STANDALONE" == "1" ]]; then
     [[ -n "$NODE_ID" ]] || fail "--node-id is required in standalone mode"
@@ -288,7 +295,7 @@ bootstrap_standalone() {
   "server_port": $SERVER_PORT,
   "config_revision": 1,
   "release": {
-    "version": "0.16.0",
+    "version": "0.16.1",
     "manifest_url": ""
   },
   "standalone": true
@@ -454,6 +461,7 @@ EOF
 
 [network]
 server_ip = "$SERVER_IP"
+listen_ip = "$LISTEN_IP"
 server_port = $SERVER_PORT
 relay_server_ip = ""
 relay_server_port = 0

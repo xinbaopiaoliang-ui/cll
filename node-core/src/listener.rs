@@ -56,16 +56,12 @@ pub async fn spawn_network_listeners(state: RuntimeState) -> anyhow::Result<Vec<
 }
 
 fn listen_addr(_config: &NodeConfig, network: &NetworkConfig) -> anyhow::Result<SocketAddr> {
-    let server_ip = network.server_ip.trim();
-    if server_ip.is_empty() {
-        bail!("network.server_ip is required");
+    let listen_host = network.listen_host();
+    if listen_host.is_empty() {
+        bail!("network.listen_ip or network.server_ip is required");
     }
 
-    let endpoint = if server_ip.contains(':') {
-        format!("[{}]:{}", server_ip, network.server_port)
-    } else {
-        format!("{}:{}", server_ip, network.server_port)
-    };
+    let endpoint = network.listen_endpoint();
 
     endpoint
         .parse::<SocketAddr>()
