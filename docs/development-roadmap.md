@@ -133,6 +133,13 @@ Done in `v0.14.1`:
 - Store admin status changes in `node_audit_logs`.
 - Generate and persist an admin token during control-api one-click install.
 
+Done in `v0.15.0`:
+
+- Add admin bootstrap-token generation endpoint with one-line install command.
+- Implement `/api/node/v1/bootstrap` token exchange backed by MySQL.
+- Let the Linux installer parse bootstrap responses and write identity,
+  network, and control-plane config without standalone parameters.
+
 Goals:
 
 - Implement backend handshake.

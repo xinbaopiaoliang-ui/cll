@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.14.1"
+INSTALLER_VERSION="0.15.0"
 SERVICE_NAME="xaccel-node"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-node"
@@ -22,6 +22,7 @@ PANEL_URL=""
 SERVER_IP=""
 SERVER_PORT=""
 NODE_SECRET=""
+CONFIG_REVISION="1"
 CHANNEL="stable"
 OPEN_FIREWALL="0"
 DRY_RUN="0"
@@ -192,6 +193,42 @@ json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
+json_string_field() {
+  local file key
+  file="$1"
+  key="$2"
+  sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$file" | head -n 1
+}
+
+json_number_field() {
+  local file key
+  file="$1"
+  key="$2"
+  sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$file" | head -n 1
+}
+
+load_bootstrap_response_vars() {
+  local file
+  file="${DATA_DIR}/bootstrap-response.json"
+  [[ -f "$file" ]] || fail "bootstrap response missing: $file"
+
+  NODE_ID="$(json_number_field "$file" "node_id")"
+  NODE_SECRET="$(json_string_field "$file" "node_secret")"
+  PANEL_URL="$(json_string_field "$file" "panel_url")"
+  SERVER_IP="$(json_string_field "$file" "server_ip")"
+  SERVER_PORT="$(json_number_field "$file" "server_port")"
+  CONFIG_REVISION="$(json_number_field "$file" "config_revision")"
+  CONFIG_REVISION="${CONFIG_REVISION:-1}"
+
+  [[ -n "$NODE_ID" ]] || fail "bootstrap response missing node_id"
+  [[ -n "$NODE_SECRET" ]] || fail "bootstrap response missing node_secret"
+  [[ -n "$PANEL_URL" ]] || fail "bootstrap response missing panel_url"
+  [[ -n "$SERVER_IP" ]] || fail "bootstrap response missing server_ip"
+  [[ -n "$SERVER_PORT" ]] || fail "bootstrap response missing server_port"
+  (( SERVER_PORT >= 1 && SERVER_PORT <= 65535 )) || fail "bootstrap response server_port must be 1-65535"
+  (( CONFIG_REVISION >= 1 )) || fail "bootstrap response config_revision must be positive"
+}
+
 bootstrap() {
   local hostname arch kernel ips_json payload response
   hostname="$(hostname)"
@@ -251,7 +288,7 @@ bootstrap_standalone() {
   "server_port": $SERVER_PORT,
   "config_revision": 1,
   "release": {
-    "version": "0.14.1",
+    "version": "0.15.0",
     "manifest_url": ""
   },
   "standalone": true
@@ -280,13 +317,9 @@ reuse_existing_identity_secret() {
 
 write_identity_placeholder() {
   if [[ -f "$IDENTITY_FILE" ]]; then
-    if [[ "$STANDALONE" != "1" ]]; then
-      log "identity already exists: $IDENTITY_FILE"
-      return
-    fi
-    log "update existing standalone identity: $IDENTITY_FILE"
+    log "update existing identity: $IDENTITY_FILE"
   else
-    log "write standalone identity: $IDENTITY_FILE"
+    log "write identity: $IDENTITY_FILE"
   fi
 
   if [[ "$STANDALONE" == "1" && -z "$NODE_SECRET" ]]; then
@@ -402,7 +435,7 @@ response_file = "${DATA_DIR}/bootstrap-response.json"
 
 [control]
 enabled = ${control_enabled}
-config_revision = 1
+config_revision = ${CONFIG_REVISION}
 request_timeout_sec = 5
 
 [report]
@@ -411,7 +444,12 @@ traffic_batch_sec = 60
 metrics_interval_sec = 15
 EOF
 
-  if [[ "$STANDALONE" == "1" ]]; then
+  if [[ -n "$SERVER_IP" && -n "$SERVER_PORT" ]]; then
+    local network_tag
+    network_tag="bootstrap"
+    if [[ "$STANDALONE" == "1" ]]; then
+      network_tag="standalone"
+    fi
     cat >> "$CONFIG_FILE" <<EOF
 
 [network]
@@ -423,7 +461,7 @@ is_support_ipv6 = false
 disable_quic = false
 area = "UNKNOWN"
 bandwidth_quality = "normal"
-tag = "standalone"
+tag = "$network_tag"
 
 [network.operator_ips]
 telecom_ip = ""
@@ -461,9 +499,8 @@ EOF
 
 open_firewall_if_requested() {
   [[ "$OPEN_FIREWALL" == "1" ]] || return 0
-  if [[ "$STANDALONE" != "1" ]]; then
-    log "firewall opening is requested, but port parsing depends on backend bootstrap response"
-    log "MVP installer leaves firewall unchanged; open node TCP/UDP port manually"
+  if [[ -z "$SERVER_PORT" ]]; then
+    log "firewall opening is requested, but server port is unknown"
     return 0
   fi
 
@@ -509,9 +546,7 @@ main() {
     bootstrap
   fi
 
-  if [[ -z "$NODE_SECRET" && "$STANDALONE" == "1" ]]; then
-    NODE_SECRET="$(sed -n 's/.*"node_secret": "\([^"]*\)".*/\1/p' "${DATA_DIR}/bootstrap-response.json" | head -n 1)"
-  fi
+  load_bootstrap_response_vars
 
   write_identity_placeholder
   install_binary_release

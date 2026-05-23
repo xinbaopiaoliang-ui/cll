@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.14.1"
+INSTALLER_VERSION="0.15.0"
 SERVICE_NAME="xaccel-control-api"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-control-api"
@@ -16,6 +16,7 @@ LISTEN="127.0.0.1:18080"
 TOKEN_TTL_SEC="120"
 MAX_DB_CONNECTIONS="8"
 ADMIN_TOKEN=""
+PUBLIC_BASE_URL=""
 ARTIFACT_URL=""
 SHA256_URL=""
 DRY_RUN="0"
@@ -31,6 +32,7 @@ Options:
   --token-ttl-sec SEC     Client token TTL. Default: 120.
   --max-db-connections N  MySQL connection pool size. Default: 8.
   --admin-token TOKEN     Admin API bearer token. Generated automatically when omitted.
+  --public-base-url URL   Optional public base URL for node bootstrap responses.
   --artifact-url URL      Override xaccel-control-api tar.gz download URL.
   --sha256-url URL        Override xaccel-control-api sha256 download URL.
   --dry-run               Run preflight only and print planned actions.
@@ -67,6 +69,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --admin-token)
       ADMIN_TOKEN="${2:-}"
+      shift 2
+      ;;
+    --public-base-url)
+      PUBLIC_BASE_URL="${2:-}"
       shift 2
       ;;
     --artifact-url)
@@ -197,6 +203,9 @@ XACCEL_MAX_DB_CONNECTIONS='$(env_escape "$MAX_DB_CONNECTIONS")'
 XACCEL_ADMIN_TOKEN='$(env_escape "$ADMIN_TOKEN")'
 RUST_LOG='xaccel_control_api=info'
 EOF
+  if [[ -n "$PUBLIC_BASE_URL" ]]; then
+    printf "XACCEL_PUBLIC_BASE_URL='%s'\n" "$(env_escape "$PUBLIC_BASE_URL")" >> "$ENV_FILE"
+  fi
   chmod 0600 "$ENV_FILE"
 }
 

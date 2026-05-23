@@ -13,6 +13,7 @@ use base64::{
 };
 use clap::Parser;
 use hmac::{Hmac, Mac};
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -31,6 +32,11 @@ const TOKEN_PREFIX: &str = "xat";
 const TOKEN_VERSION: &str = "v1";
 const NODE_REPORT_PATH: &str = "/api/node/v1/report";
 const NODE_REPORT_MAX_SKEW_SEC: u64 = 300;
+const NODE_BOOTSTRAP_PATH: &str = "/api/node/v1/bootstrap";
+const DEFAULT_BOOTSTRAP_TTL_SEC: u64 = 3600;
+const MAX_BOOTSTRAP_TTL_SEC: u64 = 86_400;
+const DEFAULT_INSTALL_URL: &str =
+    "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Parser)]
@@ -51,6 +57,9 @@ struct Cli {
 
     #[arg(long, env = "XACCEL_ADMIN_TOKEN")]
     admin_token: Option<String>,
+
+    #[arg(long, env = "XACCEL_PUBLIC_BASE_URL")]
+    public_base_url: Option<String>,
 }
 
 #[derive(Clone)]
@@ -58,6 +67,7 @@ struct AppState {
     pool: MySqlPool,
     token_ttl_sec: u64,
     admin_token: Option<String>,
+    public_base_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -210,6 +220,34 @@ struct NodeReportResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct BootstrapRequest {
+    bootstrap_token: String,
+    hostname: String,
+    os: String,
+    arch: String,
+    kernel: String,
+    ips: Vec<String>,
+    installer_version: String,
+}
+
+#[derive(Debug, Serialize)]
+struct BootstrapResponse {
+    node_id: u64,
+    node_secret: String,
+    panel_url: String,
+    server_ip: String,
+    server_port: u32,
+    config_revision: u64,
+    release: BootstrapReleaseInfo,
+}
+
+#[derive(Debug, Serialize)]
+struct BootstrapReleaseInfo {
+    version: &'static str,
+    manifest_url: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct AdminListNodesQuery {
     limit: Option<u32>,
 }
@@ -223,6 +261,16 @@ struct AdminNodeDetailQuery {
 struct AdminUpdateNodeStatusRequest {
     status: String,
     reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminCreateBootstrapTokenRequest {
+    expires_in_sec: Option<u64>,
+    created_by: Option<u64>,
+    public_base_url: Option<String>,
+    install_url: Option<String>,
+    enable_control_plane: Option<bool>,
+    channel: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -246,6 +294,17 @@ struct AdminUpdateNodeStatusResponse {
     previous_status: String,
     current_status: String,
     reason: Option<String>,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminCreateBootstrapTokenResponse {
+    status: &'static str,
+    node_id: u64,
+    bootstrap_token: String,
+    bootstrap_url: String,
+    expires_at: u64,
+    install_command: String,
     server_time: u64,
 }
 
@@ -351,6 +410,18 @@ struct AdminReportRow {
     raw_json: Option<String>,
 }
 
+#[derive(Debug, FromRow)]
+struct BootstrapExchangeRow {
+    token_id: u64,
+    node_id: u64,
+    expires_at: u64,
+    used_at: Option<u64>,
+    node_secret: Option<String>,
+    server_ip: String,
+    server_port: u32,
+    config_revision: u64,
+}
+
 #[derive(Debug)]
 struct AppError {
     status: StatusCode,
@@ -384,16 +455,27 @@ async fn main() -> anyhow::Result<()> {
             .map(str::trim)
             .filter(|token| !token.is_empty())
             .map(ToOwned::to_owned),
+        public_base_url: cli
+            .public_base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .map(trim_trailing_slash),
     };
     let app = Router::new()
         .route("/health", get(health))
         .route("/api/client/v1/connect-intent", post(connect_intent))
+        .route(NODE_BOOTSTRAP_PATH, post(node_bootstrap))
         .route(NODE_REPORT_PATH, post(node_report))
         .route("/api/admin/v1/nodes", get(admin_list_nodes))
         .route("/api/admin/v1/nodes/:node_id", get(admin_get_node))
         .route(
             "/api/admin/v1/nodes/:node_id/status",
             patch(admin_update_node_status),
+        )
+        .route(
+            "/api/admin/v1/nodes/:node_id/bootstrap-token",
+            post(admin_create_bootstrap_token),
         )
         .with_state(Arc::new(state));
 
@@ -422,6 +504,22 @@ fn validate_cli(cli: &Cli) -> anyhow::Result<()> {
         .is_some_and(|token| token.trim().is_empty())
     {
         bail!("--admin-token must not be empty when provided");
+    }
+    if cli
+        .public_base_url
+        .as_deref()
+        .is_some_and(|url| url.trim().is_empty())
+    {
+        bail!("--public-base-url must not be empty when provided");
+    }
+    if let Some(url) = cli.public_base_url.as_deref() {
+        let url = url.trim();
+        if url.chars().any(char::is_whitespace) {
+            bail!("--public-base-url must not contain whitespace");
+        }
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            bail!("--public-base-url must start with http:// or https://");
+        }
     }
     Ok(())
 }
@@ -459,6 +557,17 @@ async fn connect_intent(
 ) -> Result<Json<ConnectIntentResponse>, AppError> {
     validate_connect_intent_request(&request)?;
     let response = issue_connect_intent(&state.pool, state.token_ttl_sec, request).await?;
+    Ok(Json(response))
+}
+
+async fn node_bootstrap(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<BootstrapRequest>,
+) -> Result<Json<BootstrapResponse>, AppError> {
+    validate_bootstrap_request(&request)?;
+    let panel_url = resolve_public_base_url(&state, &headers)?;
+    let response = exchange_bootstrap_token(&state.pool, request, panel_url).await?;
     Ok(Json(response))
 }
 
@@ -569,6 +678,54 @@ async fn admin_update_node_status(
         previous_status,
         current_status: next_status.to_string(),
         reason,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_create_bootstrap_token(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+    Json(request): Json<AdminCreateBootstrapTokenRequest>,
+) -> Result<Json<AdminCreateBootstrapTokenResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let public_base_url = request
+        .public_base_url
+        .as_deref()
+        .map(normalize_url_arg)
+        .transpose()?
+        .unwrap_or(resolve_public_base_url(&state, &headers)?);
+    let install_url = request
+        .install_url
+        .as_deref()
+        .map(normalize_url_arg)
+        .transpose()?
+        .unwrap_or_else(|| DEFAULT_INSTALL_URL.to_string());
+    let channel = request
+        .channel
+        .as_deref()
+        .map(normalize_command_arg)
+        .transpose()?;
+    let expires_in_sec = clamp_bootstrap_ttl(request.expires_in_sec)?;
+    let expires_at = now_unix() + expires_in_sec;
+    let bootstrap_token =
+        create_bootstrap_token(&state.pool, node_id, request.created_by, expires_at).await?;
+    let bootstrap_url = format!("{public_base_url}{NODE_BOOTSTRAP_PATH}");
+    let install_command = build_bootstrap_install_command(
+        &install_url,
+        &bootstrap_url,
+        &bootstrap_token,
+        request.enable_control_plane.unwrap_or(true),
+        channel.as_deref(),
+    );
+
+    Ok(Json(AdminCreateBootstrapTokenResponse {
+        status: "ok",
+        node_id,
+        bootstrap_token,
+        bootstrap_url,
+        expires_at,
+        install_command,
         server_time: now_unix(),
     }))
 }
@@ -744,6 +901,170 @@ INSERT INTO connect_intents (
     .map_err(AppError::database)?;
 
     Ok(())
+}
+
+async fn create_bootstrap_token(
+    pool: &MySqlPool,
+    node_id: u64,
+    created_by: Option<u64>,
+    expires_at: u64,
+) -> Result<String, AppError> {
+    if node_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_node",
+            "node_id must be positive",
+        ));
+    }
+    if created_by == Some(0) {
+        return Err(AppError::bad_request(
+            "invalid_actor",
+            "created_by must be positive when provided",
+        ));
+    }
+
+    let node_exists = sqlx::query_scalar::<_, u64>(
+        r#"
+SELECT id
+FROM accel_nodes
+WHERE id = ?
+LIMIT 1
+"#,
+    )
+    .bind(node_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::database)?
+    .is_some();
+
+    if !node_exists {
+        return Err(AppError::not_found("node_not_found", "node does not exist"));
+    }
+
+    let token = generate_bootstrap_token();
+    let token_hash = hash_bootstrap_token(&token);
+    sqlx::query(
+        r#"
+INSERT INTO node_bootstrap_tokens (
+  node_id,
+  token_hash,
+  expires_at,
+  created_by,
+  created_at
+) VALUES (?, ?, FROM_UNIXTIME(?), ?, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(node_id)
+    .bind(token_hash)
+    .bind(expires_at)
+    .bind(created_by)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+
+    Ok(token)
+}
+
+async fn exchange_bootstrap_token(
+    pool: &MySqlPool,
+    request: BootstrapRequest,
+    panel_url: String,
+) -> Result<BootstrapResponse, AppError> {
+    let token_hash = hash_bootstrap_token(&request.bootstrap_token);
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
+    let row = sqlx::query_as::<_, BootstrapExchangeRow>(
+        r#"
+SELECT
+  bt.id AS token_id,
+  bt.node_id,
+  CAST(UNIX_TIMESTAMP(bt.expires_at) AS UNSIGNED) AS expires_at,
+  CAST(UNIX_TIMESTAMP(bt.used_at) AS UNSIGNED) AS used_at,
+  n.node_secret,
+  n.server_ip,
+  n.server_port,
+  n.config_revision
+FROM node_bootstrap_tokens bt
+JOIN accel_nodes n ON n.id = bt.node_id
+WHERE bt.token_hash = ?
+LIMIT 1
+FOR UPDATE
+"#,
+    )
+    .bind(token_hash)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(AppError::database)?
+    .ok_or_else(|| {
+        AppError::bad_request("invalid_bootstrap_token", "bootstrap token is invalid")
+    })?;
+
+    if row.used_at.is_some() {
+        return Err(AppError::bad_request(
+            "bootstrap_token_used",
+            "bootstrap token was already used",
+        ));
+    }
+    if row.expires_at <= now_unix() {
+        return Err(AppError::bad_request(
+            "bootstrap_token_expired",
+            "bootstrap token is expired",
+        ));
+    }
+
+    let node_secret = row
+        .node_secret
+        .filter(|secret| !secret.trim().is_empty())
+        .unwrap_or_else(generate_node_secret);
+    let config_revision = row.config_revision.max(1);
+    let used_by_ip = request.ips.first().map(String::as_str);
+
+    sqlx::query(
+        r#"
+UPDATE node_bootstrap_tokens
+SET used_at = CURRENT_TIMESTAMP,
+    used_by_ip = ?
+WHERE id = ?
+"#,
+    )
+    .bind(used_by_ip)
+    .bind(row.token_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    sqlx::query(
+        r#"
+UPDATE accel_nodes
+SET
+  status = 'installing',
+  node_secret = ?,
+  config_revision = ?,
+  installed_at = CURRENT_TIMESTAMP,
+  install_error_code = NULL,
+  install_error_message = NULL
+WHERE id = ?
+"#,
+    )
+    .bind(&node_secret)
+    .bind(config_revision)
+    .bind(row.node_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    tx.commit().await.map_err(AppError::database)?;
+
+    Ok(BootstrapResponse {
+        node_id: row.node_id,
+        node_secret,
+        panel_url,
+        server_ip: row.server_ip,
+        server_port: row.server_port,
+        config_revision,
+        release: BootstrapReleaseInfo {
+            version: VERSION,
+            manifest_url: String::new(),
+        },
+    })
 }
 
 async fn select_admin_nodes(pool: &MySqlPool, limit: u32) -> Result<Vec<AdminNodeRow>, AppError> {
@@ -1045,6 +1366,52 @@ fn validate_connect_intent_request(request: &ConnectIntentRequest) -> Result<(),
     Ok(())
 }
 
+fn validate_bootstrap_request(request: &BootstrapRequest) -> Result<(), AppError> {
+    if request.bootstrap_token.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_bootstrap_token",
+            "bootstrap_token is required",
+        ));
+    }
+    if request.hostname.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_hostname",
+            "hostname is required",
+        ));
+    }
+    if request.os != "linux" {
+        return Err(AppError::bad_request(
+            "invalid_os",
+            "only linux bootstrap is supported",
+        ));
+    }
+    if !matches!(request.arch.as_str(), "x86_64" | "aarch64") {
+        return Err(AppError::bad_request(
+            "invalid_arch",
+            "arch must be x86_64 or aarch64",
+        ));
+    }
+    if request.kernel.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_kernel",
+            "kernel is required",
+        ));
+    }
+    if request.installer_version.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_installer_version",
+            "installer_version is required",
+        ));
+    }
+    if request.ips.is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_ips",
+            "at least one host IP is required",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_admin_node_status(status: &str) -> Result<&'static str, AppError> {
     match status.trim() {
         "pending_install" => Ok("pending_install"),
@@ -1185,6 +1552,17 @@ fn clamp_limit(limit: Option<u32>, default: u32, max: u32) -> u32 {
     limit.unwrap_or(default).max(1).min(max)
 }
 
+fn clamp_bootstrap_ttl(ttl: Option<u64>) -> Result<u64, AppError> {
+    let ttl = ttl.unwrap_or(DEFAULT_BOOTSTRAP_TTL_SEC);
+    if ttl == 0 {
+        return Err(AppError::bad_request(
+            "invalid_bootstrap_ttl",
+            "expires_in_sec must be positive",
+        ));
+    }
+    Ok(ttl.min(MAX_BOOTSTRAP_TTL_SEC))
+}
+
 fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
     let configured = state.admin_token.as_deref().ok_or_else(|| {
         AppError::service_unavailable(
@@ -1230,6 +1608,119 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
         diff |= usize::from(left_byte ^ right_byte);
     }
     diff == 0
+}
+
+fn resolve_public_base_url(state: &AppState, headers: &HeaderMap) -> Result<String, AppError> {
+    if let Some(url) = state.public_base_url.as_deref() {
+        return Ok(url.to_string());
+    }
+
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .ok_or_else(|| {
+            AppError::bad_request(
+                "missing_host",
+                "Host or X-Forwarded-Host header is required to derive public base URL",
+            )
+        })?;
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|proto| !proto.is_empty())
+        .unwrap_or("http");
+
+    normalize_url_arg(&format!("{proto}://{host}"))
+}
+
+fn normalize_url_arg(value: &str) -> Result<String, AppError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_url",
+            "url must not be empty",
+        ));
+    }
+    if value.chars().any(char::is_whitespace) {
+        return Err(AppError::bad_request(
+            "invalid_url",
+            "url must not contain whitespace",
+        ));
+    }
+    if !(value.starts_with("http://") || value.starts_with("https://")) {
+        return Err(AppError::bad_request(
+            "invalid_url",
+            "url must start with http:// or https://",
+        ));
+    }
+    Ok(trim_trailing_slash(value))
+}
+
+fn normalize_command_arg(value: &str) -> Result<String, AppError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_argument",
+            "argument must not be empty",
+        ));
+    }
+    if value
+        .chars()
+        .any(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-')))
+    {
+        return Err(AppError::bad_request(
+            "invalid_argument",
+            "argument may only contain letters, numbers, dot, underscore, or dash",
+        ));
+    }
+    Ok(value.to_string())
+}
+
+fn trim_trailing_slash(value: &str) -> String {
+    value.trim_end_matches('/').to_string()
+}
+
+fn generate_bootstrap_token() -> String {
+    let mut bytes = [0_u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    format!("xbt.{}", URL_SAFE_NO_PAD.encode(bytes))
+}
+
+fn generate_node_secret() -> String {
+    let mut bytes = [0_u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    BASE64.encode(bytes)
+}
+
+fn hash_bootstrap_token(token: &str) -> String {
+    format!(
+        "sha256:{}",
+        URL_SAFE_NO_PAD.encode(Sha256::digest(token.trim()))
+    )
+}
+
+fn build_bootstrap_install_command(
+    install_url: &str,
+    bootstrap_url: &str,
+    bootstrap_token: &str,
+    enable_control_plane: bool,
+    channel: Option<&str>,
+) -> String {
+    let mut command = format!(
+        "curl -fsSL {install_url} | sudo bash -s -- \\\n  --bootstrap-url {bootstrap_url} \\\n  --bootstrap-token {bootstrap_token}"
+    );
+    if let Some(channel) = channel {
+        command.push_str(" \\\n  --channel ");
+        command.push_str(channel);
+    }
+    if enable_control_plane {
+        command.push_str(" \\\n  --enable-control-plane");
+    }
+    command
 }
 
 fn sign_client_token(claims: &ClientTokenClaims, secret: &str) -> anyhow::Result<String> {
@@ -1422,7 +1913,7 @@ mod tests {
 
     #[test]
     fn verifies_node_report_signature() {
-        let body = br#"{"node_id":1,"config_revision":1,"node_version":"0.14.0","status":"ready","timestamp":1779250000,"health":{"listeners":{"udp_listening":true,"tcp_listening":true},"traffic":{},"sessions":{}}}"#;
+        let body = br#"{"node_id":1,"config_revision":1,"node_version":"0.15.0","status":"ready","timestamp":1779250000,"health":{"listeners":{"udp_listening":true,"tcp_listening":true},"traffic":{},"sessions":{}}}"#;
         let timestamp = now_unix();
         let nonce = "test-nonce";
         let body_sha256 = BASE64.encode(Sha256::digest(body));
@@ -1457,7 +1948,7 @@ mod tests {
         let report = NodeReportRequest {
             node_id: 1,
             config_revision: 1,
-            node_version: "0.14.0".to_string(),
+            node_version: "0.15.0".to_string(),
             status: "ready".to_string(),
             timestamp: now_unix(),
             health: NodeHealthSnapshot {
@@ -1496,5 +1987,44 @@ mod tests {
         assert!(constant_time_eq(b"secret", b"secret"));
         assert!(!constant_time_eq(b"secret", b"other"));
         assert!(!constant_time_eq(b"secret", b"secret-longer"));
+    }
+
+    #[test]
+    fn validates_bootstrap_request() {
+        let request = BootstrapRequest {
+            bootstrap_token: "xbt.test".to_string(),
+            hostname: "node-1".to_string(),
+            os: "linux".to_string(),
+            arch: "x86_64".to_string(),
+            kernel: "6.8.0".to_string(),
+            ips: vec!["103.201.131.99".to_string()],
+            installer_version: "0.15.0".to_string(),
+        };
+
+        validate_bootstrap_request(&request).expect("request is valid");
+    }
+
+    #[test]
+    fn hashes_bootstrap_token_without_plaintext() {
+        let hash = hash_bootstrap_token("xbt.secret");
+
+        assert!(hash.starts_with("sha256:"));
+        assert!(!hash.contains("secret"));
+        assert_eq!(hash, hash_bootstrap_token("xbt.secret"));
+    }
+
+    #[test]
+    fn builds_bootstrap_install_command() {
+        let command = build_bootstrap_install_command(
+            DEFAULT_INSTALL_URL,
+            "http://127.0.0.1:18080/api/node/v1/bootstrap",
+            "xbt.token",
+            true,
+            Some("stable"),
+        );
+
+        assert!(command.contains("--bootstrap-url http://127.0.0.1:18080/api/node/v1/bootstrap"));
+        assert!(command.contains("--bootstrap-token xbt.token"));
+        assert!(command.contains("--enable-control-plane"));
     }
 }

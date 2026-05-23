@@ -30,6 +30,8 @@ POST /api/node/v1/report
 GET  /api/admin/v1/nodes
 GET  /api/admin/v1/nodes/{node_id}
 PATCH /api/admin/v1/nodes/{node_id}/status
+POST /api/admin/v1/nodes/{node_id}/bootstrap-token
+POST /api/node/v1/bootstrap
 ```
 
 Request:
@@ -49,4 +51,13 @@ Admin requests use:
 ```bash
 curl -fsSL http://127.0.0.1:18080/api/admin/v1/nodes \
   -H "Authorization: Bearer ${XACCEL_ADMIN_TOKEN}"
+```
+
+Generate a bootstrap install command:
+
+```bash
+curl -fsSL -X POST http://127.0.0.1:18080/api/admin/v1/nodes/1/bootstrap-token \
+  -H "Authorization: Bearer ${XACCEL_ADMIN_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"public_base_url":"http://CONTROL_PUBLIC_IP:18080"}'
 ```

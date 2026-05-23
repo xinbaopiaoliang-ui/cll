@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.14.1
+  version: 0.15.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -177,6 +177,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminUpdateNodeStatusResponse'
+  /api/admin/v1/nodes/{node_id}/bootstrap-token:
+    post:
+      summary: Create a one-time bootstrap token and install command for a node.
+      security:
+        - AdminBearer: []
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateBootstrapTokenRequest'
+      responses:
+        '200':
+          description: Bootstrap token and one-line Linux install command.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCreateBootstrapTokenResponse'
+        '404':
+          description: Node does not exist.
 components:
   securitySchemes:
     NodeHmac:
@@ -599,6 +625,50 @@ components:
         reason:
           type: string
           nullable: true
+        server_time:
+          type: integer
+    AdminCreateBootstrapTokenRequest:
+      type: object
+      properties:
+        expires_in_sec:
+          type: integer
+          minimum: 1
+          maximum: 86400
+          default: 3600
+        created_by:
+          type: integer
+          nullable: true
+        public_base_url:
+          type: string
+          format: uri
+          nullable: true
+        install_url:
+          type: string
+          format: uri
+          nullable: true
+        enable_control_plane:
+          type: boolean
+          default: true
+        channel:
+          type: string
+          nullable: true
+    AdminCreateBootstrapTokenResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        node_id:
+          type: integer
+        bootstrap_token:
+          type: string
+        bootstrap_url:
+          type: string
+          format: uri
+        expires_at:
+          type: integer
+        install_command:
+          type: string
         server_time:
           type: integer
     AdminNodeSummary:

@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.14.1`.
+Current version: `v0.15.0`.
 
 The node can:
 
@@ -33,8 +33,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.14.1
-git push origin v0.14.1
+git tag v0.15.0
+git push origin v0.15.0
 ```
 
 GitHub Actions will publish:
@@ -501,6 +501,19 @@ curl -fsSL http://127.0.0.1:18080/api/admin/v1/nodes \
 curl -fsSL http://127.0.0.1:18080/api/admin/v1/nodes/1 \
   -H "Authorization: Bearer ${ADMIN_TOKEN}"
 ```
+
+Create a one-time bootstrap install command for node `1`:
+
+```bash
+curl -fsSL -X POST http://127.0.0.1:18080/api/admin/v1/nodes/1/bootstrap-token \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"public_base_url":"http://195.245.242.9:18080","expires_in_sec":3600}'
+```
+
+Copy the returned `install_command` to the target Linux node. It calls
+`/api/node/v1/bootstrap`, exchanges the one-time token, writes identity and
+network config, installs the release binary, and starts signed node reports.
 
 The node posts to:
 
