@@ -1,4 +1,4 @@
-name: Release xaccel-node
+name: Release XAccel
 
 on:
   push:
@@ -33,11 +33,18 @@ jobs:
         working-directory: control-api
         run: cargo test --locked
 
+      - name: Test client probe
+        working-directory: client-probe
+        run: cargo test --locked
+
       - name: Package node release
         run: bash scripts/package-release.sh
 
       - name: Package control API release
         run: bash scripts/package-control-api-release.sh
+
+      - name: Package client probe release
+        run: bash scripts/package-client-probe-release.sh
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -52,6 +59,10 @@ jobs:
             dist/xaccel-control-api-linux-x86_64.tar.gz.sha256
             dist/xaccel-control-api-*-linux-x86_64.tar.gz
             dist/xaccel-control-api-*-linux-x86_64.sha256
+            dist/xaccel-client-probe-linux-x86_64.tar.gz
+            dist/xaccel-client-probe-linux-x86_64.tar.gz.sha256
+            dist/xaccel-client-probe-*-linux-x86_64.tar.gz
+            dist/xaccel-client-probe-*-linux-x86_64.sha256
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -68,6 +79,10 @@ jobs:
             dist/xaccel-control-api-linux-x86_64.tar.gz.sha256 \
             dist/xaccel-control-api-*-linux-x86_64.tar.gz \
             dist/xaccel-control-api-*-linux-x86_64.sha256 \
+            dist/xaccel-client-probe-linux-x86_64.tar.gz \
+            dist/xaccel-client-probe-linux-x86_64.tar.gz.sha256 \
+            dist/xaccel-client-probe-*-linux-x86_64.tar.gz \
+            dist/xaccel-client-probe-*-linux-x86_64.sha256 \
             --title "$TAG_NAME" \
             --notes "Automated XAccel Linux x86_64 release." \
           || gh release upload "$TAG_NAME" \
@@ -79,4 +94,8 @@ jobs:
             dist/xaccel-control-api-linux-x86_64.tar.gz.sha256 \
             dist/xaccel-control-api-*-linux-x86_64.tar.gz \
             dist/xaccel-control-api-*-linux-x86_64.sha256 \
+            dist/xaccel-client-probe-linux-x86_64.tar.gz \
+            dist/xaccel-client-probe-linux-x86_64.tar.gz.sha256 \
+            dist/xaccel-client-probe-*-linux-x86_64.tar.gz \
+            dist/xaccel-client-probe-*-linux-x86_64.sha256 \
             --clobber

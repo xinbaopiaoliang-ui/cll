@@ -2,6 +2,7 @@
 /node-core/target/
 /backend-mock/target/
 /control-api/target/
+/client-probe/target/
 *.log
 *.tmp
 *.local

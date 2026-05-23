@@ -22,6 +22,7 @@ cd D:\项目\broad\game-accelerator-research
 cargo metadata --manifest-path node-core\Cargo.toml --locked --no-deps --format-version 1
 cargo metadata --manifest-path backend-mock\Cargo.toml --locked --no-deps --format-version 1
 cargo metadata --manifest-path control-api\Cargo.toml --locked --no-deps --format-version 1
+cargo metadata --manifest-path client-probe\Cargo.toml --locked --no-deps --format-version 1
 ```
 
 On Linux or a complete Rust toolchain:
@@ -30,11 +31,12 @@ On Linux or a complete Rust toolchain:
 cargo test --manifest-path node-core/Cargo.toml --locked
 cargo test --manifest-path backend-mock/Cargo.toml --locked
 cargo test --manifest-path control-api/Cargo.toml --locked
+cargo test --manifest-path client-probe/Cargo.toml --locked
 ```
 
 ## Linux Runtime Check
 
-After installing `v0.11.0`:
+After installing `v0.12.0`:
 
 ```bash
 systemctl status xaccel-node
@@ -56,6 +58,7 @@ On Linux or WSL:
 ```bash
 bash scripts/package-release.sh
 bash scripts/package-control-api-release.sh
+bash scripts/package-client-probe-release.sh
 ```
 
 Output:
@@ -65,6 +68,8 @@ dist/xaccel-node-linux-x86_64.tar.gz
 dist/xaccel-node-linux-x86_64.tar.gz.sha256
 dist/xaccel-control-api-linux-x86_64.tar.gz
 dist/xaccel-control-api-linux-x86_64.tar.gz.sha256
+dist/xaccel-client-probe-linux-x86_64.tar.gz
+dist/xaccel-client-probe-linux-x86_64.tar.gz.sha256
 ```
 
 ## Backend Connect-Intent Mock
@@ -103,6 +108,19 @@ Then call:
 curl -fsSL http://127.0.0.1:18080/api/client/v1/connect-intent \
   -H 'Content-Type: application/json' \
   -d '{"user_id":1001,"device_id":"pc-001","game_id":8888,"platform":"pc","client_isp":"telecom","client_ip":"127.0.0.1","bandwidth_quality":"fast"}'
+```
+
+Or run the automated client probe:
+
+```bash
+cargo run --manifest-path client-probe/Cargo.toml -- \
+  --control-url http://127.0.0.1:18080 \
+  --user-id 1001 \
+  --device-id pc-001 \
+  --game-id 8888 \
+  --client-isp telecom \
+  --client-ip 127.0.0.1 \
+  --bandwidth-quality fast
 ```
 
 ## Current Gaps

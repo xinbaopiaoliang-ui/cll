@@ -43,10 +43,16 @@ $required = @(
     "control-api\Cargo.lock",
     "control-api\src\main.rs",
     "control-api\README.md",
+    "client-probe\Cargo.toml",
+    "client-probe\Cargo.lock",
+    "client-probe\src\main.rs",
+    "client-probe\README.md",
     "db\control-api.seed.example.sql",
     "scripts\package-release.sh",
     "scripts\package-control-api-release.sh",
+    "scripts\package-client-probe-release.sh",
     ".github\workflows\release.yml",
+    "docs\client-probe.md",
     "docs\local-validation.md"
 )
 
@@ -58,5 +64,8 @@ foreach ($path in $required) {
 }
 
 Get-ChildItem -Recurse -File -LiteralPath $root |
+    Where-Object {
+        $_.FullName -notmatch "\\(\.git|target|dist)\\"
+    } |
     Sort-Object FullName |
     Select-Object FullName, Length

@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.11.0`.
+Current version: `v0.12.0`.
 
 The node can:
 
@@ -20,7 +20,8 @@ The node can:
 - bind connect-intent target routes from signed client tokens;
 - forward authenticated UDP `session.data` packets to the bound UDP endpoint;
 - issue development connect-intent responses through `backend-mock`;
-- optionally report signed health snapshots to the backend control plane.
+- optionally report signed health snapshots to the backend control plane;
+- validate the full flow with the packaged `xaccel-client-probe` binary.
 
 It does not yet fetch production game rules or connect-intents from a real
 backend API.
@@ -30,8 +31,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.11.0
-git push origin v0.11.0
+git tag v0.12.0
+git push origin v0.12.0
 ```
 
 GitHub Actions will publish:
@@ -39,9 +40,13 @@ GitHub Actions will publish:
 ```text
 xaccel-node-linux-x86_64.tar.gz
 xaccel-node-linux-x86_64.tar.gz.sha256
+xaccel-control-api-linux-x86_64.tar.gz
+xaccel-control-api-linux-x86_64.tar.gz.sha256
+xaccel-client-probe-linux-x86_64.tar.gz
+xaccel-client-probe-linux-x86_64.tar.gz.sha256
 ```
 
-Wait until the `Release xaccel-node` workflow succeeds.
+Wait until the `Release XAccel` workflow succeeds.
 
 ## 2. Install On Linux
 
@@ -149,7 +154,7 @@ Expected response shape:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.11.0",
+  "node_version": "0.12.0",
   "transport": "udp",
   "requested_transport": "udp",
   "session": {
@@ -233,7 +238,7 @@ Expected response shape:
 {
   "type": "session.data.ok",
   "protocol": "xaccel/1",
-  "node_version": "0.11.0",
+  "node_version": "0.12.0",
   "transport": "udp",
   "session_id": "ps-udp-...",
   "status": "echo",
@@ -259,7 +264,7 @@ Call health again and check:
 
 Without a target endpoint this remains an echo integration check.
 
-Authenticated sessions can also test real UDP target forwarding. In `v0.11.0`,
+Authenticated sessions can also test real UDP target forwarding. In `v0.12.0`,
 the preferred path is to put the target route into the signed token, which
 models a backend-issued connect-intent. Start a tiny UDP echo target on the node
 server in another shell:
@@ -308,7 +313,7 @@ Expected response shape:
 ```json
 {
   "type": "session.data.ok",
-  "node_version": "0.11.0",
+  "node_version": "0.12.0",
   "status": "forwarded",
   "payload": "dXBzdHJlYW06aGVsbG8=",
   "payload_bytes": 14,
@@ -413,7 +418,46 @@ curl http://127.0.0.1:18080/health
 Keep it bound to `127.0.0.1` until client API authentication and HTTPS reverse
 proxying are added.
 
-## 10. Optional Control Plane Report
+## 10. Run The Client Probe Tool
+
+Install the release artifact on the control server or any test client host:
+
+```bash
+curl -fL -o /tmp/xaccel-client-probe-linux-x86_64.tar.gz \
+  https://github.com/xinbaopiaoliang-ui/cll/releases/latest/download/xaccel-client-probe-linux-x86_64.tar.gz
+
+tar -xzf /tmp/xaccel-client-probe-linux-x86_64.tar.gz -C /tmp
+sudo install -m 0755 /tmp/xaccel-client-probe-*/xaccel-client-probe /usr/local/bin/xaccel-client-probe
+```
+
+Run the full connect-intent, UDP probe, and session.data check:
+
+```bash
+xaccel-client-probe \
+  --control-url http://127.0.0.1:18080 \
+  --user-id 1001 \
+  --device-id pc-001 \
+  --game-id 8888 \
+  --client-isp telecom \
+  --client-ip 127.0.0.1 \
+  --bandwidth-quality fast
+```
+
+Expected top-level output:
+
+```json
+{
+  "status": "ok",
+  "probe": {
+    "credential_valid": true
+  },
+  "session_data": {
+    "status": "forwarded"
+  }
+}
+```
+
+## 11. Optional Control Plane Report
 
 Standalone installs keep backend reporting disabled by default because
 `https://api.example.com` is only a placeholder. When the real backend endpoint
@@ -447,7 +491,7 @@ X-Node-Signature
 
 Health exposes report status under `control_plane`.
 
-## 11. Placeholder Mode
+## 12. Placeholder Mode
 
 Only use this when the GitHub Release is not ready and you want to test the
 installer/systemd path:
@@ -462,7 +506,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
   --allow-placeholder
 ```
 
-## 12. Uninstall
+## 13. Uninstall
 
 Keep data and logs:
 

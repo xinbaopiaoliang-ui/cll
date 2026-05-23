@@ -92,6 +92,14 @@ Done in `v0.11.0`:
 - Publish node and control-api binaries in the same GitHub Release.
 - Document same-server deployment with `xaccel-node`, MySQL, and control-api.
 
+Done in `v0.12.0`:
+
+- Add `xaccel-client-probe`, a Rust CLI diagnostic client.
+- Automate connect-intent, UDP probe, and session.data relay validation.
+- Reuse one UDP socket for probe and session data to model client behavior.
+- Package the client probe binary in GitHub Releases.
+- Document the operator-facing client probe workflow.
+
 Next:
 
 - Add structured bind error reporting.

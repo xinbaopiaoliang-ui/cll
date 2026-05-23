@@ -280,7 +280,7 @@ Response:
   "type": "probe.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.11.0",
+  "node_version": "0.12.0",
   "server_time": 1779250000,
   "transport": "udp",
   "requested_transport": "udp",
@@ -398,7 +398,7 @@ Response:
   "type": "session.data.ok",
   "protocol": "xaccel/1",
   "node_id": 1,
-  "node_version": "0.11.0",
+  "node_version": "0.12.0",
   "server_time": 1779250001,
   "transport": "udp",
   "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
@@ -475,7 +475,7 @@ Response with an upstream payload:
 {
   "type": "session.data.ok",
   "protocol": "xaccel/1",
-  "node_version": "0.11.0",
+  "node_version": "0.12.0",
   "transport": "udp",
   "session_id": "ps-udp-1779250000-1-2-3-4-50000-1",
   "status": "forwarded",
@@ -551,6 +551,14 @@ Scheduling is still intentionally small: it chooses an online UDP-capable node
 by requested bandwidth quality, route priority, recent `last_seen_at`, and node
 id. The next step is to add user entitlement, ISP-aware scheduling, latency
 measurements, and load-based selection.
+
+## v0.12.0 Client Probe Tool
+
+`xaccel-client-probe` is an operator-facing diagnostic client. It requests a
+connect-intent from `xaccel-control-api`, sends the selected node a UDP probe
+with the returned token, reuses the same UDP socket for `session.data`, and
+prints a JSON result. This keeps manual node validation close to the future
+desktop client flow while avoiding copy/paste of tokens and session ids.
 
 ## 客户端连接意图
 
