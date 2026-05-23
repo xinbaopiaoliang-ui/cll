@@ -27,6 +27,7 @@ cargo run --manifest-path control-api/Cargo.toml -- \
 GET  /health
 POST /api/client/v1/connect-intent
 POST /api/node/v1/report
+POST /api/admin/v1/nodes
 GET  /api/admin/v1/nodes
 GET  /api/admin/v1/nodes/{node_id}
 PATCH /api/admin/v1/nodes/{node_id}/status
@@ -51,6 +52,15 @@ Admin requests use:
 ```bash
 curl -fsSL http://127.0.0.1:18080/api/admin/v1/nodes \
   -H "Authorization: Bearer ${XACCEL_ADMIN_TOKEN}"
+```
+
+Create a node record:
+
+```bash
+curl -fsSL -X POST http://127.0.0.1:18080/api/admin/v1/nodes \
+  -H "Authorization: Bearer ${XACCEL_ADMIN_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"node-2","server_ip":"203.0.113.10","server_port":666,"area":"UNKNOWN","bandwidth_quality":"normal"}'
 ```
 
 Generate a bootstrap install command:

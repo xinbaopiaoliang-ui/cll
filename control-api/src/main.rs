@@ -19,7 +19,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{mysql::MySqlPoolOptions, FromRow, MySqlPool};
 use std::{
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -258,6 +258,23 @@ struct AdminNodeDetailQuery {
 }
 
 #[derive(Debug, Deserialize)]
+struct AdminCreateNodeRequest {
+    name: String,
+    server_ip: String,
+    server_port: u32,
+    relay_server_ip: Option<String>,
+    relay_server_port: Option<u32>,
+    is_support_ipv6: Option<bool>,
+    bandwidth_quality: Option<String>,
+    disable_quic: Option<bool>,
+    area: Option<String>,
+    telecom_ip: Option<String>,
+    mobile_ip: Option<String>,
+    unicom_ip: Option<String>,
+    tag: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct AdminUpdateNodeStatusRequest {
     status: String,
     reason: Option<String>,
@@ -284,6 +301,13 @@ struct AdminListNodesResponse {
 struct AdminNodeDetailResponse {
     node: AdminNodeSummary,
     recent_reports: Vec<AdminReportDetail>,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminCreateNodeResponse {
+    status: &'static str,
+    node: AdminNodeSummary,
     server_time: u64,
 }
 
@@ -410,6 +434,23 @@ struct AdminReportRow {
     raw_json: Option<String>,
 }
 
+#[derive(Debug)]
+struct NormalizedCreateNode {
+    name: String,
+    server_ip: String,
+    server_port: u32,
+    relay_server_ip: Option<String>,
+    relay_server_port: Option<u32>,
+    is_support_ipv6: i8,
+    bandwidth_quality: String,
+    disable_quic: i8,
+    area: String,
+    telecom_ip: Option<String>,
+    mobile_ip: Option<String>,
+    unicom_ip: Option<String>,
+    tag: Option<String>,
+}
+
 #[derive(Debug, FromRow)]
 struct BootstrapExchangeRow {
     token_id: u64,
@@ -467,7 +508,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/client/v1/connect-intent", post(connect_intent))
         .route(NODE_BOOTSTRAP_PATH, post(node_bootstrap))
         .route(NODE_REPORT_PATH, post(node_report))
-        .route("/api/admin/v1/nodes", get(admin_list_nodes))
+        .route(
+            "/api/admin/v1/nodes",
+            get(admin_list_nodes).post(admin_create_node),
+        )
         .route("/api/admin/v1/nodes/:node_id", get(admin_get_node))
         .route(
             "/api/admin/v1/nodes/:node_id/status",
@@ -653,6 +697,24 @@ async fn admin_get_node(
     Ok(Json(AdminNodeDetailResponse {
         node: AdminNodeSummary::from_row(node),
         recent_reports: reports,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_create_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<AdminCreateNodeRequest>,
+) -> Result<Json<AdminCreateNodeResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let node_id = insert_admin_node(&state.pool, request).await?;
+    let node = select_admin_node(&state.pool, node_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("node_not_found", "created node does not exist"))?;
+
+    Ok(Json(AdminCreateNodeResponse {
+        status: "ok",
+        node: AdminNodeSummary::from_row(node),
         server_time: now_unix(),
     }))
 }
@@ -1187,6 +1249,62 @@ LIMIT ?
     .map_err(AppError::database)
 }
 
+async fn insert_admin_node(
+    pool: &MySqlPool,
+    request: AdminCreateNodeRequest,
+) -> Result<u64, AppError> {
+    let node = normalize_create_node_request(&request)?;
+    let result = sqlx::query(
+        r#"
+INSERT INTO accel_nodes (
+  name,
+  server_ip,
+  server_port,
+  relay_server_ip,
+  relay_server_port,
+  is_support_ipv6,
+  bandwidth_quality,
+  disable_quic,
+  area,
+  telecom_ip,
+  mobile_ip,
+  unicom_ip,
+  tag,
+  status,
+  config_revision,
+  created_at,
+  updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_install', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(&node.name)
+    .bind(&node.server_ip)
+    .bind(node.server_port)
+    .bind(&node.relay_server_ip)
+    .bind(node.relay_server_port)
+    .bind(node.is_support_ipv6)
+    .bind(&node.bandwidth_quality)
+    .bind(node.disable_quic)
+    .bind(&node.area)
+    .bind(&node.telecom_ip)
+    .bind(&node.mobile_ip)
+    .bind(&node.unicom_ip)
+    .bind(&node.tag)
+    .execute(pool)
+    .await;
+
+    match result {
+        Ok(result) => Ok(result.last_insert_id()),
+        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("1062") => {
+            Err(AppError::conflict(
+                "node_endpoint_exists",
+                "a node with the same server_ip and server_port already exists",
+            ))
+        }
+        Err(error) => Err(AppError::database(error)),
+    }
+}
+
 async fn update_admin_node_status(
     pool: &MySqlPool,
     node_id: u64,
@@ -1412,6 +1530,56 @@ fn validate_bootstrap_request(request: &BootstrapRequest) -> Result<(), AppError
     Ok(())
 }
 
+fn normalize_create_node_request(
+    request: &AdminCreateNodeRequest,
+) -> Result<NormalizedCreateNode, AppError> {
+    let name = normalize_required_text(&request.name, "name", 128)?;
+    let server_ip = normalize_ip_text(&request.server_ip, "server_ip")?;
+    let server_port = validate_port(request.server_port, "server_port")?;
+    let relay_server_ip =
+        normalize_optional_ip_text(request.relay_server_ip.as_deref(), "relay_server_ip")?;
+    let relay_server_port = match request.relay_server_port {
+        Some(port) => Some(validate_port(port, "relay_server_port")?),
+        None => None,
+    };
+    if relay_server_ip.is_none() && relay_server_port.is_some() {
+        return Err(AppError::bad_request(
+            "invalid_relay",
+            "relay_server_ip is required when relay_server_port is provided",
+        ));
+    }
+
+    let bandwidth_quality = request
+        .bandwidth_quality
+        .as_deref()
+        .map(str::trim)
+        .filter(|quality| !quality.is_empty())
+        .unwrap_or("normal");
+    if !matches!(bandwidth_quality, "fast" | "normal" | "slow") {
+        return Err(AppError::bad_request(
+            "invalid_quality",
+            "bandwidth_quality must be fast, normal, or slow",
+        ));
+    }
+
+    Ok(NormalizedCreateNode {
+        name,
+        server_ip,
+        server_port,
+        relay_server_ip,
+        relay_server_port,
+        is_support_ipv6: bool_i8(request.is_support_ipv6.unwrap_or(false)),
+        bandwidth_quality: bandwidth_quality.to_string(),
+        disable_quic: bool_i8(request.disable_quic.unwrap_or(false)),
+        area: normalize_optional_text(request.area.as_deref(), 32)?
+            .unwrap_or_else(|| "UNKNOWN".to_string()),
+        telecom_ip: normalize_optional_ip_text(request.telecom_ip.as_deref(), "telecom_ip")?,
+        mobile_ip: normalize_optional_ip_text(request.mobile_ip.as_deref(), "mobile_ip")?,
+        unicom_ip: normalize_optional_ip_text(request.unicom_ip.as_deref(), "unicom_ip")?,
+        tag: normalize_optional_text(request.tag.as_deref(), 64)?,
+    })
+}
+
 fn validate_admin_node_status(status: &str) -> Result<&'static str, AppError> {
     match status.trim() {
         "pending_install" => Ok("pending_install"),
@@ -1561,6 +1729,83 @@ fn clamp_bootstrap_ttl(ttl: Option<u64>) -> Result<u64, AppError> {
         ));
     }
     Ok(ttl.min(MAX_BOOTSTRAP_TTL_SEC))
+}
+
+fn normalize_required_text(
+    value: &str,
+    field: &'static str,
+    max_len: usize,
+) -> Result<String, AppError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_field",
+            format!("{field} is required"),
+        ));
+    }
+    if value.chars().count() > max_len {
+        return Err(AppError::bad_request(
+            "invalid_field",
+            format!("{field} must be at most {max_len} characters"),
+        ));
+    }
+    Ok(value.to_string())
+}
+
+fn normalize_optional_text(
+    value: Option<&str>,
+    max_len: usize,
+) -> Result<Option<String>, AppError> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if value.chars().count() > max_len {
+        return Err(AppError::bad_request(
+            "invalid_field",
+            format!("field must be at most {max_len} characters"),
+        ));
+    }
+    Ok(Some(value.to_string()))
+}
+
+fn normalize_ip_text(value: &str, field: &'static str) -> Result<String, AppError> {
+    let value = normalize_required_text(value, field, 64)?;
+    value.parse::<IpAddr>().map_err(|_| {
+        AppError::bad_request("invalid_ip", format!("{field} must be a valid IP address"))
+    })?;
+    Ok(value)
+}
+
+fn normalize_optional_ip_text(
+    value: Option<&str>,
+    field: &'static str,
+) -> Result<Option<String>, AppError> {
+    let Some(value) = normalize_optional_text(value, 64)? else {
+        return Ok(None);
+    };
+    value.parse::<IpAddr>().map_err(|_| {
+        AppError::bad_request("invalid_ip", format!("{field} must be a valid IP address"))
+    })?;
+    Ok(Some(value))
+}
+
+fn validate_port(port: u32, field: &'static str) -> Result<u32, AppError> {
+    if (1..=65_535).contains(&port) {
+        Ok(port)
+    } else {
+        Err(AppError::bad_request(
+            "invalid_port",
+            format!("{field} must be 1-65535"),
+        ))
+    }
+}
+
+fn bool_i8(value: bool) -> i8 {
+    if value {
+        1
+    } else {
+        0
+    }
 }
 
 fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
@@ -1763,6 +2008,10 @@ impl AppError {
         Self::new(StatusCode::NOT_FOUND, code, message)
     }
 
+    fn conflict(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(StatusCode::CONFLICT, code, message)
+    }
+
     fn service_unavailable(code: &'static str, message: impl Into<String>) -> Self {
         Self::new(StatusCode::SERVICE_UNAVAILABLE, code, message)
     }
@@ -1870,6 +2119,24 @@ mod tests {
             client_isp: Some("telecom".to_string()),
             client_ip: Some("127.0.0.1".to_string()),
             bandwidth_quality: Some("fast".to_string()),
+        }
+    }
+
+    fn valid_create_node_request() -> AdminCreateNodeRequest {
+        AdminCreateNodeRequest {
+            name: "node-1".to_string(),
+            server_ip: "103.201.131.99".to_string(),
+            server_port: 666,
+            relay_server_ip: None,
+            relay_server_port: None,
+            is_support_ipv6: Some(false),
+            bandwidth_quality: Some("fast".to_string()),
+            disable_quic: Some(false),
+            area: Some("UNKNOWN".to_string()),
+            telecom_ip: None,
+            mobile_ip: None,
+            unicom_ip: None,
+            tag: Some("test".to_string()),
         }
     }
 
@@ -2002,6 +2269,29 @@ mod tests {
         };
 
         validate_bootstrap_request(&request).expect("request is valid");
+    }
+
+    #[test]
+    fn normalizes_admin_create_node_request() {
+        let node =
+            normalize_create_node_request(&valid_create_node_request()).expect("node is valid");
+
+        assert_eq!(node.name, "node-1");
+        assert_eq!(node.server_ip, "103.201.131.99");
+        assert_eq!(node.server_port, 666);
+        assert_eq!(node.bandwidth_quality, "fast");
+        assert_eq!(node.disable_quic, 0);
+        assert_eq!(node.area, "UNKNOWN");
+    }
+
+    #[test]
+    fn rejects_invalid_admin_create_node_ip() {
+        let mut request = valid_create_node_request();
+        request.server_ip = "not-an-ip".to_string();
+
+        let error = normalize_create_node_request(&request).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_ip");
     }
 
     #[test]

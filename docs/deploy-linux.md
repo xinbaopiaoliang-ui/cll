@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.15.0`.
+Current version: `v0.16.0`.
 
 The node can:
 
@@ -33,8 +33,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.15.0
-git push origin v0.15.0
+git tag v0.16.0
+git push origin v0.16.0
 ```
 
 GitHub Actions will publish:
@@ -500,6 +500,15 @@ curl -fsSL http://127.0.0.1:18080/api/admin/v1/nodes \
 
 curl -fsSL http://127.0.0.1:18080/api/admin/v1/nodes/1 \
   -H "Authorization: Bearer ${ADMIN_TOKEN}"
+```
+
+Create a node record without loading seed SQL:
+
+```bash
+curl -fsSL -X POST http://127.0.0.1:18080/api/admin/v1/nodes \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"node-2","server_ip":"203.0.113.10","server_port":666,"area":"UNKNOWN","bandwidth_quality":"normal"}'
 ```
 
 Create a one-time bootstrap install command for node `1`:

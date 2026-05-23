@@ -140,6 +140,13 @@ Done in `v0.15.0`:
 - Let the Linux installer parse bootstrap responses and write identity,
   network, and control-plane config without standalone parameters.
 
+Done in `v0.16.0`:
+
+- Add admin node creation endpoint so panels can create `accel_nodes` records
+  without manual seed SQL.
+- Validate node endpoint, quality, relay, area, tag, and operator IP fields.
+- Return the created node in the same shape used by node list/detail APIs.
+
 Goals:
 
 - Implement backend handshake.

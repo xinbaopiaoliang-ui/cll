@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.15.0
+  version: 0.16.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -126,6 +126,25 @@ paths:
                 $ref: '#/components/schemas/AdminListNodesResponse'
         '401':
           description: Admin token missing or invalid.
+    post:
+      summary: Create a managed acceleration node.
+      security:
+        - AdminBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateNodeRequest'
+      responses:
+        '200':
+          description: Node created in pending_install state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCreateNodeResponse'
+        '409':
+          description: Node endpoint already exists.
   /api/admin/v1/nodes/{node_id}:
     get:
       summary: Get one managed node and recent runtime reports.
@@ -597,6 +616,67 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AdminReportDetail'
+        server_time:
+          type: integer
+    AdminCreateNodeRequest:
+      type: object
+      required:
+        - name
+        - server_ip
+        - server_port
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        server_ip:
+          type: string
+          example: 103.201.131.99
+        server_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          example: 666
+        relay_server_ip:
+          type: string
+          nullable: true
+        relay_server_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          nullable: true
+        is_support_ipv6:
+          type: boolean
+          default: false
+        bandwidth_quality:
+          type: string
+          enum: [fast, normal, slow]
+          default: normal
+        disable_quic:
+          type: boolean
+          default: false
+        area:
+          type: string
+          default: UNKNOWN
+        telecom_ip:
+          type: string
+          nullable: true
+        mobile_ip:
+          type: string
+          nullable: true
+        unicom_ip:
+          type: string
+          nullable: true
+        tag:
+          type: string
+          nullable: true
+    AdminCreateNodeResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        node:
+          $ref: '#/components/schemas/AdminNodeSummary'
         server_time:
           type: integer
     AdminUpdateNodeStatusRequest:

@@ -61,8 +61,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.15.0
-git push origin v0.15.0
+git tag v0.16.0
+git push origin v0.16.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -80,7 +80,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.15.0` keeps the legacy TCP/UDP `ping` probe, supports
+next stage. Version `0.16.0` keeps the legacy TCP/UDP `ping` probe, supports
 JSON `xaccel/1` client probe responses, verifies optional `xat.v1` HMAC client
 tokens, keeps a short-lived UDP session table, echoes `session.data` packets for
 client integration testing, binds backend-style connect-intent routes from
@@ -92,8 +92,8 @@ development `backend-mock` service that issues production-shaped
 a Rust + MySQL `control-api` service and one-click installer for
 production-shaped scheduling. The control API can receive signed node runtime
 reports, persist health snapshots to MySQL, and expose token-protected admin
-node management APIs, and generate one-time bootstrap install commands for
-Linux nodes. The `xaccel-client-probe` binary automates the full connect-intent,
-UDP probe, and session relay validation flow.
+node management APIs, create node records, and generate one-time bootstrap
+install commands for Linux nodes. The `xaccel-client-probe` binary automates
+the full connect-intent, UDP probe, and session relay validation flow.
 Standalone mode leaves backend reporting disabled unless `--enable-control-plane`
 is passed with a real backend URL.
