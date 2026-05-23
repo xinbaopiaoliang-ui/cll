@@ -105,7 +105,7 @@ Next:
 - Add structured bind error reporting.
 - Add user entitlement checks before issuing connect-intents.
 - Add production scheduler policy for ISP, region, latency, and node load.
-- Add API authentication for clients and admin callers.
+- Add API authentication for clients.
 
 ## P3: Control Plane
 
@@ -124,6 +124,14 @@ Done in `v0.13.0`:
 - Update `accel_nodes.last_report_at`, `last_seen_at`, `kernel_version`, and
   runtime status from signed reports.
 - Keep standalone reinstall identity data consistent when changing panel URLs.
+
+Done in `v0.14.0`:
+
+- Add token-protected admin node list and detail endpoints.
+- Add admin node status update endpoint for draining, disabling, and recovery
+  workflows.
+- Store admin status changes in `node_audit_logs`.
+- Generate and persist an admin token during control-api one-click install.
 
 Goals:
 

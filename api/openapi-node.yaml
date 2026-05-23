@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.13.0
+  version: 0.14.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -104,6 +104,79 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NodeReportResponse'
+  /api/admin/v1/nodes:
+    get:
+      summary: List managed acceleration nodes.
+      security:
+        - AdminBearer: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+      responses:
+        '200':
+          description: Node list with latest report summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminListNodesResponse'
+        '401':
+          description: Admin token missing or invalid.
+  /api/admin/v1/nodes/{node_id}:
+    get:
+      summary: Get one managed node and recent runtime reports.
+      security:
+        - AdminBearer: []
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Node detail and recent report snapshots.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminNodeDetailResponse'
+        '404':
+          description: Node does not exist.
+  /api/admin/v1/nodes/{node_id}/status:
+    patch:
+      summary: Update a managed node status.
+      security:
+        - AdminBearer: []
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateNodeStatusRequest'
+      responses:
+        '200':
+          description: Node status updated and audit log stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUpdateNodeStatusResponse'
 components:
   securitySchemes:
     NodeHmac:
@@ -111,6 +184,10 @@ components:
       in: header
       name: X-Node-Signature
       description: HMAC-SHA256 over method, path, timestamp, nonce, and base64 body sha256.
+    AdminBearer:
+      type: http
+      scheme: bearer
+      description: Admin API token from XACCEL_ADMIN_TOKEN.
   schemas:
     ConnectIntentRequest:
       type: object
@@ -474,6 +551,122 @@ components:
           type: boolean
         server_time:
           type: integer
+    AdminListNodesResponse:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminNodeSummary'
+        total:
+          type: integer
+        server_time:
+          type: integer
+    AdminNodeDetailResponse:
+      type: object
+      properties:
+        node:
+          $ref: '#/components/schemas/AdminNodeSummary'
+        recent_reports:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminReportDetail'
+        server_time:
+          type: integer
+    AdminUpdateNodeStatusRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [pending_install, draining, offline, install_failed, disabled]
+        reason:
+          type: string
+          nullable: true
+    AdminUpdateNodeStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        node_id:
+          type: integer
+        previous_status:
+          type: string
+        current_status:
+          type: string
+        reason:
+          type: string
+          nullable: true
+        server_time:
+          type: integer
+    AdminNodeSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        endpoint:
+          type: string
+        server_ip:
+          type: string
+        server_port:
+          type: integer
+        area:
+          type: string
+        tag:
+          type: string
+          nullable: true
+        bandwidth_quality:
+          type: string
+        disable_quic:
+          type: boolean
+        status:
+          type: string
+        kernel_version:
+          type: string
+          nullable: true
+        config_revision:
+          type: integer
+        last_seen_at:
+          type: integer
+          nullable: true
+        last_report_at:
+          type: integer
+          nullable: true
+        latest_report:
+          $ref: '#/components/schemas/AdminReportSummary'
+          nullable: true
+    AdminReportSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+        active_sessions:
+          type: integer
+        udp_sessions:
+          type: integer
+        tcp_sessions:
+          type: integer
+        reported_at:
+          type: integer
+          nullable: true
+    AdminReportDetail:
+      allOf:
+        - $ref: '#/components/schemas/AdminReportSummary'
+        - type: object
+          properties:
+            node_id:
+              type: integer
+            config_revision:
+              type: integer
+            raw:
+              type: object
+              nullable: true
     ClientSessionDataRequest:
       type: object
       description: UDP packet sent after a successful probe session is allocated.

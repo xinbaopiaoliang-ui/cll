@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.13.0"
+INSTALLER_VERSION="0.14.0"
 SERVICE_NAME="xaccel-control-api"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-control-api"
@@ -15,6 +15,7 @@ DATABASE_URL=""
 LISTEN="127.0.0.1:18080"
 TOKEN_TTL_SEC="120"
 MAX_DB_CONNECTIONS="8"
+ADMIN_TOKEN=""
 ARTIFACT_URL=""
 SHA256_URL=""
 DRY_RUN="0"
@@ -29,6 +30,7 @@ Options:
   --listen ADDR           HTTP listen address. Default: 127.0.0.1:18080.
   --token-ttl-sec SEC     Client token TTL. Default: 120.
   --max-db-connections N  MySQL connection pool size. Default: 8.
+  --admin-token TOKEN     Admin API bearer token. Generated automatically when omitted.
   --artifact-url URL      Override xaccel-control-api tar.gz download URL.
   --sha256-url URL        Override xaccel-control-api sha256 download URL.
   --dry-run               Run preflight only and print planned actions.
@@ -61,6 +63,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --max-db-connections)
       MAX_DB_CONNECTIONS="${2:-}"
+      shift 2
+      ;;
+    --admin-token)
+      ADMIN_TOKEN="${2:-}"
       shift 2
       ;;
     --artifact-url)
@@ -109,6 +115,28 @@ preflight() {
   [[ "$MAX_DB_CONNECTIONS" =~ ^[0-9]+$ ]] || fail "--max-db-connections must be numeric"
   (( TOKEN_TTL_SEC >= 1 )) || fail "--token-ttl-sec must be positive"
   (( MAX_DB_CONNECTIONS >= 1 )) || fail "--max-db-connections must be positive"
+}
+
+generate_admin_token_if_needed() {
+  if [[ -n "$ADMIN_TOKEN" ]]; then
+    return 0
+  fi
+
+  if [[ -f "$ENV_FILE" ]]; then
+    local existing_token
+    existing_token="$(sed -n "s/^XACCEL_ADMIN_TOKEN='\(.*\)'$/\1/p" "$ENV_FILE" | tail -n 1 || true)"
+    if [[ -n "$existing_token" ]]; then
+      ADMIN_TOKEN="$existing_token"
+      log "reuse existing admin token from ${ENV_FILE}"
+      return 0
+    fi
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    ADMIN_TOKEN="$(openssl rand -base64 32)"
+  else
+    ADMIN_TOKEN="admin-$(date +%s)-$(hostname)"
+  fi
 }
 
 env_escape() {
@@ -166,6 +194,7 @@ DATABASE_URL='$(env_escape "$DATABASE_URL")'
 XACCEL_CONTROL_LISTEN='$(env_escape "$LISTEN")'
 XACCEL_TOKEN_TTL_SEC='$(env_escape "$TOKEN_TTL_SEC")'
 XACCEL_MAX_DB_CONNECTIONS='$(env_escape "$MAX_DB_CONNECTIONS")'
+XACCEL_ADMIN_TOKEN='$(env_escape "$ADMIN_TOKEN")'
 RUST_LOG='xaccel_control_api=info'
 EOF
   chmod 0600 "$ENV_FILE"
@@ -231,6 +260,7 @@ main() {
   fi
 
   install_binary_release
+  generate_admin_token_if_needed
   write_env
   write_systemd_unit
   enable_service
@@ -240,6 +270,7 @@ main() {
   log "service: systemctl status ${SERVICE_NAME}"
   log "logs: journalctl -u ${SERVICE_NAME} -f"
   log "env: ${ENV_FILE}"
+  log "admin token is saved in ${ENV_FILE}"
 }
 
 main "$@"

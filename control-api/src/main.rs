@@ -1,10 +1,10 @@
 use anyhow::{bail, Context};
 use axum::{
     body::Bytes,
-    extract::State,
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router,
 };
 use base64::{
@@ -48,12 +48,16 @@ struct Cli {
 
     #[arg(long, default_value_t = 8)]
     max_db_connections: u32,
+
+    #[arg(long, env = "XACCEL_ADMIN_TOKEN")]
+    admin_token: Option<String>,
 }
 
 #[derive(Clone)]
 struct AppState {
     pool: MySqlPool,
     token_ttl_sec: u64,
+    admin_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -205,6 +209,88 @@ struct NodeReportResponse {
     server_time: u64,
 }
 
+#[derive(Debug, Deserialize)]
+struct AdminListNodesQuery {
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminNodeDetailQuery {
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminUpdateNodeStatusRequest {
+    status: String,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminListNodesResponse {
+    nodes: Vec<AdminNodeSummary>,
+    total: usize,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminNodeDetailResponse {
+    node: AdminNodeSummary,
+    recent_reports: Vec<AdminReportDetail>,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminUpdateNodeStatusResponse {
+    status: &'static str,
+    node_id: u64,
+    previous_status: String,
+    current_status: String,
+    reason: Option<String>,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminNodeSummary {
+    id: u64,
+    name: String,
+    endpoint: String,
+    server_ip: String,
+    server_port: u32,
+    area: String,
+    tag: Option<String>,
+    bandwidth_quality: String,
+    disable_quic: bool,
+    status: String,
+    kernel_version: Option<String>,
+    config_revision: u64,
+    last_seen_at: Option<u64>,
+    last_report_at: Option<u64>,
+    latest_report: Option<AdminReportSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminReportSummary {
+    id: u64,
+    status: String,
+    active_sessions: u32,
+    udp_sessions: u32,
+    tcp_sessions: u32,
+    reported_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminReportDetail {
+    id: u64,
+    node_id: u64,
+    config_revision: u64,
+    status: String,
+    active_sessions: u32,
+    udp_sessions: u32,
+    tcp_sessions: u32,
+    reported_at: Option<u64>,
+    raw: Option<Value>,
+}
+
 #[derive(Debug, Serialize)]
 struct ErrorBody {
     error: ErrorMessage,
@@ -227,6 +313,42 @@ struct CandidateRow {
     node_secret: String,
     target_addr: String,
     protocol: String,
+}
+
+#[derive(Debug, FromRow)]
+struct AdminNodeRow {
+    id: u64,
+    name: String,
+    server_ip: String,
+    server_port: u32,
+    area: String,
+    tag: Option<String>,
+    bandwidth_quality: String,
+    disable_quic: u8,
+    status: String,
+    kernel_version: Option<String>,
+    config_revision: u64,
+    last_seen_at: Option<u64>,
+    last_report_at: Option<u64>,
+    latest_report_id: Option<u64>,
+    latest_report_status: Option<String>,
+    latest_active_sessions: Option<u32>,
+    latest_udp_sessions: Option<u32>,
+    latest_tcp_sessions: Option<u32>,
+    latest_reported_at: Option<u64>,
+}
+
+#[derive(Debug, FromRow)]
+struct AdminReportRow {
+    id: u64,
+    node_id: u64,
+    config_revision: u64,
+    status: String,
+    active_sessions: u32,
+    udp_sessions: u32,
+    tcp_sessions: u32,
+    reported_at: Option<u64>,
+    raw_json: Option<String>,
 }
 
 #[derive(Debug)]
@@ -256,11 +378,23 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         pool,
         token_ttl_sec: cli.token_ttl_sec.max(1),
+        admin_token: cli
+            .admin_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .map(ToOwned::to_owned),
     };
     let app = Router::new()
         .route("/health", get(health))
         .route("/api/client/v1/connect-intent", post(connect_intent))
         .route(NODE_REPORT_PATH, post(node_report))
+        .route("/api/admin/v1/nodes", get(admin_list_nodes))
+        .route("/api/admin/v1/nodes/:node_id", get(admin_get_node))
+        .route(
+            "/api/admin/v1/nodes/:node_id/status",
+            patch(admin_update_node_status),
+        )
         .with_state(Arc::new(state));
 
     let listener = TcpListener::bind(cli.listen)
@@ -281,6 +415,13 @@ fn validate_cli(cli: &Cli) -> anyhow::Result<()> {
     }
     if cli.max_db_connections == 0 {
         bail!("--max-db-connections must be positive");
+    }
+    if cli
+        .admin_token
+        .as_deref()
+        .is_some_and(|token| token.trim().is_empty())
+    {
+        bail!("--admin-token must not be empty when provided");
     }
     Ok(())
 }
@@ -360,6 +501,74 @@ async fn node_report(
         status: "ok",
         node_id: report.node_id,
         stored: true,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_list_nodes(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<AdminListNodesQuery>,
+) -> Result<Json<AdminListNodesResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let limit = clamp_limit(query.limit, 200, 500);
+    let rows = select_admin_nodes(&state.pool, limit).await?;
+    let nodes = rows
+        .into_iter()
+        .map(AdminNodeSummary::from_row)
+        .collect::<Vec<_>>();
+
+    Ok(Json(AdminListNodesResponse {
+        total: nodes.len(),
+        nodes,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_get_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+    Query(query): Query<AdminNodeDetailQuery>,
+) -> Result<Json<AdminNodeDetailResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let node = select_admin_node(&state.pool, node_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("node_not_found", "node does not exist"))?;
+    let reports = select_admin_reports(&state.pool, node_id, clamp_limit(query.limit, 20, 100))
+        .await?
+        .into_iter()
+        .map(AdminReportDetail::from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Json(AdminNodeDetailResponse {
+        node: AdminNodeSummary::from_row(node),
+        recent_reports: reports,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_update_node_status(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+    Json(request): Json<AdminUpdateNodeStatusRequest>,
+) -> Result<Json<AdminUpdateNodeStatusResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let next_status = validate_admin_node_status(&request.status)?;
+    let reason = request
+        .reason
+        .map(|reason| reason.trim().to_string())
+        .filter(|reason| !reason.is_empty());
+    let previous_status =
+        update_admin_node_status(&state.pool, node_id, next_status, reason.as_deref()).await?;
+
+    Ok(Json(AdminUpdateNodeStatusResponse {
+        status: "ok",
+        node_id,
+        previous_status,
+        current_status: next_status.to_string(),
+        reason,
         server_time: now_unix(),
     }))
 }
@@ -537,6 +746,188 @@ INSERT INTO connect_intents (
     Ok(())
 }
 
+async fn select_admin_nodes(pool: &MySqlPool, limit: u32) -> Result<Vec<AdminNodeRow>, AppError> {
+    sqlx::query_as::<_, AdminNodeRow>(
+        r#"
+SELECT
+  n.id,
+  n.name,
+  n.server_ip,
+  n.server_port,
+  n.area,
+  n.tag,
+  n.bandwidth_quality,
+  n.disable_quic,
+  n.status,
+  n.kernel_version,
+  n.config_revision,
+  CAST(UNIX_TIMESTAMP(n.last_seen_at) AS UNSIGNED) AS last_seen_at,
+  CAST(UNIX_TIMESTAMP(n.last_report_at) AS UNSIGNED) AS last_report_at,
+  lr.id AS latest_report_id,
+  lr.status AS latest_report_status,
+  lr.active_sessions AS latest_active_sessions,
+  lr.udp_sessions AS latest_udp_sessions,
+  lr.tcp_sessions AS latest_tcp_sessions,
+  CAST(UNIX_TIMESTAMP(lr.reported_at) AS UNSIGNED) AS latest_reported_at
+FROM accel_nodes n
+LEFT JOIN node_runtime_reports lr
+  ON lr.id = (
+    SELECT r.id
+    FROM node_runtime_reports r
+    WHERE r.node_id = n.id
+    ORDER BY r.id DESC
+    LIMIT 1
+  )
+ORDER BY
+  n.last_report_at IS NULL ASC,
+  n.last_report_at DESC,
+  n.id ASC
+LIMIT ?
+"#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::database)
+}
+
+async fn select_admin_node(
+    pool: &MySqlPool,
+    node_id: u64,
+) -> Result<Option<AdminNodeRow>, AppError> {
+    sqlx::query_as::<_, AdminNodeRow>(
+        r#"
+SELECT
+  n.id,
+  n.name,
+  n.server_ip,
+  n.server_port,
+  n.area,
+  n.tag,
+  n.bandwidth_quality,
+  n.disable_quic,
+  n.status,
+  n.kernel_version,
+  n.config_revision,
+  CAST(UNIX_TIMESTAMP(n.last_seen_at) AS UNSIGNED) AS last_seen_at,
+  CAST(UNIX_TIMESTAMP(n.last_report_at) AS UNSIGNED) AS last_report_at,
+  lr.id AS latest_report_id,
+  lr.status AS latest_report_status,
+  lr.active_sessions AS latest_active_sessions,
+  lr.udp_sessions AS latest_udp_sessions,
+  lr.tcp_sessions AS latest_tcp_sessions,
+  CAST(UNIX_TIMESTAMP(lr.reported_at) AS UNSIGNED) AS latest_reported_at
+FROM accel_nodes n
+LEFT JOIN node_runtime_reports lr
+  ON lr.id = (
+    SELECT r.id
+    FROM node_runtime_reports r
+    WHERE r.node_id = n.id
+    ORDER BY r.id DESC
+    LIMIT 1
+  )
+WHERE n.id = ?
+LIMIT 1
+"#,
+    )
+    .bind(node_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::database)
+}
+
+async fn select_admin_reports(
+    pool: &MySqlPool,
+    node_id: u64,
+    limit: u32,
+) -> Result<Vec<AdminReportRow>, AppError> {
+    sqlx::query_as::<_, AdminReportRow>(
+        r#"
+SELECT
+  id,
+  node_id,
+  config_revision,
+  status,
+  active_sessions,
+  udp_sessions,
+  tcp_sessions,
+  CAST(UNIX_TIMESTAMP(reported_at) AS UNSIGNED) AS reported_at,
+  CAST(raw_json AS CHAR) AS raw_json
+FROM node_runtime_reports
+WHERE node_id = ?
+ORDER BY id DESC
+LIMIT ?
+"#,
+    )
+    .bind(node_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::database)
+}
+
+async fn update_admin_node_status(
+    pool: &MySqlPool,
+    node_id: u64,
+    next_status: &str,
+    reason: Option<&str>,
+) -> Result<String, AppError> {
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
+    let previous_status = sqlx::query_scalar::<_, String>(
+        r#"
+SELECT status
+FROM accel_nodes
+WHERE id = ?
+LIMIT 1
+"#,
+    )
+    .bind(node_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(AppError::database)?
+    .ok_or_else(|| AppError::not_found("node_not_found", "node does not exist"))?;
+
+    sqlx::query(
+        r#"
+UPDATE accel_nodes
+SET status = ?
+WHERE id = ?
+"#,
+    )
+    .bind(next_status)
+    .bind(node_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    let response_previous_status = previous_status.clone();
+    let detail_json = serde_json::json!({
+        "previous_status": previous_status,
+        "current_status": next_status,
+        "reason": reason,
+    });
+    sqlx::query(
+        r#"
+INSERT INTO node_audit_logs (
+  node_id,
+  actor_type,
+  actor_id,
+  action,
+  detail_json,
+  created_at
+) VALUES (?, 'admin_api', NULL, 'node.status.update', ?, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(node_id)
+    .bind(detail_json.to_string())
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    tx.commit().await.map_err(AppError::database)?;
+    Ok(response_previous_status)
+}
+
 async fn select_node_secret(pool: &MySqlPool, node_id: u64) -> Result<Option<String>, AppError> {
     sqlx::query_scalar::<_, String>(
         r#"
@@ -652,6 +1043,20 @@ fn validate_connect_intent_request(request: &ConnectIntentRequest) -> Result<(),
         }
     }
     Ok(())
+}
+
+fn validate_admin_node_status(status: &str) -> Result<&'static str, AppError> {
+    match status.trim() {
+        "pending_install" => Ok("pending_install"),
+        "draining" => Ok("draining"),
+        "offline" => Ok("offline"),
+        "install_failed" => Ok("install_failed"),
+        "disabled" => Ok("disabled"),
+        _ => Err(AppError::bad_request(
+            "invalid_node_status",
+            "status must be pending_install, draining, offline, install_failed, or disabled; online/degraded are set by signed node reports",
+        )),
+    }
 }
 
 fn validate_node_report_request(
@@ -776,6 +1181,57 @@ fn clamp_u32(value: u64) -> u32 {
     value.min(u64::from(u32::MAX)) as u32
 }
 
+fn clamp_limit(limit: Option<u32>, default: u32, max: u32) -> u32 {
+    limit.unwrap_or(default).max(1).min(max)
+}
+
+fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+    let configured = state.admin_token.as_deref().ok_or_else(|| {
+        AppError::service_unavailable(
+            "admin_disabled",
+            "admin API is disabled because XACCEL_ADMIN_TOKEN is not configured",
+        )
+    })?;
+    let provided = admin_token_from_headers(headers)
+        .ok_or_else(|| AppError::unauthorized("admin_auth_required", "admin token is required"))?;
+
+    if constant_time_eq(configured.as_bytes(), provided.as_bytes()) {
+        Ok(())
+    } else {
+        Err(AppError::unauthorized(
+            "admin_auth_failed",
+            "admin token is invalid",
+        ))
+    }
+}
+
+fn admin_token_from_headers(headers: &HeaderMap) -> Option<&str> {
+    if let Some(value) = headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+    {
+        if let Some(token) = value.strip_prefix("Bearer ") {
+            return Some(token.trim());
+        }
+    }
+
+    headers
+        .get("X-Admin-Token")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    let max_len = left.len().max(right.len());
+    let mut diff = left.len() ^ right.len();
+    for index in 0..max_len {
+        let left_byte = left.get(index).copied().unwrap_or(0);
+        let right_byte = right.get(index).copied().unwrap_or(0);
+        diff |= usize::from(left_byte ^ right_byte);
+    }
+    diff == 0
+}
+
 fn sign_client_token(claims: &ClientTokenClaims, secret: &str) -> anyhow::Result<String> {
     let payload = serde_json::to_vec(claims).context("failed to encode claims")?;
     let payload = URL_SAFE_NO_PAD.encode(payload);
@@ -812,6 +1268,14 @@ impl AppError {
         Self::new(StatusCode::UNAUTHORIZED, code, message)
     }
 
+    fn not_found(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(StatusCode::NOT_FOUND, code, message)
+    }
+
+    fn service_unavailable(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(StatusCode::SERVICE_UNAVAILABLE, code, message)
+    }
+
     fn database(error: sqlx::Error) -> Self {
         error!(error = %error, "database operation failed");
         Self::new(
@@ -828,6 +1292,62 @@ impl AppError {
             "internal_error",
             "internal operation failed",
         )
+    }
+}
+
+impl AdminNodeSummary {
+    fn from_row(row: AdminNodeRow) -> Self {
+        Self {
+            endpoint: format!("{}:{}", row.server_ip, row.server_port),
+            id: row.id,
+            name: row.name,
+            server_ip: row.server_ip,
+            server_port: row.server_port,
+            area: row.area,
+            tag: row.tag,
+            bandwidth_quality: row.bandwidth_quality,
+            disable_quic: row.disable_quic != 0,
+            status: row.status,
+            kernel_version: row.kernel_version,
+            config_revision: row.config_revision,
+            last_seen_at: row.last_seen_at,
+            last_report_at: row.last_report_at,
+            latest_report: row.latest_report_id.map(|id| AdminReportSummary {
+                id,
+                status: row.latest_report_status.unwrap_or_default(),
+                active_sessions: row.latest_active_sessions.unwrap_or_default(),
+                udp_sessions: row.latest_udp_sessions.unwrap_or_default(),
+                tcp_sessions: row.latest_tcp_sessions.unwrap_or_default(),
+                reported_at: row.latest_reported_at,
+            }),
+        }
+    }
+}
+
+impl AdminReportDetail {
+    fn from_row(row: AdminReportRow) -> Result<Self, AppError> {
+        let raw = row
+            .raw_json
+            .as_deref()
+            .map(serde_json::from_str::<Value>)
+            .transpose()
+            .map_err(|error| {
+                AppError::internal(anyhow::anyhow!(
+                    "failed to decode node report raw_json: {error}"
+                ))
+            })?;
+
+        Ok(Self {
+            id: row.id,
+            node_id: row.node_id,
+            config_revision: row.config_revision,
+            status: row.status,
+            active_sessions: row.active_sessions,
+            udp_sessions: row.udp_sessions,
+            tcp_sessions: row.tcp_sessions,
+            reported_at: row.reported_at,
+            raw,
+        })
     }
 }
 
@@ -902,7 +1422,7 @@ mod tests {
 
     #[test]
     fn verifies_node_report_signature() {
-        let body = br#"{"node_id":1,"config_revision":1,"node_version":"0.13.0","status":"ready","timestamp":1779250000,"health":{"listeners":{"udp_listening":true,"tcp_listening":true},"traffic":{},"sessions":{}}}"#;
+        let body = br#"{"node_id":1,"config_revision":1,"node_version":"0.14.0","status":"ready","timestamp":1779250000,"health":{"listeners":{"udp_listening":true,"tcp_listening":true},"traffic":{},"sessions":{}}}"#;
         let timestamp = now_unix();
         let nonce = "test-nonce";
         let body_sha256 = BASE64.encode(Sha256::digest(body));
@@ -937,7 +1457,7 @@ mod tests {
         let report = NodeReportRequest {
             node_id: 1,
             config_revision: 1,
-            node_version: "0.13.0".to_string(),
+            node_version: "0.14.0".to_string(),
             status: "ready".to_string(),
             timestamp: now_unix(),
             health: NodeHealthSnapshot {
@@ -951,5 +1471,30 @@ mod tests {
         };
 
         assert_eq!(report_database_status(&report), "online");
+    }
+
+    #[test]
+    fn validates_admin_node_status() {
+        assert_eq!(
+            validate_admin_node_status("draining").expect("status"),
+            "draining"
+        );
+        let error = validate_admin_node_status("bad").unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_node_status");
+    }
+
+    #[test]
+    fn reads_bearer_admin_token() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer secret".parse().unwrap());
+        assert_eq!(admin_token_from_headers(&headers), Some("secret"));
+    }
+
+    #[test]
+    fn compares_tokens_in_constant_time_shape() {
+        assert!(constant_time_eq(b"secret", b"secret"));
+        assert!(!constant_time_eq(b"secret", b"other"));
+        assert!(!constant_time_eq(b"secret", b"secret-longer"));
     }
 }

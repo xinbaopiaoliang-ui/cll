@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.13.0`.
+Current version: `v0.14.0`.
 
 The node can:
 
@@ -22,6 +22,7 @@ The node can:
 - issue development connect-intent responses through `backend-mock`;
 - optionally report signed health snapshots to the backend control plane and
   store them in MySQL through `xaccel-control-api`;
+- expose token-protected admin node APIs for backend Web panels;
 - validate the full flow with the packaged `xaccel-client-probe` binary.
 
 It does not yet fetch production game rules or connect-intents from a real
@@ -32,8 +33,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.13.0
-git push origin v0.13.0
+git tag v0.14.0
+git push origin v0.14.0
 ```
 
 GitHub Actions will publish:
@@ -481,6 +482,24 @@ allow only the node server through your firewall:
 curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \
   --database-url 'mysql://xaccel:password@127.0.0.1:3306/xaccel' \
   --listen 0.0.0.0:18080
+```
+
+The installer writes an admin bearer token to:
+
+```bash
+sudo sed -n "s/^XACCEL_ADMIN_TOKEN='\(.*\)'$/\1/p" /etc/xaccel-control-api/control-api.env
+```
+
+Use it to call the admin API:
+
+```bash
+ADMIN_TOKEN="$(sudo sed -n "s/^XACCEL_ADMIN_TOKEN='\(.*\)'$/\1/p" /etc/xaccel-control-api/control-api.env)"
+
+curl -fsSL http://127.0.0.1:18080/api/admin/v1/nodes \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+
+curl -fsSL http://127.0.0.1:18080/api/admin/v1/nodes/1 \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
 ```
 
 The node posts to:
