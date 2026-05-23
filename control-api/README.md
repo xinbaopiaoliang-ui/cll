@@ -7,7 +7,9 @@ route tables through SQLx, selects an online node, signs a short-lived `xat.v1`
 credential, stores the intent, and returns the node candidate to the client.
 It also receives HMAC-signed node runtime reports and stores them in MySQL.
 Admin node management APIs are protected by an admin bearer token. The embedded
-dashboard is available at `/admin` and uses the same bearer token in the browser.
+dashboard is available at `/admin` and uses the same bearer token in the browser
+for login, node creation, status changes, and bootstrap install command
+generation.
 
 ## Run
 

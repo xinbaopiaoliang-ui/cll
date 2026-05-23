@@ -171,6 +171,12 @@ Done in `v0.17.1`:
   refresh time, localized node status, stale-report highlighting, and collapsed
   Health JSON.
 
+Done in `v0.18.0`:
+
+- Add a dashboard login screen backed by the existing admin bearer token.
+- Add admin UI flows for creating nodes, changing node status, generating
+  bootstrap install commands, and copying node install commands.
+
 Goals:
 
 - Implement backend handshake.

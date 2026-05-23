@@ -2258,7 +2258,10 @@ mod tests {
     #[test]
     fn embeds_admin_dashboard_html() {
         assert!(ADMIN_DASHBOARD_HTML.contains("节点控制台"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("登录节点后台"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("新增节点"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("bootstrap-token"));
     }
 
     #[test]

@@ -40,7 +40,9 @@
       }
 
       button,
-      input {
+      input,
+      select,
+      textarea {
         font: inherit;
       }
 
@@ -72,7 +74,18 @@
         color: #ffffff;
       }
 
-      input {
+      button.secondary {
+        background: var(--panel-soft);
+      }
+
+      button.danger {
+        border-color: rgba(180, 35, 24, 0.28);
+        color: var(--bad);
+      }
+
+      input,
+      select,
+      textarea {
         width: 100%;
         min-height: 36px;
         padding: 0 12px;
@@ -83,9 +96,68 @@
         outline: none;
       }
 
-      input:focus {
+      textarea {
+        min-height: 96px;
+        padding: 10px 12px;
+        resize: vertical;
+        line-height: 1.5;
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus {
         border-color: var(--accent);
         box-shadow: 0 0 0 3px rgba(23, 120, 111, 0.13);
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .login-screen {
+        min-height: 100dvh;
+        display: grid;
+        grid-template-columns: minmax(280px, 0.8fr) minmax(360px, 420px);
+        gap: 64px;
+        align-items: center;
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 28px;
+      }
+
+      .login-copy {
+        display: grid;
+        gap: 16px;
+      }
+
+      .login-copy h1 {
+        max-width: 680px;
+      }
+
+      .login-note {
+        max-width: 520px;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.7;
+      }
+
+      .login-card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+        padding: 22px;
+      }
+
+      .login-card form {
+        display: grid;
+        gap: 16px;
+      }
+
+      .form-help {
+        color: var(--faint);
+        font-size: 12px;
+        line-height: 1.5;
       }
 
       .shell {
@@ -96,7 +168,7 @@
 
       .topbar {
         display: grid;
-        grid-template-columns: minmax(280px, 1fr) minmax(520px, 0.76fr);
+        grid-template-columns: minmax(280px, 1fr) auto;
         gap: 18px;
         align-items: center;
         margin-bottom: 16px;
@@ -161,6 +233,13 @@
         border: 1px solid var(--line);
         border-radius: 8px;
         background: rgba(255, 255, 255, 0.78);
+      }
+
+      .top-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 10px;
       }
 
       .field {
@@ -235,6 +314,111 @@
         grid-template-columns: minmax(0, 1.52fr) minmax(390px, 0.86fr);
         gap: 18px;
         align-items: start;
+      }
+
+      .action-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .operation-card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-soft);
+        padding: 14px;
+      }
+
+      .operation-title {
+        margin-bottom: 10px;
+        font-size: 13px;
+        font-weight: 760;
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .form-grid.single {
+        grid-template-columns: 1fr;
+      }
+
+      .form-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: flex-end;
+        margin-top: 14px;
+      }
+
+      .checkbox {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 36px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .checkbox input {
+        width: 16px;
+        min-height: 16px;
+        padding: 0;
+        accent-color: var(--accent);
+      }
+
+      .message {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .message.error-text {
+        color: var(--bad);
+      }
+
+      .command-output {
+        margin-top: 12px;
+      }
+
+      .command-output textarea {
+        min-height: 138px;
+        font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+        font-size: 12px;
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        background: rgba(23, 33, 43, 0.34);
+      }
+
+      .modal {
+        width: min(760px, 100%);
+        max-height: calc(100dvh - 36px);
+        overflow: auto;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 28px 80px -35px rgba(23, 33, 43, 0.58);
+      }
+
+      .modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .modal-body {
+        padding: 18px;
       }
 
       .panel {
@@ -601,10 +785,17 @@
           padding: 16px;
         }
 
+        .login-screen,
         .topbar,
         .layout,
         .summary {
           grid-template-columns: 1fr;
+        }
+
+        .login-screen {
+          gap: 22px;
+          align-items: start;
+          padding: 18px;
         }
 
         .summary-cell,
@@ -619,6 +810,10 @@
 
         .authbar {
           grid-template-columns: 1fr;
+        }
+
+        .top-actions {
+          justify-content: flex-start;
         }
       }
 
@@ -643,24 +838,49 @@
         .detail-grid {
           grid-template-columns: 1fr;
         }
+
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
-    <main class="shell">
+    <section class="login-screen" id="loginScreen">
+      <div class="login-copy">
+        <div class="eyebrow">XAccel Control</div>
+        <h1>登录节点后台</h1>
+        <div class="login-note">
+          用控制面安装时生成的管理员 Token 登录。登录后可以查看节点状态、新增节点、生成一键安装命令，并处理节点下线、排空或禁用。
+        </div>
+      </div>
+      <div class="login-card">
+        <form id="loginForm">
+          <div class="field">
+            <label for="loginTokenInput">管理员 Token</label>
+            <input id="loginTokenInput" type="password" autocomplete="off" />
+            <div class="form-help">
+              Token 保存在本机浏览器，不会写入服务端。服务器上可通过
+              /etc/xaccel-control-api/control-api.env 查看。
+            </div>
+          </div>
+          <div class="message error-text hidden" id="loginError"></div>
+          <button class="primary" type="submit">登录后台</button>
+        </form>
+      </div>
+    </section>
+
+    <main class="shell hidden" id="appShell">
       <section class="topbar">
         <div class="brand">
           <div class="eyebrow">XAccel Control</div>
           <h1>节点控制台</h1>
           <div class="subtitle" id="statusLine">等待连接控制面</div>
         </div>
-        <div class="authbar">
-          <div class="field">
-            <label for="tokenInput">管理员 Token</label>
-            <input id="tokenInput" type="password" autocomplete="off" />
-          </div>
-          <button id="saveToken" class="primary" type="button">保存</button>
+        <div class="top-actions">
+          <button id="openCreateNode" class="primary" type="button">新增节点</button>
           <button id="refreshNow" type="button">立即刷新</button>
+          <button id="logoutButton" class="danger" type="button">退出</button>
         </div>
       </section>
 
@@ -737,6 +957,83 @@
       </section>
     </main>
 
+    <div class="modal-backdrop hidden" id="createNodeModal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="createNodeTitle">
+        <div class="modal-head">
+          <div>
+            <div class="panel-title" id="createNodeTitle">新增节点</div>
+            <div class="panel-meta">创建节点记录后，再生成一键安装命令部署到 Linux 服务器。</div>
+          </div>
+          <button id="closeCreateNode" type="button">关闭</button>
+        </div>
+        <form class="modal-body" id="createNodeForm">
+          <div class="form-grid">
+            <div class="field">
+              <label for="nodeName">节点名称</label>
+              <input id="nodeName" name="name" autocomplete="off" placeholder="node-hk-01" required />
+            </div>
+            <div class="field">
+              <label for="nodeServerIp">公网 IP</label>
+              <input id="nodeServerIp" name="server_ip" autocomplete="off" placeholder="47.83.160.126" required />
+            </div>
+            <div class="field">
+              <label for="nodeServerPort">入口端口</label>
+              <input id="nodeServerPort" name="server_port" type="number" min="1" max="65535" value="666" required />
+            </div>
+            <div class="field">
+              <label for="nodeQuality">带宽质量</label>
+              <select id="nodeQuality" name="bandwidth_quality">
+                <option value="normal">normal</option>
+                <option value="fast">fast</option>
+                <option value="slow">slow</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="nodeArea">区域</label>
+              <input id="nodeArea" name="area" autocomplete="off" placeholder="UNKNOWN" />
+            </div>
+            <div class="field">
+              <label for="nodeTag">标签</label>
+              <input id="nodeTag" name="tag" autocomplete="off" placeholder="standalone" />
+            </div>
+            <div class="field">
+              <label for="nodeRelayIp">中转 IP</label>
+              <input id="nodeRelayIp" name="relay_server_ip" autocomplete="off" placeholder="可选" />
+            </div>
+            <div class="field">
+              <label for="nodeRelayPort">中转端口</label>
+              <input id="nodeRelayPort" name="relay_server_port" type="number" min="1" max="65535" placeholder="可选" />
+            </div>
+            <div class="field">
+              <label for="nodeTelecomIp">电信 IP</label>
+              <input id="nodeTelecomIp" name="telecom_ip" autocomplete="off" placeholder="可选" />
+            </div>
+            <div class="field">
+              <label for="nodeMobileIp">移动 IP</label>
+              <input id="nodeMobileIp" name="mobile_ip" autocomplete="off" placeholder="可选" />
+            </div>
+            <div class="field">
+              <label for="nodeUnicomIp">联通 IP</label>
+              <input id="nodeUnicomIp" name="unicom_ip" autocomplete="off" placeholder="可选" />
+            </div>
+            <label class="checkbox">
+              <input name="is_support_ipv6" type="checkbox" />
+              支持 IPv6
+            </label>
+            <label class="checkbox">
+              <input name="disable_quic" type="checkbox" />
+              禁用 QUIC
+            </label>
+          </div>
+          <div class="message error-text hidden" id="createNodeError"></div>
+          <div class="form-actions">
+            <button id="cancelCreateNode" type="button">取消</button>
+            <button class="primary" type="submit">创建节点</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <script>
       const state = {
         token: localStorage.getItem("xaccel_admin_token") || "",
@@ -748,8 +1045,18 @@
       };
 
       const els = {
-        tokenInput: document.getElementById("tokenInput"),
-        saveToken: document.getElementById("saveToken"),
+        loginScreen: document.getElementById("loginScreen"),
+        appShell: document.getElementById("appShell"),
+        loginForm: document.getElementById("loginForm"),
+        loginTokenInput: document.getElementById("loginTokenInput"),
+        loginError: document.getElementById("loginError"),
+        logoutButton: document.getElementById("logoutButton"),
+        openCreateNode: document.getElementById("openCreateNode"),
+        createNodeModal: document.getElementById("createNodeModal"),
+        closeCreateNode: document.getElementById("closeCreateNode"),
+        cancelCreateNode: document.getElementById("cancelCreateNode"),
+        createNodeForm: document.getElementById("createNodeForm"),
+        createNodeError: document.getElementById("createNodeError"),
         refreshNow: document.getElementById("refreshNow"),
         toggleAuto: document.getElementById("toggleAuto"),
         statusLine: document.getElementById("statusLine"),
@@ -761,7 +1068,35 @@
         detailBody: document.getElementById("detailBody"),
       };
 
-      els.tokenInput.value = state.token;
+      els.loginTokenInput.value = state.token;
+
+      function setLoggedIn(loggedIn) {
+        els.loginScreen.classList.toggle("hidden", loggedIn);
+        els.appShell.classList.toggle("hidden", !loggedIn);
+      }
+
+      function showInlineError(element, message) {
+        element.textContent = message;
+        element.classList.remove("hidden");
+      }
+
+      function clearInlineError(element) {
+        element.textContent = "";
+        element.classList.add("hidden");
+      }
+
+      function openCreateNodeModal() {
+        clearInlineError(els.createNodeError);
+        els.createNodeForm.reset();
+        els.createNodeForm.elements.server_port.value = "666";
+        els.createNodeForm.elements.bandwidth_quality.value = "normal";
+        els.createNodeModal.classList.remove("hidden");
+        els.createNodeForm.elements.name.focus();
+      }
+
+      function closeCreateNodeModal() {
+        els.createNodeModal.classList.add("hidden");
+      }
 
       function escapeHtml(value) {
         return String(value ?? "")
@@ -833,6 +1168,22 @@
         const udp = listeners.udp_listening ? "UDP" : "";
         const tcp = listeners.tcp_listening ? "TCP" : "";
         return [udp, tcp].filter(Boolean).join(" + ") || "未监听";
+      }
+
+      function numberOrNull(value) {
+        const trimmed = String(value ?? "").trim();
+        if (!trimmed) return null;
+        const number = Number(trimmed);
+        return Number.isFinite(number) ? number : null;
+      }
+
+      function textOrNull(value) {
+        const trimmed = String(value ?? "").trim();
+        return trimmed ? trimmed : null;
+      }
+
+      function defaultPublicBaseUrl() {
+        return window.location.origin;
       }
 
       async function api(path, options = {}) {
@@ -1021,6 +1372,70 @@
             </div>
           </div>
           <div class="detail-section">
+            <div class="section-title">节点操作</div>
+            <div class="action-grid">
+              <div class="operation-card">
+                <div class="operation-title">调整状态</div>
+                <form data-action="status">
+                  <div class="form-grid single">
+                    <div class="field">
+                      <label>目标状态</label>
+                      <select name="status">
+                        <option value="pending_install">待安装</option>
+                        <option value="draining">排空</option>
+                        <option value="offline">离线</option>
+                        <option value="install_failed">安装失败</option>
+                        <option value="disabled">禁用</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label>原因</label>
+                      <input name="reason" autocomplete="off" placeholder="可选，记录到审计日志" />
+                    </div>
+                  </div>
+                  <div class="form-actions">
+                    <button type="submit">保存状态</button>
+                  </div>
+                </form>
+              </div>
+              <div class="operation-card">
+                <div class="operation-title">生成安装命令</div>
+                <form data-action="bootstrap">
+                  <div class="form-grid">
+                    <div class="field">
+                      <label>控制面公网地址</label>
+                      <input name="public_base_url" value="${escapeHtml(defaultPublicBaseUrl())}" autocomplete="off" />
+                    </div>
+                    <div class="field">
+                      <label>有效期秒数</label>
+                      <input name="expires_in_sec" type="number" min="60" max="86400" value="3600" />
+                    </div>
+                    <div class="field">
+                      <label>发布通道</label>
+                      <select name="channel">
+                        <option value="stable">stable</option>
+                        <option value="beta">beta</option>
+                      </select>
+                    </div>
+                    <label class="checkbox">
+                      <input name="enable_control_plane" type="checkbox" checked />
+                      开启节点上报
+                    </label>
+                  </div>
+                  <div class="form-actions">
+                    <button class="primary" type="submit">生成命令</button>
+                  </div>
+                  <div class="command-output">
+                    <textarea data-install-command readonly placeholder="生成后会显示一键安装命令"></textarea>
+                    <div class="form-actions">
+                      <button data-copy-install type="button">复制命令</button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+          <div class="detail-section">
             <details>
               <summary>Health JSON</summary>
               <pre>${escapeHtml(JSON.stringify(health, null, 2))}</pre>
@@ -1076,12 +1491,117 @@
         els.nodeRows.innerHTML = `<tr><td colspan="7" class="error">${escapeHtml(error.message)}</td></tr>`;
       }
 
+      async function login() {
+        clearInlineError(els.loginError);
+        state.token = els.loginTokenInput.value.trim();
+        if (!state.token) {
+          showInlineError(els.loginError, "请输入管理员 Token");
+          return;
+        }
+        localStorage.setItem("xaccel_admin_token", state.token);
+        try {
+          setLoggedIn(true);
+          resetTimer();
+          await loadNodes();
+        } catch (error) {
+          localStorage.removeItem("xaccel_admin_token");
+          state.token = "";
+          setLoggedIn(false);
+          showInlineError(els.loginError, error.message);
+        }
+      }
+
+      function logout() {
+        localStorage.removeItem("xaccel_admin_token");
+        state.token = "";
+        state.nodes = [];
+        state.selectedId = null;
+        clearInterval(state.timer);
+        state.timer = null;
+        els.loginTokenInput.value = "";
+        setLoggedIn(false);
+      }
+
+      async function createNode(form) {
+        clearInlineError(els.createNodeError);
+        const payload = {
+          name: form.elements.name.value.trim(),
+          server_ip: form.elements.server_ip.value.trim(),
+          server_port: Number(form.elements.server_port.value),
+          bandwidth_quality: form.elements.bandwidth_quality.value,
+          is_support_ipv6: form.elements.is_support_ipv6.checked,
+          disable_quic: form.elements.disable_quic.checked,
+        };
+        for (const key of [
+          "area",
+          "tag",
+          "relay_server_ip",
+          "telecom_ip",
+          "mobile_ip",
+          "unicom_ip",
+        ]) {
+          const value = textOrNull(form.elements[key]?.value);
+          if (value) payload[key] = value;
+        }
+        const relayPort = numberOrNull(form.elements.relay_server_port.value);
+        if (relayPort) payload.relay_server_port = relayPort;
+
+        const data = await api("/api/admin/v1/nodes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        state.selectedId = data.node.id;
+        closeCreateNodeModal();
+        await loadNodes();
+      }
+
+      async function updateNodeStatus(form) {
+        if (!state.selectedId) return;
+        const payload = {
+          status: form.elements.status.value,
+        };
+        const reason = textOrNull(form.elements.reason.value);
+        if (reason) payload.reason = reason;
+
+        await api(`/api/admin/v1/nodes/${state.selectedId}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        await loadNodes();
+      }
+
+      async function createBootstrapCommand(form) {
+        if (!state.selectedId) return;
+        const payload = {
+          enable_control_plane: form.elements.enable_control_plane.checked,
+        };
+        const publicBaseUrl = textOrNull(form.elements.public_base_url.value);
+        const ttl = numberOrNull(form.elements.expires_in_sec.value);
+        const channel = textOrNull(form.elements.channel.value);
+        if (publicBaseUrl) payload.public_base_url = publicBaseUrl;
+        if (ttl) payload.expires_in_sec = ttl;
+        if (channel) payload.channel = channel;
+
+        const data = await api(`/api/admin/v1/nodes/${state.selectedId}/bootstrap-token`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const output = form.querySelector("[data-install-command]");
+        output.value = data.install_command;
+        output.focus();
+        output.select();
+        els.statusLine.textContent = `已生成节点 ${data.node_id} 的安装命令`;
+      }
+
       function resetTimer() {
         if (state.timer) {
           clearInterval(state.timer);
           state.timer = null;
         }
-        if (state.autoRefresh) {
+        if (state.autoRefresh && state.token) {
           state.timer = setInterval(() => {
             loadNodes({ silent: true }).catch(showError);
           }, 30000);
@@ -1089,10 +1609,25 @@
         els.toggleAuto.textContent = `自动刷新：${state.autoRefresh ? "开" : "关"}`;
       }
 
-      els.saveToken.addEventListener("click", () => {
-        state.token = els.tokenInput.value.trim();
-        localStorage.setItem("xaccel_admin_token", state.token);
-        loadNodes().catch(showError);
+      els.loginForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        login();
+      });
+
+      els.logoutButton.addEventListener("click", logout);
+
+      els.openCreateNode.addEventListener("click", openCreateNodeModal);
+      els.closeCreateNode.addEventListener("click", closeCreateNodeModal);
+      els.cancelCreateNode.addEventListener("click", closeCreateNodeModal);
+      els.createNodeModal.addEventListener("click", (event) => {
+        if (event.target === els.createNodeModal) closeCreateNodeModal();
+      });
+
+      els.createNodeForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        createNode(els.createNodeForm).catch((error) => {
+          showInlineError(els.createNodeError, error.message);
+        });
       });
 
       els.refreshNow.addEventListener("click", () => {
@@ -1111,9 +1646,37 @@
         }
       });
 
-      resetTimer();
+      els.detailBody.addEventListener("submit", (event) => {
+        const form = event.target.closest("form[data-action]");
+        if (!form) return;
+        event.preventDefault();
+        if (form.dataset.action === "status") {
+          updateNodeStatus(form).catch(showError);
+        }
+        if (form.dataset.action === "bootstrap") {
+          createBootstrapCommand(form).catch(showError);
+        }
+      });
+
+      els.detailBody.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-copy-install]");
+        if (!button) return;
+        const output = button.closest("form").querySelector("[data-install-command]");
+        if (!output.value) return;
+        navigator.clipboard?.writeText(output.value).then(() => {
+          button.textContent = "已复制";
+          setTimeout(() => {
+            button.textContent = "复制命令";
+          }, 1400);
+        });
+      });
+
       if (state.token) {
+        setLoggedIn(true);
+        resetTimer();
         loadNodes().catch(showError);
+      } else {
+        setLoggedIn(false);
       }
     </script>
   </body>
