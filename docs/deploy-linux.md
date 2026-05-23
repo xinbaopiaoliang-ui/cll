@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.12.0`.
+Current version: `v0.13.0`.
 
 The node can:
 
@@ -20,7 +20,8 @@ The node can:
 - bind connect-intent target routes from signed client tokens;
 - forward authenticated UDP `session.data` packets to the bound UDP endpoint;
 - issue development connect-intent responses through `backend-mock`;
-- optionally report signed health snapshots to the backend control plane;
+- optionally report signed health snapshots to the backend control plane and
+  store them in MySQL through `xaccel-control-api`;
 - validate the full flow with the packaged `xaccel-client-probe` binary.
 
 It does not yet fetch production game rules or connect-intents from a real
@@ -31,8 +32,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.12.0
-git push origin v0.12.0
+git tag v0.13.0
+git push origin v0.13.0
 ```
 
 GitHub Actions will publish:
@@ -460,8 +461,8 @@ Expected top-level output:
 ## 11. Optional Control Plane Report
 
 Standalone installs keep backend reporting disabled by default because
-`https://api.example.com` is only a placeholder. When the real backend endpoint
-exists, enable signed node reports during install:
+`https://api.example.com` is only a placeholder. When `xaccel-control-api` is
+reachable from the node server, enable signed node reports during install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh | sudo bash -s -- \
@@ -471,6 +472,15 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
   --server-ip YOUR_SERVER_IP \
   --server-port 666 \
   --enable-control-plane
+```
+
+For a separate control server, bind the control API to a reachable address and
+allow only the node server through your firewall:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \
+  --database-url 'mysql://xaccel:password@127.0.0.1:3306/xaccel' \
+  --listen 0.0.0.0:18080
 ```
 
 The node posts to:
@@ -489,7 +499,9 @@ X-Node-Body-Sha256
 X-Node-Signature
 ```
 
-Health exposes report status under `control_plane`.
+Health exposes report status under `control_plane`. The control API stores the
+raw report in `node_runtime_reports`, updates `accel_nodes.last_report_at`, and
+refreshes `accel_nodes.kernel_version`.
 
 ## 12. Placeholder Mode
 

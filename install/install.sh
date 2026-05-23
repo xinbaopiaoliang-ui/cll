@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.12.0"
+INSTALLER_VERSION="0.13.0"
 SERVICE_NAME="xaccel-node"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-node"
@@ -251,7 +251,7 @@ bootstrap_standalone() {
   "server_port": $SERVER_PORT,
   "config_revision": 1,
   "release": {
-    "version": "0.12.0",
+    "version": "0.13.0",
     "manifest_url": ""
   },
   "standalone": true
@@ -260,10 +260,41 @@ JSON
   chmod 0600 "${DATA_DIR}/bootstrap-response.json"
 }
 
+read_identity_secret() {
+  [[ -f "$IDENTITY_FILE" ]] || return 0
+  sed -n 's/.*"node_secret": *"\([^"]*\)".*/\1/p' "$IDENTITY_FILE" | head -n 1
+}
+
+reuse_existing_identity_secret() {
+  local existing_secret
+  if [[ "$STANDALONE" != "1" || -n "$NODE_SECRET" || ! -f "$IDENTITY_FILE" ]]; then
+    return 0
+  fi
+
+  existing_secret="$(read_identity_secret)"
+  if [[ -n "$existing_secret" ]]; then
+    NODE_SECRET="$existing_secret"
+    log "reuse existing node secret from $IDENTITY_FILE"
+  fi
+}
+
 write_identity_placeholder() {
   if [[ -f "$IDENTITY_FILE" ]]; then
-    log "identity already exists: $IDENTITY_FILE"
-    return
+    if [[ "$STANDALONE" != "1" ]]; then
+      log "identity already exists: $IDENTITY_FILE"
+      return
+    fi
+    log "update existing standalone identity: $IDENTITY_FILE"
+  else
+    log "write standalone identity: $IDENTITY_FILE"
+  fi
+
+  if [[ "$STANDALONE" == "1" && -z "$NODE_SECRET" ]]; then
+    NODE_SECRET="$(sed -n 's/.*"node_secret": "\([^"]*\)".*/\1/p' "${DATA_DIR}/bootstrap-response.json" | head -n 1)"
+  fi
+
+  if [[ "$STANDALONE" == "1" && -z "$NODE_SECRET" ]]; then
+    fail "node secret is required to write standalone identity"
   fi
 
   cat > "$IDENTITY_FILE" <<JSON
@@ -471,6 +502,7 @@ main() {
     exit 0
   fi
 
+  reuse_existing_identity_secret
   if [[ "$STANDALONE" == "1" ]]; then
     bootstrap_standalone
   else

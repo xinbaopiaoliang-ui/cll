@@ -116,9 +116,19 @@ Done in `v0.3.0`:
 - Report health, listener, traffic, and session snapshots.
 - Expose control-plane success/failure state in `/health`.
 
+Done in `v0.13.0`:
+
+- Add `POST /api/node/v1/report` to `xaccel-control-api`.
+- Verify node report HMAC headers against each node secret in MySQL.
+- Persist raw health snapshots into `node_runtime_reports`.
+- Update `accel_nodes.last_report_at`, `last_seen_at`, `kernel_version`, and
+  runtime status from signed reports.
+- Keep standalone reinstall identity data consistent when changing panel URLs.
+
 Goals:
 
 - Implement backend handshake.
+- Add nonce replay storage for node report requests.
 - Parse production bootstrap response.
 - Fetch node config and hot-apply safe fields.
 - Add websocket or long-poll events for drain, config update, and user kick.

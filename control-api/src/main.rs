@@ -1,16 +1,21 @@
 use anyhow::{bail, Context};
 use axum::{
+    body::Bytes,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{
+    engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD},
+    Engine,
+};
 use clap::Parser;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sqlx::{mysql::MySqlPoolOptions, FromRow, MySqlPool};
 use std::{
     net::SocketAddr,
@@ -24,6 +29,8 @@ type HmacSha256 = Hmac<Sha256>;
 
 const TOKEN_PREFIX: &str = "xat";
 const TOKEN_VERSION: &str = "v1";
+const NODE_REPORT_PATH: &str = "/api/node/v1/report";
+const NODE_REPORT_MAX_SKEW_SEC: u64 = 300;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Parser)]
@@ -131,6 +138,73 @@ struct HealthResponse {
     database: &'static str,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct NodeReportRequest {
+    node_id: u64,
+    config_revision: u64,
+    node_version: String,
+    status: String,
+    timestamp: u64,
+    health: NodeHealthSnapshot,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct NodeHealthSnapshot {
+    #[serde(default)]
+    listeners: NodeListenerSnapshot,
+    #[serde(default)]
+    traffic: NodeTrafficSnapshot,
+    #[serde(default)]
+    sessions: NodeSessionSnapshot,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, Value>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct NodeListenerSnapshot {
+    #[serde(default)]
+    udp_listening: bool,
+    #[serde(default)]
+    tcp_listening: bool,
+    listen_addr: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct NodeTrafficSnapshot {
+    #[serde(default)]
+    udp_rx_packets: u64,
+    #[serde(default)]
+    udp_rx_bytes: u64,
+    #[serde(default)]
+    udp_tx_packets: u64,
+    #[serde(default)]
+    udp_tx_bytes: u64,
+    #[serde(default)]
+    tcp_accepted: u64,
+    #[serde(default)]
+    tcp_rx_bytes: u64,
+    #[serde(default)]
+    tcp_tx_bytes: u64,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct NodeSessionSnapshot {
+    #[serde(default)]
+    active_tcp_connections: u64,
+    #[serde(default)]
+    active_udp_sessions: u64,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct NodeReportResponse {
+    status: &'static str,
+    node_id: u64,
+    stored: bool,
+    server_time: u64,
+}
+
 #[derive(Debug, Serialize)]
 struct ErrorBody {
     error: ErrorMessage,
@@ -186,6 +260,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/api/client/v1/connect-intent", post(connect_intent))
+        .route(NODE_REPORT_PATH, post(node_report))
         .with_state(Arc::new(state));
 
     let listener = TcpListener::bind(cli.listen)
@@ -244,6 +319,49 @@ async fn connect_intent(
     validate_connect_intent_request(&request)?;
     let response = issue_connect_intent(&state.pool, state.token_ttl_sec, request).await?;
     Ok(Json(response))
+}
+
+async fn node_report(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<NodeReportResponse>, AppError> {
+    let header_node_id = required_header_u64(&headers, "X-Node-Id")?;
+    let timestamp = required_header_u64(&headers, "X-Node-Timestamp")?;
+    let nonce = required_header(&headers, "X-Node-Nonce")?;
+    let body_sha256 = required_header(&headers, "X-Node-Body-Sha256")?;
+    let signature = required_header(&headers, "X-Node-Signature")?;
+
+    validate_node_report_timestamp(timestamp)?;
+
+    let node_secret = select_node_secret(&state.pool, header_node_id)
+        .await?
+        .ok_or_else(|| AppError::unauthorized("unknown_node", "node is not registered"))?;
+    verify_node_report_signature(
+        &node_secret,
+        timestamp,
+        nonce,
+        body_sha256,
+        signature,
+        &body,
+    )?;
+
+    let raw_json = serde_json::from_slice::<Value>(&body).map_err(|error| {
+        AppError::bad_request("invalid_report", format!("invalid report body: {error}"))
+    })?;
+    let report =
+        serde_json::from_value::<NodeReportRequest>(raw_json.clone()).map_err(|error| {
+            AppError::bad_request("invalid_report", format!("invalid report body: {error}"))
+        })?;
+    validate_node_report_request(header_node_id, &report)?;
+    persist_node_report(&state.pool, &report, &raw_json).await?;
+
+    Ok(Json(NodeReportResponse {
+        status: "ok",
+        node_id: report.node_id,
+        stored: true,
+        server_time: now_unix(),
+    }))
 }
 
 async fn issue_connect_intent(
@@ -419,6 +537,93 @@ INSERT INTO connect_intents (
     Ok(())
 }
 
+async fn select_node_secret(pool: &MySqlPool, node_id: u64) -> Result<Option<String>, AppError> {
+    sqlx::query_scalar::<_, String>(
+        r#"
+SELECT node_secret
+FROM accel_nodes
+WHERE id = ?
+  AND node_secret IS NOT NULL
+  AND node_secret <> ''
+LIMIT 1
+"#,
+    )
+    .bind(node_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::database)
+}
+
+async fn persist_node_report(
+    pool: &MySqlPool,
+    report: &NodeReportRequest,
+    raw_json: &Value,
+) -> Result<(), AppError> {
+    let raw_json = serde_json::to_string(raw_json).map_err(|error| {
+        AppError::internal(anyhow::anyhow!(
+            "failed to encode node report json: {error}"
+        ))
+    })?;
+    let udp_sessions = clamp_u32(report.health.sessions.active_udp_sessions);
+    let tcp_sessions = clamp_u32(report.health.sessions.active_tcp_connections);
+    let active_sessions = udp_sessions.saturating_add(tcp_sessions);
+    let db_status = report_database_status(report);
+    let reported_at = report.timestamp.max(1);
+
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
+
+    sqlx::query(
+        r#"
+INSERT INTO node_runtime_reports (
+  node_id,
+  config_revision,
+  status,
+  active_sessions,
+  udp_sessions,
+  tcp_sessions,
+  raw_json,
+  reported_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?))
+"#,
+    )
+    .bind(report.node_id)
+    .bind(report.config_revision)
+    .bind(&report.status)
+    .bind(active_sessions)
+    .bind(udp_sessions)
+    .bind(tcp_sessions)
+    .bind(&raw_json)
+    .bind(reported_at)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    sqlx::query(
+        r#"
+UPDATE accel_nodes
+SET
+  status = ?,
+  kernel_version = ?,
+  config_revision = ?,
+  last_seen_at = FROM_UNIXTIME(?),
+  last_report_at = CURRENT_TIMESTAMP
+WHERE id = ?
+  AND status NOT IN ('disabled', 'draining')
+"#,
+    )
+    .bind(db_status)
+    .bind(&report.node_version)
+    .bind(report.config_revision)
+    .bind(reported_at)
+    .bind(report.node_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    tx.commit().await.map_err(AppError::database)?;
+    Ok(())
+}
+
 fn validate_connect_intent_request(request: &ConnectIntentRequest) -> Result<(), AppError> {
     if request.user_id == 0 {
         return Err(AppError::bad_request(
@@ -447,6 +652,128 @@ fn validate_connect_intent_request(request: &ConnectIntentRequest) -> Result<(),
         }
     }
     Ok(())
+}
+
+fn validate_node_report_request(
+    header_node_id: u64,
+    report: &NodeReportRequest,
+) -> Result<(), AppError> {
+    if report.node_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_node",
+            "report node_id must be positive",
+        ));
+    }
+    if report.node_id != header_node_id {
+        return Err(AppError::bad_request(
+            "node_id_mismatch",
+            "header node id does not match report body",
+        ));
+    }
+    if report.node_version.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_node_version",
+            "node_version is required",
+        ));
+    }
+    if report.status.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_status",
+            "status is required",
+        ));
+    }
+    if report.timestamp == 0 {
+        return Err(AppError::bad_request(
+            "invalid_report_timestamp",
+            "report timestamp must be positive",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_node_report_timestamp(timestamp: u64) -> Result<(), AppError> {
+    if timestamp == 0 {
+        return Err(AppError::bad_request(
+            "invalid_timestamp",
+            "X-Node-Timestamp must be positive",
+        ));
+    }
+
+    let now = now_unix();
+    if timestamp.abs_diff(now) > NODE_REPORT_MAX_SKEW_SEC {
+        return Err(AppError::unauthorized(
+            "stale_report",
+            "node report timestamp is outside the allowed window",
+        ));
+    }
+
+    Ok(())
+}
+
+fn verify_node_report_signature(
+    secret: &str,
+    timestamp: u64,
+    nonce: &str,
+    body_sha256: &str,
+    signature: &str,
+    body: &[u8],
+) -> Result<(), AppError> {
+    if nonce.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_nonce",
+            "X-Node-Nonce is required",
+        ));
+    }
+
+    let expected_body_sha256 = BASE64.encode(Sha256::digest(body));
+    if body_sha256 != expected_body_sha256 {
+        return Err(AppError::bad_request(
+            "body_hash_mismatch",
+            "X-Node-Body-Sha256 does not match request body",
+        ));
+    }
+
+    let signature = BASE64.decode(signature).map_err(|_| {
+        AppError::unauthorized("invalid_signature", "node signature is not valid base64")
+    })?;
+    let canonical = format!("POST\n{NODE_REPORT_PATH}\n{timestamp}\n{nonce}\n{body_sha256}");
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(secret.as_bytes()).map_err(|error| {
+        AppError::internal(anyhow::anyhow!(
+            "failed to initialize node report verifier: {error}"
+        ))
+    })?;
+    mac.update(canonical.as_bytes());
+    mac.verify_slice(&signature)
+        .map_err(|_| AppError::unauthorized("invalid_signature", "node signature mismatch"))
+}
+
+fn required_header<'a>(headers: &'a HeaderMap, name: &'static str) -> Result<&'a str, AppError> {
+    headers
+        .get(name)
+        .ok_or_else(|| AppError::bad_request("missing_header", format!("{name} is required")))?
+        .to_str()
+        .map_err(|_| AppError::bad_request("invalid_header", format!("{name} is not valid UTF-8")))
+}
+
+fn required_header_u64(headers: &HeaderMap, name: &'static str) -> Result<u64, AppError> {
+    required_header(headers, name)?
+        .parse::<u64>()
+        .map_err(|_| AppError::bad_request("invalid_header", format!("{name} must be numeric")))
+}
+
+fn report_database_status(report: &NodeReportRequest) -> &'static str {
+    if report.status == "ready"
+        && report.health.listeners.udp_listening
+        && report.health.listeners.tcp_listening
+    {
+        "online"
+    } else {
+        "degraded"
+    }
+}
+
+fn clamp_u32(value: u64) -> u32 {
+    value.min(u64::from(u32::MAX)) as u32
 }
 
 fn sign_client_token(claims: &ClientTokenClaims, secret: &str) -> anyhow::Result<String> {
@@ -479,6 +806,10 @@ impl AppError {
 
     fn bad_request(code: &'static str, message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, code, message)
+    }
+
+    fn unauthorized(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(StatusCode::UNAUTHORIZED, code, message)
     }
 
     fn database(error: sqlx::Error) -> Self {
@@ -567,5 +898,58 @@ mod tests {
         assert_eq!(parts.len(), 4);
         assert_eq!(parts[0], "xat");
         assert_eq!(parts[1], "v1");
+    }
+
+    #[test]
+    fn verifies_node_report_signature() {
+        let body = br#"{"node_id":1,"config_revision":1,"node_version":"0.13.0","status":"ready","timestamp":1779250000,"health":{"listeners":{"udp_listening":true,"tcp_listening":true},"traffic":{},"sessions":{}}}"#;
+        let timestamp = now_unix();
+        let nonce = "test-nonce";
+        let body_sha256 = BASE64.encode(Sha256::digest(body));
+        let canonical = format!("POST\n{NODE_REPORT_PATH}\n{timestamp}\n{nonce}\n{body_sha256}");
+        let mut mac = <HmacSha256 as Mac>::new_from_slice(b"secret").expect("hmac");
+        mac.update(canonical.as_bytes());
+        let signature = BASE64.encode(mac.finalize().into_bytes());
+
+        verify_node_report_signature("secret", timestamp, nonce, &body_sha256, &signature, body)
+            .expect("signature verifies");
+    }
+
+    #[test]
+    fn rejects_node_report_body_hash_mismatch() {
+        let timestamp = now_unix();
+        let error = verify_node_report_signature(
+            "secret",
+            timestamp,
+            "test-nonce",
+            "wrong-hash",
+            "wrong-signature",
+            br#"{}"#,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "body_hash_mismatch");
+    }
+
+    #[test]
+    fn maps_ready_report_to_online() {
+        let report = NodeReportRequest {
+            node_id: 1,
+            config_revision: 1,
+            node_version: "0.13.0".to_string(),
+            status: "ready".to_string(),
+            timestamp: now_unix(),
+            health: NodeHealthSnapshot {
+                listeners: NodeListenerSnapshot {
+                    udp_listening: true,
+                    tcp_listening: true,
+                    listen_addr: Some("103.201.131.99:666".to_string()),
+                },
+                ..NodeHealthSnapshot::default()
+            },
+        };
+
+        assert_eq!(report_database_status(&report), "online");
     }
 }

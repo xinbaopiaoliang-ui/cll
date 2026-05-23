@@ -27,7 +27,7 @@ INSERT INTO accel_nodes (
   'online',
   'PASTE_NODE_SECRET',
   CURRENT_TIMESTAMP,
-  '0.12.0',
+  '0.13.0',
   1
 ) ON DUPLICATE KEY UPDATE
   server_ip = VALUES(server_ip),

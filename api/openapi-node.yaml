@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.12.0
+  version: 0.13.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -103,10 +103,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  ok:
-                    type: boolean
+                $ref: '#/components/schemas/NodeReportResponse'
 components:
   securitySchemes:
     NodeHmac:
@@ -442,7 +439,10 @@ components:
       required:
         - node_id
         - config_revision
+        - node_version
         - status
+        - timestamp
+        - health
       properties:
         node_id:
           type: integer
@@ -456,34 +456,24 @@ components:
           type: string
         health:
           type: object
-        traffic:
-          type: array
-          items:
-            type: object
-            properties:
-              user_id:
-                type: integer
-              device_id:
-                type: string
-              game_id:
-                type: integer
-              up:
-                type: integer
-              down:
-                type: integer
-        sessions:
-          type: object
-        quality:
-          type: object
-        system:
-          type: object
-        error:
-          type: object
-          properties:
-            code:
-              type: string
-            message:
-              type: string
+          description: Full xaccel-node /health snapshot.
+    NodeReportResponse:
+      type: object
+      required:
+        - status
+        - node_id
+        - stored
+        - server_time
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        node_id:
+          type: integer
+        stored:
+          type: boolean
+        server_time:
+          type: integer
     ClientSessionDataRequest:
       type: object
       description: UDP packet sent after a successful probe session is allocated.
