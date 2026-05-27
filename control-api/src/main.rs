@@ -31,6 +31,7 @@ type HmacSha256 = Hmac<Sha256>;
 const TOKEN_PREFIX: &str = "xat";
 const TOKEN_VERSION: &str = "v1";
 const NODE_REPORT_PATH: &str = "/api/node/v1/report";
+const NODE_HANDSHAKE_PATH: &str = "/api/node/v1/handshake";
 const NODE_CONFIG_PATH: &str = "/api/node/v1/config";
 const NODE_REPORT_MAX_SKEW_SEC: u64 = 300;
 const NODE_BOOTSTRAP_PATH: &str = "/api/node/v1/bootstrap";
@@ -39,6 +40,7 @@ const MAX_BOOTSTRAP_TTL_SEC: u64 = 86_400;
 const DEFAULT_INSTALL_URL: &str =
     "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const MIN_NODE_VERSION: &str = "0.1.0";
 const ADMIN_DASHBOARD_HTML: &str = include_str!("../static/admin-dashboard.html");
 
 #[derive(Debug, Parser)]
@@ -219,6 +221,36 @@ struct NodeReportResponse {
     node_id: u64,
     stored: bool,
     server_time: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeHandshakeRequest {
+    node_id: u64,
+    node_version: String,
+    os: String,
+    arch: String,
+    boot_id: String,
+    timestamp: u64,
+    nonce: String,
+    #[serde(default)]
+    config_revision: u64,
+    listen_addr: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct NodeHandshakeResponse {
+    status: &'static str,
+    node_id: u64,
+    server_time: u64,
+    config_revision: u64,
+    min_node_version: &'static str,
+    websocket: NodeHandshakeWebsocket,
+}
+
+#[derive(Debug, Serialize)]
+struct NodeHandshakeWebsocket {
+    enabled: bool,
+    url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -580,6 +612,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health))
         .route("/api/client/v1/connect-intent", post(connect_intent))
         .route(NODE_BOOTSTRAP_PATH, post(node_bootstrap))
+        .route(NODE_HANDSHAKE_PATH, post(node_handshake))
         .route(NODE_CONFIG_PATH, get(node_config))
         .route(NODE_REPORT_PATH, post(node_report))
         .route(
@@ -694,6 +727,55 @@ async fn node_bootstrap(
     let panel_url = resolve_public_base_url(&state, &headers)?;
     let response = exchange_bootstrap_token(&state.pool, request, panel_url).await?;
     Ok(Json(response))
+}
+
+async fn node_handshake(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<NodeHandshakeResponse>, AppError> {
+    let header_node_id = required_header_u64(&headers, "X-Node-Id")?;
+    let timestamp = required_header_u64(&headers, "X-Node-Timestamp")?;
+    let nonce = required_header(&headers, "X-Node-Nonce")?;
+    let body_sha256 = required_header(&headers, "X-Node-Body-Sha256")?;
+    let signature = required_header(&headers, "X-Node-Signature")?;
+
+    validate_node_report_timestamp(timestamp)?;
+
+    let node_secret = select_node_secret(&state.pool, header_node_id)
+        .await?
+        .ok_or_else(|| AppError::unauthorized("unknown_node", "node is not registered"))?;
+    verify_node_signature(
+        "POST",
+        NODE_HANDSHAKE_PATH,
+        &node_secret,
+        timestamp,
+        nonce,
+        body_sha256,
+        signature,
+        &body,
+    )?;
+
+    let request = serde_json::from_slice::<NodeHandshakeRequest>(&body).map_err(|error| {
+        AppError::bad_request(
+            "invalid_handshake",
+            format!("invalid handshake body: {error}"),
+        )
+    })?;
+    validate_node_handshake_request(header_node_id, timestamp, nonce, &request)?;
+    let config_revision = persist_node_handshake(&state.pool, &request).await?;
+
+    Ok(Json(NodeHandshakeResponse {
+        status: "ok",
+        node_id: request.node_id,
+        server_time: now_unix(),
+        config_revision,
+        min_node_version: MIN_NODE_VERSION,
+        websocket: NodeHandshakeWebsocket {
+            enabled: false,
+            url: None,
+        },
+    }))
 }
 
 async fn node_report(
@@ -1745,6 +1827,49 @@ WHERE id = ?
     Ok(())
 }
 
+async fn persist_node_handshake(
+    pool: &MySqlPool,
+    handshake: &NodeHandshakeRequest,
+) -> Result<u64, AppError> {
+    let seen_at = handshake.timestamp.max(1);
+    sqlx::query(
+        r#"
+UPDATE accel_nodes
+SET
+  status = CASE
+    WHEN status IN ('disabled', 'draining') THEN status
+    ELSE 'online'
+  END,
+  kernel_version = ?,
+  config_revision = GREATEST(config_revision, ?),
+  last_seen_at = FROM_UNIXTIME(?),
+  updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+"#,
+    )
+    .bind(&handshake.node_version)
+    .bind(handshake.config_revision.max(1))
+    .bind(seen_at)
+    .bind(handshake.node_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+
+    sqlx::query_scalar::<_, u64>(
+        r#"
+SELECT config_revision
+FROM accel_nodes
+WHERE id = ?
+LIMIT 1
+"#,
+    )
+    .bind(handshake.node_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::database)?
+    .ok_or_else(|| AppError::not_found("node_not_found", "node does not exist"))
+}
+
 fn validate_connect_intent_request(request: &ConnectIntentRequest) -> Result<(), AppError> {
     if request.user_id == 0 {
         return Err(AppError::bad_request(
@@ -1883,6 +2008,70 @@ fn validate_admin_node_status(status: &str) -> Result<&'static str, AppError> {
             "status must be pending_install, draining, offline, install_failed, or disabled; online/degraded are set by signed node reports",
         )),
     }
+}
+
+fn validate_node_handshake_request(
+    header_node_id: u64,
+    header_timestamp: u64,
+    header_nonce: &str,
+    request: &NodeHandshakeRequest,
+) -> Result<(), AppError> {
+    if request.node_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_node",
+            "handshake node_id must be positive",
+        ));
+    }
+    if request.node_id != header_node_id {
+        return Err(AppError::bad_request(
+            "node_id_mismatch",
+            "header node id does not match handshake body",
+        ));
+    }
+    if request.timestamp != header_timestamp {
+        return Err(AppError::bad_request(
+            "timestamp_mismatch",
+            "header timestamp does not match handshake body",
+        ));
+    }
+    if request.nonce != header_nonce {
+        return Err(AppError::bad_request(
+            "nonce_mismatch",
+            "header nonce does not match handshake body",
+        ));
+    }
+    if request.node_version.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_node_version",
+            "node_version is required",
+        ));
+    }
+    if request.os != "linux" {
+        return Err(AppError::bad_request(
+            "invalid_os",
+            "only linux node handshakes are supported",
+        ));
+    }
+    if request.arch.trim().is_empty() {
+        return Err(AppError::bad_request("invalid_arch", "arch is required"));
+    }
+    if request.boot_id.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_boot_id",
+            "boot_id is required",
+        ));
+    }
+    if request
+        .listen_addr
+        .as_deref()
+        .is_some_and(|listen_addr| listen_addr.chars().count() > 128)
+    {
+        return Err(AppError::bad_request(
+            "invalid_listen_addr",
+            "listen_addr must be at most 128 characters",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_node_report_request(
@@ -2554,6 +2743,30 @@ mod tests {
     }
 
     #[test]
+    fn verifies_node_handshake_signature() {
+        let body = br#"{"node_id":1,"node_version":"0.20.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
+        let timestamp = now_unix();
+        let nonce = "handshake-nonce";
+        let body_sha256 = BASE64.encode(Sha256::digest(body));
+        let canonical = format!("POST\n{NODE_HANDSHAKE_PATH}\n{timestamp}\n{nonce}\n{body_sha256}");
+        let mut mac = <HmacSha256 as Mac>::new_from_slice(b"secret").expect("hmac");
+        mac.update(canonical.as_bytes());
+        let signature = BASE64.encode(mac.finalize().into_bytes());
+
+        verify_node_signature(
+            "POST",
+            NODE_HANDSHAKE_PATH,
+            "secret",
+            timestamp,
+            nonce,
+            &body_sha256,
+            &signature,
+            body,
+        )
+        .expect("signature verifies");
+    }
+
+    #[test]
     fn rejects_node_report_body_hash_mismatch() {
         let timestamp = now_unix();
         let error = verify_node_signature(
@@ -2591,6 +2804,25 @@ mod tests {
         };
 
         assert_eq!(report_database_status(&report), "online");
+    }
+
+    #[test]
+    fn validates_node_handshake_request() {
+        let timestamp = now_unix();
+        let request = NodeHandshakeRequest {
+            node_id: 1,
+            node_version: "0.20.0".to_string(),
+            os: "linux".to_string(),
+            arch: "x86_64".to_string(),
+            boot_id: "boot-1".to_string(),
+            timestamp,
+            nonce: "nonce-1".to_string(),
+            config_revision: 1,
+            listen_addr: Some("0.0.0.0:666".to_string()),
+        };
+
+        validate_node_handshake_request(1, timestamp, "nonce-1", &request)
+            .expect("handshake is valid");
     }
 
     #[test]

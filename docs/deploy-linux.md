@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.19.0`.
+Current version: `v0.20.0`.
 
 The node can:
 
@@ -23,6 +23,8 @@ The node can:
 - issue development connect-intent responses through `backend-mock`;
 - optionally report signed health snapshots to the backend control plane and
   store them in MySQL through `xaccel-control-api`;
+- perform a signed startup handshake with the control plane before periodic
+  reports;
 - poll signed node config from the control plane and hot-apply safe node
   metadata changes;
 - write pulled network config back to `/etc/xaccel-node/config.toml` so endpoint
@@ -40,8 +42,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.19.0
-git push origin v0.19.0
+git tag v0.20.0
+git push origin v0.20.0
 ```
 
 GitHub Actions will publish:

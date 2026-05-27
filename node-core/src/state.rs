@@ -106,6 +106,12 @@ pub struct SessionSnapshot {
 #[derive(Debug, Serialize)]
 pub struct ControlPlaneSnapshot {
     pub enabled: bool,
+    pub handshake_last_success_at: Option<u64>,
+    pub handshake_last_failure_at: Option<u64>,
+    pub handshake_last_http_status: Option<u16>,
+    pub handshake_last_error: Option<String>,
+    pub handshake_ok: u64,
+    pub handshake_failed: u64,
     pub last_success_at: Option<u64>,
     pub last_failure_at: Option<u64>,
     pub last_http_status: Option<u16>,
@@ -172,6 +178,12 @@ pub struct RuntimeStats {
     control_report_ok: AtomicU64,
     control_report_failed: AtomicU64,
     control_last_error: Mutex<Option<String>>,
+    handshake_last_success_at: AtomicU64,
+    handshake_last_failure_at: AtomicU64,
+    handshake_last_http_status: AtomicU64,
+    handshake_ok: AtomicU64,
+    handshake_failed: AtomicU64,
+    handshake_last_error: Mutex<Option<String>>,
     config_last_success_at: AtomicU64,
     config_last_failure_at: AtomicU64,
     config_last_http_status: AtomicU64,
@@ -504,6 +516,30 @@ impl RuntimeStats {
         }
     }
 
+    pub fn record_handshake_success(&self, http_status: u16) {
+        self.handshake_ok.fetch_add(1, Ordering::Relaxed);
+        self.handshake_last_success_at
+            .store(now_unix(), Ordering::Relaxed);
+        self.handshake_last_http_status
+            .store(u64::from(http_status), Ordering::Relaxed);
+        if let Ok(mut last_error) = self.handshake_last_error.lock() {
+            *last_error = None;
+        }
+    }
+
+    pub fn record_handshake_failure(&self, http_status: Option<u16>, error: impl Into<String>) {
+        self.handshake_failed.fetch_add(1, Ordering::Relaxed);
+        self.handshake_last_failure_at
+            .store(now_unix(), Ordering::Relaxed);
+        if let Some(status) = http_status {
+            self.handshake_last_http_status
+                .store(u64::from(status), Ordering::Relaxed);
+        }
+        if let Ok(mut last_error) = self.handshake_last_error.lock() {
+            *last_error = Some(error.into());
+        }
+    }
+
     pub fn record_config_success(&self, http_status: u16) {
         self.config_ok.fetch_add(1, Ordering::Relaxed);
         self.config_last_success_at
@@ -575,6 +611,11 @@ impl RuntimeStats {
         let last_success_at = unix_option(self.control_last_success_at.load(Ordering::Relaxed));
         let last_failure_at = unix_option(self.control_last_failure_at.load(Ordering::Relaxed));
         let last_http_status = self.control_last_http_status.load(Ordering::Relaxed);
+        let handshake_last_success_at =
+            unix_option(self.handshake_last_success_at.load(Ordering::Relaxed));
+        let handshake_last_failure_at =
+            unix_option(self.handshake_last_failure_at.load(Ordering::Relaxed));
+        let handshake_last_http_status = self.handshake_last_http_status.load(Ordering::Relaxed);
         let config_last_success_at =
             unix_option(self.config_last_success_at.load(Ordering::Relaxed));
         let config_last_failure_at =
@@ -582,6 +623,11 @@ impl RuntimeStats {
         let config_last_http_status = self.config_last_http_status.load(Ordering::Relaxed);
         let last_error = self
             .control_last_error
+            .lock()
+            .ok()
+            .and_then(|last_error| last_error.clone());
+        let handshake_last_error = self
+            .handshake_last_error
             .lock()
             .ok()
             .and_then(|last_error| last_error.clone());
@@ -593,6 +639,16 @@ impl RuntimeStats {
 
         ControlPlaneSnapshot {
             enabled,
+            handshake_last_success_at,
+            handshake_last_failure_at,
+            handshake_last_http_status: if handshake_last_http_status == 0 {
+                None
+            } else {
+                Some(handshake_last_http_status as u16)
+            },
+            handshake_last_error,
+            handshake_ok: self.handshake_ok.load(Ordering::Relaxed),
+            handshake_failed: self.handshake_failed.load(Ordering::Relaxed),
             last_success_at,
             last_failure_at,
             last_http_status: if last_http_status == 0 {

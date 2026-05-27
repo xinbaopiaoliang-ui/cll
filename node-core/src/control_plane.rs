@@ -12,6 +12,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    fs,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -25,6 +26,7 @@ use tracing::{info, warn};
 type HmacSha256 = Hmac<Sha256>;
 
 const REPORT_PATH: &str = "/api/node/v1/report";
+const HANDSHAKE_PATH: &str = "/api/node/v1/handshake";
 const CONFIG_PATH: &str = "/api/node/v1/config";
 static NONCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -74,6 +76,17 @@ pub fn spawn_control_plane(state: RuntimeState, config_path: PathBuf) -> Vec<Joi
     let config_client = client;
 
     let task = tokio::spawn(async move {
+        if let Err(error) = send_handshake(
+            &report_client,
+            &task_state,
+            node_id,
+            &panel_url,
+            &node_secret,
+        )
+        .await
+        {
+            warn!(?error, "control plane handshake failed");
+        }
         run_report_loop(
             report_client,
             task_state,
@@ -100,6 +113,112 @@ pub fn spawn_control_plane(state: RuntimeState, config_path: PathBuf) -> Vec<Joi
     });
 
     vec![task, config_task]
+}
+
+#[derive(Serialize)]
+struct NodeHandshake {
+    node_id: u64,
+    node_version: &'static str,
+    os: &'static str,
+    arch: &'static str,
+    boot_id: String,
+    timestamp: u64,
+    nonce: String,
+    config_revision: u64,
+    listen_addr: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct NodeHandshakeResponse {
+    status: String,
+    node_id: u64,
+    server_time: u64,
+    config_revision: u64,
+    min_node_version: String,
+}
+
+async fn send_handshake(
+    client: &Client,
+    state: &RuntimeState,
+    node_id: u64,
+    panel_url: &str,
+    node_secret: &str,
+) -> anyhow::Result<()> {
+    let timestamp = now_unix();
+    let nonce = next_nonce(timestamp);
+    let handshake = NodeHandshake {
+        node_id,
+        node_version: env!("CARGO_PKG_VERSION"),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        boot_id: read_boot_id(),
+        timestamp,
+        nonce: nonce.clone(),
+        config_revision: state.config_revision(),
+        listen_addr: state
+            .effective_network()
+            .map(|network| network.listen_endpoint()),
+    };
+    let body = serde_json::to_vec(&handshake).context("failed to encode node handshake")?;
+    let signed = sign_request(
+        "POST",
+        HANDSHAKE_PATH,
+        timestamp,
+        &nonce,
+        &body,
+        node_secret,
+    )?;
+    let url = format!("{panel_url}{HANDSHAKE_PATH}");
+
+    let response = match client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .header("X-Node-Id", node_id.to_string())
+        .header("X-Node-Timestamp", timestamp.to_string())
+        .header("X-Node-Nonce", &nonce)
+        .header("X-Node-Body-Sha256", signed.body_sha256)
+        .header("X-Node-Signature", signed.signature)
+        .body(body)
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            state
+                .stats()
+                .record_handshake_failure(None, error.to_string());
+            return Err(error.into());
+        }
+    };
+
+    let status = response.status();
+    if !status.is_success() {
+        let message = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "failed to read response body".to_string());
+        let message = trim_for_log(&message, 200);
+        state
+            .stats()
+            .record_handshake_failure(Some(status.as_u16()), message.clone());
+        bail!("handshake rejected: http {} {}", status.as_u16(), message);
+    }
+
+    let payload = response
+        .json::<NodeHandshakeResponse>()
+        .await
+        .context("failed to decode handshake response")?;
+    state.stats().record_handshake_success(status.as_u16());
+    info!(
+        status = %payload.status,
+        node_id = payload.node_id,
+        server_time = payload.server_time,
+        remote_config_revision = payload.config_revision,
+        local_config_revision = state.config_revision(),
+        min_node_version = %payload.min_node_version,
+        "control plane handshake accepted"
+    );
+    Ok(())
 }
 
 async fn run_report_loop(
@@ -377,6 +496,14 @@ fn is_placeholder_panel_url(panel_url: &str) -> bool {
         .trim()
         .to_ascii_lowercase()
         .contains("api.example.com")
+}
+
+fn read_boot_id() -> String {
+    fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .map(|boot_id| boot_id.trim().to_string())
+        .ok()
+        .filter(|boot_id| !boot_id.is_empty())
+        .unwrap_or_else(|| format!("pid-{}-{}", std::process::id(), now_unix()))
 }
 
 fn now_unix() -> u64 {

@@ -188,9 +188,16 @@ Done in `v0.19.0`:
 - Persist pulled network config back to the local TOML so restart-required
   endpoint changes can take effect after `systemctl restart xaccel-node`.
 
+Done in `v0.20.0`:
+
+- Implement signed node startup handshake at `/api/node/v1/handshake`.
+- Update node `last_seen_at`, `kernel_version`, and config revision during
+  handshake before the first periodic report arrives.
+- Expose handshake success/failure counters and last HTTP status in node
+  `/health`.
+
 Goals:
 
-- Implement backend handshake.
 - Add nonce replay storage for node report requests.
 - Parse production bootstrap response.
 - Add websocket or long-poll events for drain, config update, and user kick.

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.19.0
+  version: 0.20.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -479,9 +479,26 @@ components:
           type: integer
         nonce:
           type: string
+        config_revision:
+          type: integer
+          minimum: 1
+        listen_addr:
+          type: string
     HandshakeResponse:
       type: object
+      required:
+        - status
+        - node_id
+        - server_time
+        - config_revision
+        - min_node_version
+        - websocket
       properties:
+        status:
+          type: string
+          enum: [ok]
+        node_id:
+          type: integer
         server_time:
           type: integer
         config_revision:

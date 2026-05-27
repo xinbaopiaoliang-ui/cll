@@ -1339,6 +1339,7 @@
           <div class="detail-section detail-hero">
             <div class="detail-kicker">
               <span class="chip ${status}">${escapeHtml(statusText(node))}</span>
+              <span class="chip ${Number(control.handshake_last_http_status) === 200 ? "ok" : "warn"}">Handshake ${escapeHtml(control.handshake_last_http_status || "--")}</span>
               <span class="chip">监听 ${escapeHtml(listenText(listeners))}</span>
               <span class="chip ${Number(control.last_http_status) === 200 ? "ok" : "warn"}">控制面 ${escapeHtml(control.last_http_status || "--")}</span>
               <span class="chip ${Number(control.config_last_http_status) === 200 ? "ok" : "warn"}">配置 ${escapeHtml(control.config_last_http_status || "--")}</span>
@@ -1365,6 +1366,8 @@
               ${metric("Active UDP", sessions.active_udp_sessions || 0)}
               ${metric("Auth OK", sessions.auth_ok || 0)}
               ${metric("Relay Timeout", sessions.udp_relay_timeout || 0)}
+              ${metric("Handshake OK", control.handshake_ok || 0)}
+              ${metric("Handshake Failed", control.handshake_failed || 0)}
               ${metric("Config OK", control.config_ok || 0)}
               ${metric("Config Failed", control.config_failed || 0)}
             </div>

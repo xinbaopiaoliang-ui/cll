@@ -36,7 +36,7 @@ cargo test --manifest-path client-probe/Cargo.toml --locked
 
 ## Linux Runtime Check
 
-After installing `v0.19.0`:
+After installing `v0.20.0`:
 
 ```bash
 systemctl status xaccel-node

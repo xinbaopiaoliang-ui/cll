@@ -111,13 +111,14 @@ POST /api/node/v1/handshake
 ```json
 {
   "node_id": 1,
-  "node_version": "0.1.0",
+  "node_version": "0.20.0",
   "os": "linux",
   "arch": "x86_64",
   "boot_id": "uuid",
   "timestamp": 1779250000,
   "nonce": "random",
-  "signature": "hmac-sha256"
+  "config_revision": 1,
+  "listen_addr": "0.0.0.0:666"
 }
 ```
 
@@ -125,11 +126,13 @@ POST /api/node/v1/handshake
 
 ```json
 {
+  "status": "ok",
+  "node_id": 1,
   "server_time": 1779250001,
   "config_revision": 10001,
   "websocket": {
-    "enabled": true,
-    "url": "wss://api.example.com/api/node/v1/events"
+    "enabled": false,
+    "url": null
   },
   "min_node_version": "0.1.0"
 }
