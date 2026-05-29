@@ -17,7 +17,7 @@ use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sqlx::{mysql::MySqlPoolOptions, FromRow, MySqlPool};
+use sqlx::{mysql::MySqlPoolOptions, FromRow, MySql, MySqlPool, QueryBuilder};
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -326,6 +326,28 @@ struct AdminCreateBootstrapTokenRequest {
     channel: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AdminListRouteRulesQuery {
+    game_id: Option<u64>,
+    node_id: Option<u64>,
+    status: Option<String>,
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminRouteRuleRequest {
+    game_id: u64,
+    node_id: u64,
+    target_addr: String,
+    protocol: Option<String>,
+    area: Option<String>,
+    tag: Option<String>,
+    priority: Option<u32>,
+    status: Option<String>,
+}
+
+type AdminUpdateRouteRuleRequest = AdminRouteRuleRequest;
+
 #[derive(Debug, Serialize)]
 struct AdminListNodesResponse {
     nodes: Vec<AdminNodeSummary>,
@@ -376,6 +398,28 @@ struct AdminCreateBootstrapTokenResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct AdminListRouteRulesResponse {
+    rules: Vec<AdminRouteRuleSummary>,
+    total: usize,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminRouteRuleResponse {
+    status: &'static str,
+    rule: AdminRouteRuleSummary,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminDeleteRouteRuleResponse {
+    status: &'static str,
+    rule_id: u64,
+    deleted: bool,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
 struct AdminNodeSummary {
     id: u64,
     name: String,
@@ -398,6 +442,24 @@ struct AdminNodeSummary {
     last_seen_at: Option<u64>,
     last_report_at: Option<u64>,
     latest_report: Option<AdminReportSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminRouteRuleSummary {
+    id: u64,
+    game_id: u64,
+    node_id: u64,
+    node_name: String,
+    node_endpoint: String,
+    node_status: String,
+    target_addr: String,
+    protocol: String,
+    area: Option<String>,
+    tag: Option<String>,
+    priority: u32,
+    status: String,
+    created_at: Option<u64>,
+    updated_at: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -489,6 +551,25 @@ struct AdminReportRow {
     raw_json: Option<String>,
 }
 
+#[derive(Debug, FromRow)]
+struct AdminRouteRuleRow {
+    id: u64,
+    game_id: u64,
+    node_id: u64,
+    node_name: String,
+    node_server_ip: String,
+    node_server_port: u32,
+    node_status: String,
+    target_addr: String,
+    protocol: String,
+    area: Option<String>,
+    tag: Option<String>,
+    priority: u32,
+    status: String,
+    created_at: Option<u64>,
+    updated_at: Option<u64>,
+}
+
 #[derive(Debug)]
 struct NormalizedCreateNode {
     name: String,
@@ -504,6 +585,18 @@ struct NormalizedCreateNode {
     mobile_ip: Option<String>,
     unicom_ip: Option<String>,
     tag: Option<String>,
+}
+
+#[derive(Debug)]
+struct NormalizedRouteRule {
+    game_id: u64,
+    node_id: u64,
+    target_addr: String,
+    protocol: String,
+    area: Option<String>,
+    tag: Option<String>,
+    priority: u32,
+    status: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -630,6 +723,14 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/admin/v1/nodes/:node_id/bootstrap-token",
             post(admin_create_bootstrap_token),
+        )
+        .route(
+            "/api/admin/v1/game-route-rules",
+            get(admin_list_route_rules).post(admin_create_route_rule),
+        )
+        .route(
+            "/api/admin/v1/game-route-rules/:rule_id",
+            patch(admin_update_route_rule).delete(admin_delete_route_rule),
         )
         .with_state(Arc::new(state));
 
@@ -1004,6 +1105,90 @@ async fn admin_create_bootstrap_token(
         bootstrap_url,
         expires_at,
         install_command,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_list_route_rules(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<AdminListRouteRulesQuery>,
+) -> Result<Json<AdminListRouteRulesResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    validate_route_rule_query(&query)?;
+    let limit = clamp_limit(query.limit, 200, 500);
+    let rows = select_admin_route_rules(&state.pool, &query, limit).await?;
+    let rules = rows
+        .into_iter()
+        .map(AdminRouteRuleSummary::from_row)
+        .collect::<Vec<_>>();
+
+    Ok(Json(AdminListRouteRulesResponse {
+        total: rules.len(),
+        rules,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_create_route_rule(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<AdminRouteRuleRequest>,
+) -> Result<Json<AdminRouteRuleResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let rule_id = insert_admin_route_rule(&state.pool, request).await?;
+    let rule = select_admin_route_rule(&state.pool, rule_id)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found("route_rule_not_found", "created rule does not exist")
+        })?;
+
+    Ok(Json(AdminRouteRuleResponse {
+        status: "ok",
+        rule: AdminRouteRuleSummary::from_row(rule),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_update_route_rule(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(rule_id): Path<u64>,
+    Json(request): Json<AdminUpdateRouteRuleRequest>,
+) -> Result<Json<AdminRouteRuleResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    update_admin_route_rule(&state.pool, rule_id, request).await?;
+    let rule = select_admin_route_rule(&state.pool, rule_id)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found("route_rule_not_found", "updated rule does not exist")
+        })?;
+
+    Ok(Json(AdminRouteRuleResponse {
+        status: "ok",
+        rule: AdminRouteRuleSummary::from_row(rule),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_delete_route_rule(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(rule_id): Path<u64>,
+) -> Result<Json<AdminDeleteRouteRuleResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    if rule_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_route_rule",
+            "rule_id must be positive",
+        ));
+    }
+    let deleted = delete_admin_route_rule(&state.pool, rule_id).await?;
+
+    Ok(Json(AdminDeleteRouteRuleResponse {
+        status: "ok",
+        rule_id,
+        deleted,
         server_time: now_unix(),
     }))
 }
@@ -1475,6 +1660,233 @@ LIMIT ?
     .fetch_all(pool)
     .await
     .map_err(AppError::database)
+}
+
+async fn select_admin_route_rules(
+    pool: &MySqlPool,
+    query: &AdminListRouteRulesQuery,
+    limit: u32,
+) -> Result<Vec<AdminRouteRuleRow>, AppError> {
+    let mut builder = QueryBuilder::<MySql>::new(
+        r#"
+SELECT
+  r.id,
+  r.game_id,
+  r.node_id,
+  n.name AS node_name,
+  n.server_ip AS node_server_ip,
+  n.server_port AS node_server_port,
+  n.status AS node_status,
+  r.target_addr,
+  r.protocol,
+  r.area,
+  r.tag,
+  r.priority,
+  r.status,
+  CAST(UNIX_TIMESTAMP(r.created_at) AS UNSIGNED) AS created_at,
+  CAST(UNIX_TIMESTAMP(r.updated_at) AS UNSIGNED) AS updated_at
+FROM game_route_rules r
+JOIN accel_nodes n ON n.id = r.node_id
+WHERE 1 = 1
+"#,
+    );
+
+    if let Some(game_id) = query.game_id {
+        builder.push(" AND r.game_id = ");
+        builder.push_bind(game_id);
+    }
+    if let Some(node_id) = query.node_id {
+        builder.push(" AND r.node_id = ");
+        builder.push_bind(node_id);
+    }
+    if let Some(status) = query
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|status| !status.is_empty())
+    {
+        builder.push(" AND r.status = ");
+        builder.push_bind(status);
+    }
+
+    builder.push(
+        r#"
+ORDER BY r.game_id ASC, r.priority ASC, r.id ASC
+LIMIT
+"#,
+    );
+    builder.push_bind(limit);
+
+    builder
+        .build_query_as::<AdminRouteRuleRow>()
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::database)
+}
+
+async fn select_admin_route_rule(
+    pool: &MySqlPool,
+    rule_id: u64,
+) -> Result<Option<AdminRouteRuleRow>, AppError> {
+    sqlx::query_as::<_, AdminRouteRuleRow>(
+        r#"
+SELECT
+  r.id,
+  r.game_id,
+  r.node_id,
+  n.name AS node_name,
+  n.server_ip AS node_server_ip,
+  n.server_port AS node_server_port,
+  n.status AS node_status,
+  r.target_addr,
+  r.protocol,
+  r.area,
+  r.tag,
+  r.priority,
+  r.status,
+  CAST(UNIX_TIMESTAMP(r.created_at) AS UNSIGNED) AS created_at,
+  CAST(UNIX_TIMESTAMP(r.updated_at) AS UNSIGNED) AS updated_at
+FROM game_route_rules r
+JOIN accel_nodes n ON n.id = r.node_id
+WHERE r.id = ?
+LIMIT 1
+"#,
+    )
+    .bind(rule_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::database)
+}
+
+async fn insert_admin_route_rule(
+    pool: &MySqlPool,
+    request: AdminRouteRuleRequest,
+) -> Result<u64, AppError> {
+    let rule = normalize_route_rule_request(&request)?;
+    ensure_admin_node_exists(pool, rule.node_id).await?;
+    let result = sqlx::query(
+        r#"
+INSERT INTO game_route_rules (
+  game_id,
+  node_id,
+  target_addr,
+  protocol,
+  area,
+  tag,
+  priority,
+  status,
+  created_at,
+  updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(rule.game_id)
+    .bind(rule.node_id)
+    .bind(&rule.target_addr)
+    .bind(&rule.protocol)
+    .bind(&rule.area)
+    .bind(&rule.tag)
+    .bind(rule.priority)
+    .bind(&rule.status)
+    .execute(pool)
+    .await
+    .map_err(map_route_rule_write_error)?;
+
+    Ok(result.last_insert_id())
+}
+
+async fn update_admin_route_rule(
+    pool: &MySqlPool,
+    rule_id: u64,
+    request: AdminUpdateRouteRuleRequest,
+) -> Result<(), AppError> {
+    if rule_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_route_rule",
+            "rule_id must be positive",
+        ));
+    }
+    let rule = normalize_route_rule_request(&request)?;
+    ensure_admin_node_exists(pool, rule.node_id).await?;
+    let result = sqlx::query(
+        r#"
+UPDATE game_route_rules
+SET
+  game_id = ?,
+  node_id = ?,
+  target_addr = ?,
+  protocol = ?,
+  area = ?,
+  tag = ?,
+  priority = ?,
+  status = ?,
+  updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+"#,
+    )
+    .bind(rule.game_id)
+    .bind(rule.node_id)
+    .bind(&rule.target_addr)
+    .bind(&rule.protocol)
+    .bind(&rule.area)
+    .bind(&rule.tag)
+    .bind(rule.priority)
+    .bind(&rule.status)
+    .bind(rule_id)
+    .execute(pool)
+    .await
+    .map_err(map_route_rule_write_error)?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::not_found(
+            "route_rule_not_found",
+            "route rule does not exist",
+        ));
+    }
+    Ok(())
+}
+
+async fn delete_admin_route_rule(pool: &MySqlPool, rule_id: u64) -> Result<bool, AppError> {
+    let result = sqlx::query(
+        r#"
+DELETE FROM game_route_rules
+WHERE id = ?
+"#,
+    )
+    .bind(rule_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+async fn ensure_admin_node_exists(pool: &MySqlPool, node_id: u64) -> Result<(), AppError> {
+    if node_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_node",
+            "node_id must be positive",
+        ));
+    }
+    let exists = sqlx::query_scalar::<_, u64>(
+        r#"
+SELECT id
+FROM accel_nodes
+WHERE id = ?
+LIMIT 1
+"#,
+    )
+    .bind(node_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::database)?
+    .is_some();
+
+    if exists {
+        Ok(())
+    } else {
+        Err(AppError::not_found("node_not_found", "node does not exist"))
+    }
 }
 
 async fn insert_admin_node(
@@ -1996,6 +2408,99 @@ fn normalize_create_node_request(
     })
 }
 
+fn validate_route_rule_query(query: &AdminListRouteRulesQuery) -> Result<(), AppError> {
+    if query.game_id == Some(0) {
+        return Err(AppError::bad_request(
+            "invalid_game",
+            "game_id must be positive",
+        ));
+    }
+    if query.node_id == Some(0) {
+        return Err(AppError::bad_request(
+            "invalid_node",
+            "node_id must be positive",
+        ));
+    }
+    if let Some(status) = query.status.as_deref() {
+        validate_route_rule_status(status)?;
+    }
+    Ok(())
+}
+
+fn normalize_route_rule_request(
+    request: &AdminRouteRuleRequest,
+) -> Result<NormalizedRouteRule, AppError> {
+    if request.game_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_game",
+            "game_id must be positive",
+        ));
+    }
+    if request.node_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_node",
+            "node_id must be positive",
+        ));
+    }
+
+    let protocol = request
+        .protocol
+        .as_deref()
+        .map(str::trim)
+        .filter(|protocol| !protocol.is_empty())
+        .unwrap_or("udp");
+    if protocol != "udp" {
+        return Err(AppError::bad_request(
+            "invalid_route_protocol",
+            "protocol must be udp",
+        ));
+    }
+
+    Ok(NormalizedRouteRule {
+        game_id: request.game_id,
+        node_id: request.node_id,
+        target_addr: validate_target_addr(&request.target_addr)?,
+        protocol: protocol.to_string(),
+        area: normalize_optional_text(request.area.as_deref(), 32)?,
+        tag: normalize_optional_text(request.tag.as_deref(), 64)?,
+        priority: request.priority.unwrap_or(100),
+        status: validate_route_rule_status(request.status.as_deref().unwrap_or("enabled"))?
+            .to_string(),
+    })
+}
+
+fn validate_target_addr(value: &str) -> Result<String, AppError> {
+    let value = normalize_required_text(value, "target_addr", 255)?;
+    let (host, port) = value.rsplit_once(':').ok_or_else(|| {
+        AppError::bad_request(
+            "invalid_target_addr",
+            "target_addr must use host:port format",
+        )
+    })?;
+    if host.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_target_addr",
+            "target host is required",
+        ));
+    }
+    let port = port
+        .parse::<u32>()
+        .map_err(|_| AppError::bad_request("invalid_target_addr", "target port must be numeric"))?;
+    validate_port(port, "target_port")?;
+    Ok(value)
+}
+
+fn validate_route_rule_status(status: &str) -> Result<&'static str, AppError> {
+    match status.trim() {
+        "enabled" => Ok("enabled"),
+        "disabled" => Ok("disabled"),
+        _ => Err(AppError::bad_request(
+            "invalid_route_status",
+            "status must be enabled or disabled",
+        )),
+    }
+}
+
 fn validate_admin_node_status(status: &str) -> Result<&'static str, AppError> {
     match status.trim() {
         "pending_install" => Ok("pending_install"),
@@ -2469,6 +2974,21 @@ fn now_unix() -> u64 {
         .unwrap_or_default()
 }
 
+fn map_route_rule_write_error(error: sqlx::Error) -> AppError {
+    match error {
+        sqlx::Error::Database(error) if error.code().as_deref() == Some("1062") => {
+            AppError::conflict(
+                "route_rule_exists",
+                "a route rule with the same game, node, target, and protocol already exists",
+            )
+        }
+        sqlx::Error::Database(error) if error.code().as_deref() == Some("1452") => {
+            AppError::not_found("node_not_found", "node does not exist")
+        }
+        error => AppError::database(error),
+    }
+}
+
 impl AppError {
     fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
         Self {
@@ -2548,6 +3068,27 @@ impl AdminNodeSummary {
                 tcp_sessions: row.latest_tcp_sessions.unwrap_or_default(),
                 reported_at: row.latest_reported_at,
             }),
+        }
+    }
+}
+
+impl AdminRouteRuleSummary {
+    fn from_row(row: AdminRouteRuleRow) -> Self {
+        Self {
+            id: row.id,
+            game_id: row.game_id,
+            node_id: row.node_id,
+            node_name: row.node_name,
+            node_endpoint: format!("{}:{}", row.node_server_ip, row.node_server_port),
+            node_status: row.node_status,
+            target_addr: row.target_addr,
+            protocol: row.protocol,
+            area: row.area,
+            tag: row.tag,
+            priority: row.priority,
+            status: row.status,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         }
     }
 }
@@ -2656,6 +3197,19 @@ mod tests {
         }
     }
 
+    fn valid_route_rule_request() -> AdminRouteRuleRequest {
+        AdminRouteRuleRequest {
+            game_id: 8888,
+            node_id: 1,
+            target_addr: "127.0.0.1:7777".to_string(),
+            protocol: Some("udp".to_string()),
+            area: Some("UNKNOWN".to_string()),
+            tag: Some("test".to_string()),
+            priority: Some(90),
+            status: Some("enabled".to_string()),
+        }
+    }
+
     #[test]
     fn validates_connect_intent_request() {
         validate_connect_intent_request(&valid_request()).expect("request is valid");
@@ -2744,7 +3298,7 @@ mod tests {
 
     #[test]
     fn verifies_node_handshake_signature() {
-        let body = br#"{"node_id":1,"node_version":"0.20.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
+        let body = br#"{"node_id":1,"node_version":"0.21.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
         let timestamp = now_unix();
         let nonce = "handshake-nonce";
         let body_sha256 = BASE64.encode(Sha256::digest(body));
@@ -2811,7 +3365,7 @@ mod tests {
         let timestamp = now_unix();
         let request = NodeHandshakeRequest {
             node_id: 1,
-            node_version: "0.20.0".to_string(),
+            node_version: "0.21.0".to_string(),
             os: "linux".to_string(),
             arch: "x86_64".to_string(),
             boot_id: "boot-1".to_string(),
@@ -2850,6 +3404,7 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("新增节点"));
         assert!(ADMIN_DASHBOARD_HTML.contains("编辑配置"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/game-route-rules"));
         assert!(ADMIN_DASHBOARD_HTML.contains("method: \"PATCH\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("bootstrap-token"));
     }
@@ -2897,6 +3452,38 @@ mod tests {
         let error = normalize_create_node_request(&request).unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.code, "invalid_ip");
+    }
+
+    #[test]
+    fn normalizes_route_rule_request() {
+        let rule = normalize_route_rule_request(&valid_route_rule_request()).expect("rule");
+
+        assert_eq!(rule.game_id, 8888);
+        assert_eq!(rule.node_id, 1);
+        assert_eq!(rule.target_addr, "127.0.0.1:7777");
+        assert_eq!(rule.protocol, "udp");
+        assert_eq!(rule.priority, 90);
+        assert_eq!(rule.status, "enabled");
+    }
+
+    #[test]
+    fn rejects_invalid_route_rule_target() {
+        let mut request = valid_route_rule_request();
+        request.target_addr = "127.0.0.1".to_string();
+
+        let error = normalize_route_rule_request(&request).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_target_addr");
+    }
+
+    #[test]
+    fn rejects_invalid_route_rule_status() {
+        let mut request = valid_route_rule_request();
+        request.status = Some("paused".to_string());
+
+        let error = normalize_route_rule_request(&request).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_route_status");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.20.0
+  version: 0.21.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -240,6 +240,112 @@ paths:
                 $ref: '#/components/schemas/AdminCreateBootstrapTokenResponse'
         '404':
           description: Node does not exist.
+  /api/admin/v1/game-route-rules:
+    get:
+      summary: List game route rules.
+      security:
+        - AdminBearer: []
+      parameters:
+        - name: game_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: node_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [enabled, disabled]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+      responses:
+        '200':
+          description: Route rule list joined with node summary fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminListRouteRulesResponse'
+    post:
+      summary: Create a game route rule.
+      security:
+        - AdminBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminRouteRuleRequest'
+      responses:
+        '200':
+          description: Route rule created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminRouteRuleResponse'
+        '404':
+          description: Node does not exist.
+        '409':
+          description: Route rule already exists.
+  /api/admin/v1/game-route-rules/{rule_id}:
+    patch:
+      summary: Update a game route rule.
+      security:
+        - AdminBearer: []
+      parameters:
+        - name: rule_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminRouteRuleRequest'
+      responses:
+        '200':
+          description: Route rule updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminRouteRuleResponse'
+        '404':
+          description: Route rule or node does not exist.
+        '409':
+          description: Route rule already exists.
+    delete:
+      summary: Delete a game route rule.
+      security:
+        - AdminBearer: []
+      parameters:
+        - name: rule_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Route rule deleted when it existed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDeleteRouteRuleResponse'
 components:
   securitySchemes:
     NodeHmac:
@@ -873,6 +979,115 @@ components:
           type: string
         server_time:
           type: integer
+    AdminListRouteRulesResponse:
+      type: object
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminRouteRuleSummary'
+        total:
+          type: integer
+        server_time:
+          type: integer
+    AdminRouteRuleRequest:
+      type: object
+      required:
+        - game_id
+        - node_id
+        - target_addr
+      properties:
+        game_id:
+          type: integer
+          minimum: 1
+          example: 8888
+        node_id:
+          type: integer
+          minimum: 1
+          example: 1
+        target_addr:
+          type: string
+          maxLength: 255
+          example: 127.0.0.1:7777
+        protocol:
+          type: string
+          enum: [udp]
+          default: udp
+        area:
+          type: string
+          nullable: true
+          maxLength: 32
+        tag:
+          type: string
+          nullable: true
+          maxLength: 64
+        priority:
+          type: integer
+          minimum: 0
+          default: 100
+        status:
+          type: string
+          enum: [enabled, disabled]
+          default: enabled
+    AdminRouteRuleResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        rule:
+          $ref: '#/components/schemas/AdminRouteRuleSummary'
+        server_time:
+          type: integer
+    AdminDeleteRouteRuleResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        rule_id:
+          type: integer
+        deleted:
+          type: boolean
+        server_time:
+          type: integer
+    AdminRouteRuleSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        game_id:
+          type: integer
+        node_id:
+          type: integer
+        node_name:
+          type: string
+        node_endpoint:
+          type: string
+        node_status:
+          type: string
+        target_addr:
+          type: string
+        protocol:
+          type: string
+          enum: [udp]
+        area:
+          type: string
+          nullable: true
+        tag:
+          type: string
+          nullable: true
+        priority:
+          type: integer
+        status:
+          type: string
+          enum: [enabled, disabled]
+        created_at:
+          type: integer
+          nullable: true
+        updated_at:
+          type: integer
+          nullable: true
     AdminNodeSummary:
       type: object
       properties:

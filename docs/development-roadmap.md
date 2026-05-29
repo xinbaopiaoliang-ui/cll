@@ -196,6 +196,13 @@ Done in `v0.20.0`:
 - Expose handshake success/failure counters and last HTTP status in node
   `/health`.
 
+Done in `v0.21.0`:
+
+- Add admin CRUD APIs for `game_route_rules`.
+- Add dashboard list, create, edit, enable/disable, and delete flows for game
+  route rules.
+- Document the route-rule admin API in the OpenAPI spec and control API README.
+
 Goals:
 
 - Add nonce replay storage for node report requests.

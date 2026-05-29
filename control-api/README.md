@@ -9,7 +9,8 @@ It also receives HMAC-signed node runtime reports and stores them in MySQL.
 Admin node management APIs are protected by an admin bearer token. The embedded
 dashboard is available at `/admin` and uses the same bearer token in the browser
 for login, node creation, status changes, and bootstrap install command
-generation.
+generation. Route rules can also be managed from the dashboard, so day-to-day
+game target changes no longer require direct MySQL edits.
 
 ## Run
 
@@ -36,6 +37,10 @@ GET  /api/admin/v1/nodes
 GET  /api/admin/v1/nodes/{node_id}
 PATCH /api/admin/v1/nodes/{node_id}/status
 POST /api/admin/v1/nodes/{node_id}/bootstrap-token
+GET  /api/admin/v1/game-route-rules
+POST /api/admin/v1/game-route-rules
+PATCH /api/admin/v1/game-route-rules/{rule_id}
+DELETE /api/admin/v1/game-route-rules/{rule_id}
 POST /api/node/v1/bootstrap
 ```
 
@@ -81,4 +86,13 @@ curl -fsSL -X POST http://127.0.0.1:18080/api/admin/v1/nodes/1/bootstrap-token \
   -H "Authorization: Bearer ${XACCEL_ADMIN_TOKEN}" \
   -H 'Content-Type: application/json' \
   -d '{"public_base_url":"http://CONTROL_PUBLIC_IP:18080"}'
+```
+
+Create a game route rule:
+
+```bash
+curl -fsSL -X POST http://127.0.0.1:18080/api/admin/v1/game-route-rules \
+  -H "Authorization: Bearer ${XACCEL_ADMIN_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"game_id":8888,"node_id":1,"target_addr":"127.0.0.1:7777","protocol":"udp","priority":100,"status":"enabled"}'
 ```
