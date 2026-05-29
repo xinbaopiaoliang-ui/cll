@@ -269,12 +269,12 @@ Done in `v0.26.0`:
   render the latest status-change history in `/admin`, including previous
   status, target status, actor, age, and operator reason.
 
-Done in `v0.26.1`:
+Done in `v0.26.2`:
 
-- Add a dedicated restore-scheduling action to the node detail operations panel.
-  It exits drain/disabled protection by setting the node to the offline waiting
-  state with an audit reason, then lets the next signed health report move the
-  node back online for scheduling.
+- Move the restore-scheduling action into the node list row operations. It is
+  available for draining, disabled, or offline nodes, sets the node to the
+  offline waiting state with an audit reason, and then lets the next signed
+  health report move the node back online for scheduling.
 
 Goals:
 

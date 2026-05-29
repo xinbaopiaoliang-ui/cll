@@ -61,8 +61,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.26.1
-git push origin v0.26.1
+git tag v0.26.2
+git push origin v0.26.2
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -80,7 +80,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.26.1` keeps the legacy TCP/UDP `ping` probe, supports
+next stage. Version `0.26.2` keeps the legacy TCP/UDP `ping` probe, supports
 JSON `xaccel/1` client probe responses, verifies optional `xat.v1` HMAC client
 tokens, keeps a short-lived UDP session table, echoes `session.data` packets for
 client integration testing, binds backend-style connect-intent routes from
@@ -106,10 +106,10 @@ restart. Nodes also perform a signed startup handshake with the control plane so
 the backend can immediately record node version, boot instance, last_seen, and
 current config revision before the first periodic report. The dashboard includes
 CRUD for `game_route_rules`, letting operators create, edit, disable, and delete
-game-to-node target mappings without direct MySQL access. Version `0.26.1`
-adds a dedicated restore-scheduling action in the node detail panel so operators
-can exit drain/disabled protection without remembering the intermediate offline
-state. Version `0.26.0`
+game-to-node target mappings without direct MySQL access. Version `0.26.2`
+moves the restore-scheduling action into each node list row, so operators can
+recover draining, disabled, or offline nodes directly from the table without
+opening the detail form. Version `0.26.0`
 exposes recent node audit logs in the node detail view so status changes and
 operator reasons are visible without querying MySQL. Version `0.25.4` localizes
 remaining English-facing dashboard labels into Chinese while keeping protocol

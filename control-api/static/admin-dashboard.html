@@ -113,6 +113,22 @@
         color: var(--bad);
       }
 
+      button:disabled {
+        cursor: not-allowed;
+        border-color: var(--line);
+        background: var(--surface-soft);
+        color: var(--faint);
+        box-shadow: none;
+        opacity: 0.72;
+        transform: none;
+      }
+
+      button:disabled:hover {
+        border-color: var(--line);
+        box-shadow: none;
+        transform: none;
+      }
+
       input,
       select,
       textarea {
@@ -1300,7 +1316,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.26.1</span>
+          <span class="mono">v0.26.2</span>
         </div>
       </aside>
 
@@ -1440,11 +1456,12 @@
                       <th>区域</th>
                       <th>最近上报</th>
                       <th>会话</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody id="nodeRows">
                     <tr>
-                      <td colspan="7"><span class="skeleton"></span></td>
+                      <td colspan="8"><span class="skeleton"></span></td>
                     </tr>
                   </tbody>
                 </table>
@@ -1908,6 +1925,10 @@
         return status || "未知";
       }
 
+      function canResumeScheduling(node) {
+        return ["draining", "disabled", "offline"].includes(node?.status);
+      }
+
       function auditActionText(action) {
         if (action === "node.status.update") return "状态调整";
         if (action === "node.config.update") return "配置变更";
@@ -2107,7 +2128,7 @@
 
       function renderNodes() {
         if (!state.nodes.length) {
-          els.nodeRows.innerHTML = `<tr><td colspan="7" class="empty">暂无节点</td></tr>`;
+          els.nodeRows.innerHTML = `<tr><td colspan="8" class="empty">暂无节点</td></tr>`;
           return;
         }
 
@@ -2124,6 +2145,7 @@
             const selected = node.id === state.selectedId ? "selected" : "";
             const report = node.latest_report || {};
             const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
+            const resumeEnabled = canResumeScheduling(node);
             return `
               <tr class="${selected}" data-node-id="${node.id}">
                 <td>
@@ -2146,6 +2168,13 @@
                   <div class="cell-note">${escapeHtml(formatTime(node.last_report_at))}</div>
                 </td>
                 <td class="mono">${report.active_sessions || 0}</td>
+                <td>
+                  ${
+                    resumeEnabled
+                      ? `<button type="button" data-resume-node="${node.id}">恢复调度</button>`
+                      : `<span class="muted mono">--</span>`
+                  }
+                </td>
               </tr>
             `;
           })
@@ -2246,7 +2275,6 @@
         const control = health.control_plane || {};
         const config = health.config || {};
         const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
-        const canResumeScheduling = node.status === "draining" || node.status === "disabled";
 
         els.detailTitle.textContent = node.name;
         els.detailMeta.textContent = `${endpoint} / ID ${node.id}`;
@@ -2386,17 +2414,6 @@
                     <button type="submit">保存状态</button>
                   </div>
                 </form>
-              </div>
-              <div class="operation-card">
-                <div class="operation-title">恢复调度</div>
-                <div class="message">
-                  用于退出排空或禁用保护。提交后节点会先进入离线等待态，下一次健康上报成功后自动恢复在线并重新参与客户端调度。
-                </div>
-                <div class="form-actions">
-                  <button class="primary" type="button" data-resume-node ${canResumeScheduling ? "" : "disabled"}>
-                    ${canResumeScheduling ? "恢复调度" : "当前无需恢复"}
-                  </button>
-                </div>
               </div>
               <div class="operation-card">
                 <div class="operation-title">生成安装命令</div>
@@ -2542,7 +2559,7 @@
         els.statusLine.textContent = error.message;
         els.statusLine.classList.add("error-state");
         els.statusLine.classList.remove("connected");
-        els.nodeRows.innerHTML = `<tr><td colspan="7" class="error">${escapeHtml(error.message)}</td></tr>`;
+        els.nodeRows.innerHTML = `<tr><td colspan="8" class="error">${escapeHtml(error.message)}</td></tr>`;
       }
 
       async function login() {
@@ -2705,15 +2722,17 @@
         await loadNodes();
       }
 
-      async function resumeNodeScheduling() {
-        if (!state.selectedId) return;
-        const node = state.nodes.find((item) => item.id === Number(state.selectedId));
+      async function resumeNodeScheduling(nodeId = state.selectedId) {
+        const id = Number(nodeId);
+        if (!id) return;
+        const node = state.nodes.find((item) => item.id === id);
         const confirmed = window.confirm(
-          `确定恢复 ${node?.name || `节点 ${state.selectedId}`} 的调度吗？提交后会退出排空或禁用保护，等待节点健康上报恢复在线。`,
+          `确定恢复 ${node?.name || `节点 ${id}`} 的调度吗？提交后会退出排空或禁用保护，等待节点健康上报恢复在线。`,
         );
         if (!confirmed) return;
 
-        await api(`/api/admin/v1/nodes/${state.selectedId}/status`, {
+        state.selectedId = id;
+        await api(`/api/admin/v1/nodes/${id}/status`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -2721,8 +2740,8 @@
             reason: "恢复调度：退出排空或禁用保护，等待节点健康上报恢复在线",
           }),
         });
-        els.statusLine.textContent = `已提交节点 ${state.selectedId} 恢复调度，等待节点上报恢复在线`;
         await loadNodes();
+        els.statusLine.textContent = `已提交节点 ${id} 恢复调度，等待节点上报恢复在线`;
       }
 
       async function createBootstrapCommand(form) {
@@ -2818,6 +2837,13 @@
       });
 
       els.nodeRows.addEventListener("click", (event) => {
+        const resumeButton = event.target.closest("[data-resume-node]");
+        if (resumeButton) {
+          event.preventDefault();
+          event.stopPropagation();
+          resumeNodeScheduling(resumeButton.dataset.resumeNode).catch(showError);
+          return;
+        }
         const row = event.target.closest("tr[data-node-id]");
         if (row) {
           loadDetail(row.dataset.nodeId).catch(showError);
@@ -2868,11 +2894,6 @@
       });
 
       els.detailBody.addEventListener("click", (event) => {
-        const resumeButton = event.target.closest("[data-resume-node]");
-        if (resumeButton) {
-          resumeNodeScheduling().catch(showError);
-          return;
-        }
         const button = event.target.closest("[data-copy-install]");
         if (!button) return;
         const output = button.closest("form").querySelector("[data-install-command]");
