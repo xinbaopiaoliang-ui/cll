@@ -901,6 +901,25 @@
         border-bottom: 0;
       }
 
+      .audit-row {
+        grid-template-columns: 74px minmax(0, 1fr) 90px;
+        align-items: start;
+      }
+
+      .audit-action {
+        display: block;
+        color: var(--ink);
+        font-weight: 780;
+      }
+
+      .audit-summary {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
+
       .field {
         display: flex;
         flex-direction: column;
@@ -1281,7 +1300,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.25.4</span>
+          <span class="mono">v0.26.0</span>
         </div>
       </aside>
 
@@ -1858,16 +1877,22 @@
         return "ok";
       }
 
+      function nodeStatusValueText(status) {
+        if (status === "online") return "在线";
+        if (status === "pending_install") return "待安装";
+        if (status === "installing") return "安装中";
+        if (status === "disabled") return "禁用";
+        if (status === "draining") return "排空";
+        if (status === "offline") return "离线";
+        if (status === "install_failed") return "安装失败";
+        if (status === "degraded") return "降级";
+        return status || "未知";
+      }
+
       function statusText(node) {
         const cls = statusClass(node);
         if (cls === "warn") return "延迟";
-        if (node.status === "online") return "在线";
-        if (node.status === "pending_install") return "待安装";
-        if (node.status === "disabled") return "禁用";
-        if (node.status === "draining") return "排空";
-        if (node.status === "offline") return "离线";
-        if (node.status === "install_failed") return "安装失败";
-        return node.status || "未知";
+        return nodeStatusValueText(node.status);
       }
 
       function routeStatusText(status) {
@@ -1881,6 +1906,27 @@
         if (status === "error") return "异常";
         if (status === "degraded") return "降级";
         return status || "未知";
+      }
+
+      function auditActionText(action) {
+        if (action === "node.status.update") return "状态调整";
+        if (action === "node.config.update") return "配置变更";
+        if (action === "node.bootstrap_token.create") return "生成安装令牌";
+        return action || "操作记录";
+      }
+
+      function auditSummaryText(item) {
+        const detail = item.detail || {};
+        const actor = item.actor_type ? ` / 来源：${item.actor_type}` : "";
+        if (item.action === "node.status.update") {
+          const previous = nodeStatusValueText(detail.previous_status);
+          const current = nodeStatusValueText(detail.current_status);
+          const reason = detail.reason ? ` / 原因：${detail.reason}` : "";
+          return `${previous} -> ${current}${reason}${actor}`;
+        }
+        if (detail.reason) return `原因：${detail.reason}${actor}`;
+        if (detail.current_status) return `${nodeStatusValueText(detail.current_status)}${actor}`;
+        return item.actor_type || "--";
       }
 
       function protocolText(protocol) {
@@ -2391,6 +2437,26 @@
                     `,
                   )
                   .join("") || '<div class="empty">暂无上报</div>'}
+              </div>
+            </div>
+            <div class="detail-section">
+              <div class="section-title">操作日志</div>
+              <div class="report-list">
+                ${(data.recent_audit_logs || [])
+                  .slice(0, 8)
+                  .map(
+                    (item) => `
+                      <div class="report-row audit-row">
+                        <span class="mono">#${item.id}</span>
+                        <span>
+                          <span class="audit-action">${escapeHtml(auditActionText(item.action))}</span>
+                          <span class="audit-summary">${escapeHtml(auditSummaryText(item))}</span>
+                        </span>
+                        <span class="mono">${escapeHtml(ageText(item.created_at))}</span>
+                      </div>
+                    `,
+                  )
+                  .join("") || '<div class="empty">暂无操作记录</div>'}
               </div>
             </div>
           </div>

@@ -360,6 +360,7 @@ struct AdminListNodesResponse {
 struct AdminNodeDetailResponse {
     node: AdminNodeSummary,
     recent_reports: Vec<AdminReportDetail>,
+    recent_audit_logs: Vec<AdminAuditLogDetail>,
     server_time: u64,
 }
 
@@ -488,6 +489,17 @@ struct AdminReportDetail {
 }
 
 #[derive(Debug, Serialize)]
+struct AdminAuditLogDetail {
+    id: u64,
+    node_id: u64,
+    actor_type: String,
+    actor_id: Option<u64>,
+    action: String,
+    created_at: Option<u64>,
+    detail: Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
 struct ErrorBody {
     error: ErrorMessage,
 }
@@ -551,6 +563,17 @@ struct AdminReportRow {
     tcp_sessions: u32,
     reported_at: Option<u64>,
     raw_json: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct AdminAuditLogRow {
+    id: u64,
+    node_id: u64,
+    actor_type: String,
+    actor_id: Option<u64>,
+    action: String,
+    created_at: Option<u64>,
+    detail_json: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -1033,10 +1056,17 @@ async fn admin_get_node(
         .into_iter()
         .map(AdminReportDetail::from_row)
         .collect::<Result<Vec<_>, _>>()?;
+    let audit_logs =
+        select_admin_audit_logs(&state.pool, node_id, clamp_limit(query.limit, 20, 100))
+            .await?
+            .into_iter()
+            .map(AdminAuditLogDetail::from_row)
+            .collect::<Result<Vec<_>, _>>()?;
 
     Ok(Json(AdminNodeDetailResponse {
         node: AdminNodeSummary::from_row(node),
         recent_reports: reports,
+        recent_audit_logs: audit_logs,
         server_time: now_unix(),
     }))
 }
@@ -1692,6 +1722,34 @@ SELECT
   CAST(UNIX_TIMESTAMP(reported_at) AS UNSIGNED) AS reported_at,
   CAST(raw_json AS CHAR) AS raw_json
 FROM node_runtime_reports
+WHERE node_id = ?
+ORDER BY id DESC
+LIMIT ?
+"#,
+    )
+    .bind(node_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::database)
+}
+
+async fn select_admin_audit_logs(
+    pool: &MySqlPool,
+    node_id: u64,
+    limit: u32,
+) -> Result<Vec<AdminAuditLogRow>, AppError> {
+    sqlx::query_as::<_, AdminAuditLogRow>(
+        r#"
+SELECT
+  id,
+  node_id,
+  actor_type,
+  actor_id,
+  action,
+  CAST(UNIX_TIMESTAMP(created_at) AS UNSIGNED) AS created_at,
+  CAST(detail_json AS CHAR) AS detail_json
+FROM node_audit_logs
 WHERE node_id = ?
 ORDER BY id DESC
 LIMIT ?
@@ -3198,6 +3256,31 @@ impl AdminReportDetail {
     }
 }
 
+impl AdminAuditLogDetail {
+    fn from_row(row: AdminAuditLogRow) -> Result<Self, AppError> {
+        let detail = row
+            .detail_json
+            .as_deref()
+            .map(serde_json::from_str::<Value>)
+            .transpose()
+            .map_err(|error| {
+                AppError::internal(anyhow::anyhow!(
+                    "failed to decode node audit detail_json: {error}"
+                ))
+            })?;
+
+        Ok(Self {
+            id: row.id,
+            node_id: row.node_id,
+            actor_type: row.actor_type,
+            actor_id: row.actor_id,
+            action: row.action,
+            created_at: row.created_at,
+            detail,
+        })
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         (
@@ -3349,7 +3432,7 @@ mod tests {
 
     #[test]
     fn verifies_node_handshake_signature() {
-        let body = br#"{"node_id":1,"node_version":"0.25.4","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
+        let body = br#"{"node_id":1,"node_version":"0.26.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
         let timestamp = now_unix();
         let nonce = "handshake-nonce";
         let body_sha256 = BASE64.encode(Sha256::digest(body));
@@ -3416,7 +3499,7 @@ mod tests {
         let timestamp = now_unix();
         let request = NodeHandshakeRequest {
             node_id: 1,
-            node_version: "0.25.4".to_string(),
+            node_version: "0.26.0".to_string(),
             os: "linux".to_string(),
             arch: "x86_64".to_string(),
             boot_id: "boot-1".to_string(),
@@ -3442,6 +3525,35 @@ mod tests {
     }
 
     #[test]
+    fn parses_admin_audit_log_detail() {
+        let row = AdminAuditLogRow {
+            id: 9,
+            node_id: 2,
+            actor_type: "admin_api".to_string(),
+            actor_id: None,
+            action: "node.status.update".to_string(),
+            created_at: Some(1779500000),
+            detail_json: Some(
+                r#"{"previous_status":"online","current_status":"disabled","reason":"维护"}"#
+                    .to_string(),
+            ),
+        };
+
+        let detail = AdminAuditLogDetail::from_row(row).expect("audit detail parses");
+        assert_eq!(detail.id, 9);
+        assert_eq!(detail.node_id, 2);
+        assert_eq!(detail.action, "node.status.update");
+        assert_eq!(
+            detail
+                .detail
+                .as_ref()
+                .and_then(|value| value.get("current_status"))
+                .and_then(Value::as_str),
+            Some("disabled")
+        );
+    }
+
+    #[test]
     fn reads_bearer_admin_token() {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", "Bearer secret".parse().unwrap());
@@ -3456,6 +3568,7 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("编辑配置"));
         assert!(ADMIN_DASHBOARD_HTML.contains("控制总览"));
         assert!(ADMIN_DASHBOARD_HTML.contains("游戏路由"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("操作日志"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/game-route-rules"));
         assert!(ADMIN_DASHBOARD_HTML.contains("method: \"PATCH\""));

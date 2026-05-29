@@ -263,6 +263,12 @@ Done in `v0.25.4`:
   counters, report statuses, and select option labels while preserving protocol
   names and API enum values.
 
+Done in `v0.26.0`:
+
+- Expose recent `node_audit_logs` entries through the admin node detail API and
+  render the latest status-change history in `/admin`, including previous
+  status, target status, actor, age, and operator reason.
+
 Goals:
 
 - Add nonce replay storage for node report requests.

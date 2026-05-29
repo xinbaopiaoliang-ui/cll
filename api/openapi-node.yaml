@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.25.4
+  version: 0.26.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -831,6 +831,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AdminReportDetail'
+        recent_audit_logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminAuditLogDetail'
         server_time:
           type: integer
     AdminCreateNodeRequest:
@@ -1178,6 +1182,27 @@ components:
             raw:
               type: object
               nullable: true
+    AdminAuditLogDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        node_id:
+          type: integer
+        actor_type:
+          type: string
+        actor_id:
+          type: integer
+          nullable: true
+        action:
+          type: string
+          example: node.status.update
+        created_at:
+          type: integer
+          nullable: true
+        detail:
+          type: object
+          nullable: true
     ClientSessionDataRequest:
       type: object
       description: UDP packet sent after a successful probe session is allocated.
