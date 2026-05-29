@@ -250,6 +250,12 @@ Done in `v0.25.2`:
 - Refine the embedded `/admin` page header so the connection status is a compact
   pill and the page title uses a calmer operations-console typography scale.
 
+Done in `v0.25.3`:
+
+- Stabilize the Node Management detail layout by removing the sticky detail
+  header, aligning the action forms, and showing Health JSON in a bounded debug
+  panel instead of an empty-looking collapsed block.
+
 Goals:
 
 - Add nonce replay storage for node report requests.
