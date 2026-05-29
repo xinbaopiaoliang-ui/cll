@@ -239,6 +239,12 @@ Done in `v0.25.0`:
   config form into an on-demand drawer while keeping status, counters, recent
   reports, and install/status actions visible for daily operations.
 
+Done in `v0.25.1`:
+
+- Fix control-api startup schema migration compatibility by avoiding numeric
+  decoding of `information_schema.COLUMNS` existence probes on MySQL installs
+  that return signed `BIGINT` marker values.
+
 Goals:
 
 - Add nonce replay storage for node report requests.
