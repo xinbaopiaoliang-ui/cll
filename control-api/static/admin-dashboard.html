@@ -457,6 +457,26 @@
         gap: 18px;
       }
 
+      .nodes-workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 18px;
+      }
+
+      .nodes-list-panel .table-wrap {
+        max-height: 360px;
+      }
+
+      .node-detail-panel {
+        overflow: visible;
+      }
+
+      .node-detail-panel .panel-head {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+
       .panel {
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -677,6 +697,56 @@
         border-bottom: 0;
       }
 
+      .node-detail-panel .detail-body {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .node-detail-panel .detail-section {
+        padding: 18px;
+      }
+
+      .node-detail-panel .detail-overview {
+        display: grid;
+        grid-template-columns: minmax(320px, 0.72fr) minmax(0, 1.28fr);
+        gap: 18px;
+        align-items: start;
+        padding: 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .node-detail-panel .detail-overview .detail-section,
+      .node-detail-panel .detail-ops-grid .detail-section {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(249, 250, 251, 0.58);
+      }
+
+      .node-detail-panel .detail-overview .detail-section {
+        border-bottom: 1px solid var(--line);
+      }
+
+      .node-detail-panel .status-section {
+        display: grid;
+        gap: 16px;
+      }
+
+      .node-detail-panel .detail-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .node-detail-panel .counter-grid {
+        grid-template-columns: repeat(5, minmax(120px, 1fr));
+      }
+
+      .node-detail-panel .detail-ops-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.7fr);
+        gap: 18px;
+        padding: 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
       .detail-grid,
       .form-grid {
         display: grid;
@@ -791,6 +861,15 @@
       .action-grid {
         display: grid;
         gap: 12px;
+      }
+
+      .node-actions-grid {
+        grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.78fr) minmax(320px, 0.92fr);
+        align-items: start;
+      }
+
+      .node-actions-grid .operation-card:first-child .form-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
 
       .command-output {
@@ -926,6 +1005,10 @@
         .summary,
         .grid-2,
         .grid-3,
+        .node-detail-panel .detail-overview,
+        .node-detail-panel .detail-ops-grid,
+        .node-detail-panel .counter-grid,
+        .node-actions-grid,
         .topbar {
           grid-template-columns: 1fr;
         }
@@ -961,6 +1044,8 @@
         }
 
         .detail-grid,
+        .node-detail-panel .detail-grid,
+        .node-actions-grid .operation-card:first-child .form-grid,
         .form-grid {
           grid-template-columns: 1fr;
         }
@@ -1026,7 +1111,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.23.0</span>
+          <span class="mono">v0.24.0</span>
         </div>
       </aside>
 
@@ -1147,8 +1232,8 @@
         </section>
 
         <section class="view hidden" id="viewNodes" data-view-panel="nodes">
-          <section class="grid-2">
-            <div class="panel">
+          <section class="nodes-workspace">
+            <div class="panel nodes-list-panel">
               <div class="panel-head">
                 <div>
                   <div class="panel-title">节点列表</div>
@@ -1177,7 +1262,7 @@
               </div>
             </div>
 
-            <aside class="panel">
+            <aside class="panel node-detail-panel">
               <div class="panel-head">
                 <div>
                   <div class="panel-title" id="detailTitle">节点详情</div>
@@ -1928,62 +2013,46 @@
         els.detailTitle.textContent = node.name;
         els.detailMeta.textContent = `${endpoint} / id ${node.id}`;
         els.detailBody.innerHTML = `
-          <div class="detail-section">
-            <div class="detail-kicker">
-              <span class="chip ${statusClass(node)}">${escapeHtml(statusText(node))}</span>
-              <span class="chip ${Number(control.handshake_last_http_status) === 200 ? "ok" : "warn"}">Handshake ${escapeHtml(control.handshake_last_http_status || "--")}</span>
-              <span class="chip">监听 ${escapeHtml(listenText(listeners))}</span>
-              <span class="chip ${Number(control.last_http_status) === 200 ? "ok" : "warn"}">控制面 ${escapeHtml(control.last_http_status || "--")}</span>
-              <span class="chip ${Number(control.config_last_http_status) === 200 ? "ok" : "warn"}">配置 ${escapeHtml(control.config_last_http_status || "--")}</span>
-              <span class="chip ${config.restart_required ? "warn" : "ok"}">重启 ${config.restart_required ? "需要" : "无需"}</span>
-              <span class="chip ${ageClass(node.last_report_at)}">上报 ${escapeHtml(ageText(node.last_report_at))}</span>
+          <div class="detail-overview">
+            <div class="detail-section status-section">
+              <div class="detail-kicker">
+                <span class="chip ${statusClass(node)}">${escapeHtml(statusText(node))}</span>
+                <span class="chip ${Number(control.handshake_last_http_status) === 200 ? "ok" : "warn"}">Handshake ${escapeHtml(control.handshake_last_http_status || "--")}</span>
+                <span class="chip">监听 ${escapeHtml(listenText(listeners))}</span>
+                <span class="chip ${Number(control.last_http_status) === 200 ? "ok" : "warn"}">控制面 ${escapeHtml(control.last_http_status || "--")}</span>
+                <span class="chip ${Number(control.config_last_http_status) === 200 ? "ok" : "warn"}">配置 ${escapeHtml(control.config_last_http_status || "--")}</span>
+                <span class="chip ${config.restart_required ? "warn" : "ok"}">重启 ${config.restart_required ? "需要" : "无需"}</span>
+                <span class="chip ${ageClass(node.last_report_at)}">上报 ${escapeHtml(ageText(node.last_report_at))}</span>
+              </div>
+              <div class="detail-grid">
+                ${metric("公网入口", endpoint)}
+                ${metric("监听地址", listeners.listen_addr || "--")}
+                ${metric("版本", node.kernel_version || "--")}
+                ${metric("区域", areaText(node))}
+                ${metric("配置版本", config.config_revision || node.config_revision || "--")}
+                ${metric("重启需求", config.restart_required ? "需要重启" : "无需重启")}
+              </div>
+            </div>
+            <div class="detail-section">
+              <div class="section-title">实时计数</div>
+              <div class="detail-grid counter-grid">
+                ${metric("UDP RX", traffic.udp_rx_packets || 0)}
+                ${metric("UDP TX", traffic.udp_tx_packets || 0)}
+                ${metric("TCP Accepted", traffic.tcp_accepted || 0)}
+                ${metric("Active UDP", sessions.active_udp_sessions || 0)}
+                ${metric("Auth OK", sessions.auth_ok || 0)}
+                ${metric("Relay Timeout", sessions.udp_relay_timeout || 0)}
+                ${metric("Handshake OK", control.handshake_ok || 0)}
+                ${metric("Handshake Failed", control.handshake_failed || 0)}
+                ${metric("Config OK", control.config_ok || 0)}
+                ${metric("Config Failed", control.config_failed || 0)}
+              </div>
             </div>
           </div>
-          <div class="detail-section">
-            <div class="detail-grid">
-              ${metric("公网入口", endpoint)}
-              ${metric("监听地址", listeners.listen_addr || "--")}
-              ${metric("版本", node.kernel_version || "--")}
-              ${metric("区域", areaText(node))}
-              ${metric("配置版本", config.config_revision || node.config_revision || "--")}
-              ${metric("重启需求", config.restart_required ? "需要重启" : "无需重启")}
-            </div>
-          </div>
-          <div class="detail-section">
-            <div class="section-title">实时计数</div>
-            <div class="detail-grid">
-              ${metric("UDP RX", traffic.udp_rx_packets || 0)}
-              ${metric("UDP TX", traffic.udp_tx_packets || 0)}
-              ${metric("TCP Accepted", traffic.tcp_accepted || 0)}
-              ${metric("Active UDP", sessions.active_udp_sessions || 0)}
-              ${metric("Auth OK", sessions.auth_ok || 0)}
-              ${metric("Relay Timeout", sessions.udp_relay_timeout || 0)}
-              ${metric("Handshake OK", control.handshake_ok || 0)}
-              ${metric("Handshake Failed", control.handshake_failed || 0)}
-              ${metric("Config OK", control.config_ok || 0)}
-              ${metric("Config Failed", control.config_failed || 0)}
-            </div>
-          </div>
-          <div class="detail-section">
-            <div class="section-title">最近上报</div>
-            <div class="report-list">
-              ${(data.recent_reports || [])
-                .slice(0, 8)
-                .map(
-                  (item) => `
-                    <div class="report-row">
-                      <span class="mono">#${item.id}</span>
-                      <span>${escapeHtml(item.status)}</span>
-                      <span class="mono">${escapeHtml(ageText(item.reported_at))}</span>
-                    </div>
-                  `,
-                )
-                .join("") || '<div class="empty">暂无上报</div>'}
-            </div>
-          </div>
-          <div class="detail-section">
-            <div class="section-title">节点操作</div>
-            <div class="action-grid">
+          <div class="detail-ops-grid">
+            <div class="detail-section">
+              <div class="section-title">节点操作</div>
+              <div class="action-grid node-actions-grid">
               <div class="operation-card">
                 <div class="operation-title">编辑配置</div>
                 <form data-action="edit-node">
@@ -2109,6 +2178,23 @@
                     </div>
                   </div>
                 </form>
+              </div>
+            </div>
+            <div class="detail-section">
+              <div class="section-title">最近上报</div>
+              <div class="report-list">
+                ${(data.recent_reports || [])
+                  .slice(0, 8)
+                  .map(
+                    (item) => `
+                      <div class="report-row">
+                        <span class="mono">#${item.id}</span>
+                        <span>${escapeHtml(item.status)}</span>
+                        <span class="mono">${escapeHtml(ageText(item.reported_at))}</span>
+                      </div>
+                    `,
+                  )
+                  .join("") || '<div class="empty">暂无上报</div>'}
               </div>
             </div>
           </div>

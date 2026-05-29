@@ -3349,7 +3349,7 @@ mod tests {
 
     #[test]
     fn verifies_node_handshake_signature() {
-        let body = br#"{"node_id":1,"node_version":"0.23.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
+        let body = br#"{"node_id":1,"node_version":"0.24.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
         let timestamp = now_unix();
         let nonce = "handshake-nonce";
         let body_sha256 = BASE64.encode(Sha256::digest(body));
@@ -3416,7 +3416,7 @@ mod tests {
         let timestamp = now_unix();
         let request = NodeHandshakeRequest {
             node_id: 1,
-            node_version: "0.23.0".to_string(),
+            node_version: "0.24.0".to_string(),
             os: "linux".to_string(),
             arch: "x86_64".to_string(),
             boot_id: "boot-1".to_string(),

@@ -221,6 +221,15 @@ Done in `v0.23.0`:
   the new `game_route_rules.game_name` column automatically.
 - Display route rows as game name plus game ID for easier operations work.
 
+Done in `v0.24.0`:
+
+- Rework the Node Management page into a stacked list/detail layout so the
+  selected node detail no longer sits in a long right-side column beside empty
+  space.
+- Spread node health, endpoint/config metrics, realtime counters, recent
+  reports, and node actions across a full-width detail panel for quicker
+  operations scanning.
+
 Goals:
 
 - Add nonce replay storage for node report requests.
