@@ -1229,17 +1229,17 @@
         <div class="eyebrow">XAccel Control</div>
         <h1>登录节点后台</h1>
         <div class="login-note">
-          用控制面安装时生成的管理员 Token 登录。登录后可以查看节点状态、新增节点、管理游戏路由规则、生成一键安装命令，并处理节点下线、排空或禁用。
+          用控制面安装时生成的管理员令牌登录。登录后可以查看节点状态、新增节点、管理游戏路由规则、生成一键安装命令，并处理节点下线、排空或禁用。
         </div>
       </div>
       <div class="login-card">
         <form id="loginForm">
           <div>
             <h2>管理员入口</h2>
-            <div class="form-help">Token 保存在本机浏览器，不会写入服务端。</div>
+            <div class="form-help">令牌保存在本机浏览器，不会写入服务端。</div>
           </div>
           <div class="field">
-            <label for="loginTokenInput">管理员 Token</label>
+            <label for="loginTokenInput">管理员令牌</label>
             <input id="loginTokenInput" type="password" autocomplete="off" />
             <div class="form-help">
               服务器上可通过 /etc/xaccel-control-api/control-api.env 查看。
@@ -1257,7 +1257,7 @@
           <div class="brand-mark">XA</div>
           <div>
             <div class="sidebar-title">XAccel Control</div>
-            <div class="sidebar-subtitle">Node Operations</div>
+            <div class="sidebar-subtitle">节点运维</div>
           </div>
         </div>
         <nav class="nav-group" aria-label="主菜单">
@@ -1281,7 +1281,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.25.3</span>
+          <span class="mono">v0.25.4</span>
         </div>
       </aside>
 
@@ -1310,22 +1310,22 @@
             <div class="summary-cell">
               <div class="summary-label">节点总数</div>
               <div class="summary-value">--</div>
-              <div class="summary-note">total</div>
+              <div class="summary-note">节点总量</div>
             </div>
             <div class="summary-cell">
               <div class="summary-label">在线节点</div>
               <div class="summary-value">--</div>
-              <div class="summary-note">online</div>
+              <div class="summary-note">在线统计</div>
             </div>
             <div class="summary-cell">
               <div class="summary-label">路由规则</div>
               <div class="summary-value">--</div>
-              <div class="summary-note">routes</div>
+              <div class="summary-note">规则总量</div>
             </div>
             <div class="summary-cell">
               <div class="summary-label">最近上报</div>
               <div class="summary-value">--</div>
-              <div class="summary-note">last report</div>
+              <div class="summary-note">上报时间</div>
             </div>
           </section>
 
@@ -1342,7 +1342,7 @@
             </div>
             <div class="insight-card">
               <h3>运维节奏</h3>
-              <div class="insight-value">30s</div>
+              <div class="insight-value">30 秒</div>
               <div class="insight-note">自动刷新开启后，每 30 秒同步节点和路由状态。</div>
             </div>
           </section>
@@ -1352,7 +1352,7 @@
               <div class="panel-head">
                 <div>
                   <div class="panel-title">节点快照</div>
-                  <div class="panel-meta" id="overviewNodeMeta">limit 5</div>
+                  <div class="panel-meta" id="overviewNodeMeta">最多 5 条</div>
                 </div>
               </div>
               <div class="table-wrap">
@@ -1377,7 +1377,7 @@
               <div class="panel-head">
                 <div>
                   <div class="panel-title">路由快照</div>
-                  <div class="panel-meta" id="overviewRouteMeta">limit 5</div>
+                  <div class="panel-meta" id="overviewRouteMeta">最多 5 条</div>
                 </div>
               </div>
               <div class="table-wrap">
@@ -1407,7 +1407,7 @@
               <div class="panel-head">
                 <div>
                   <div class="panel-title">节点列表</div>
-                  <div class="panel-meta" id="listMeta">limit 500</div>
+                  <div class="panel-meta" id="listMeta">最多 500 条</div>
                 </div>
               </div>
               <div class="table-wrap">
@@ -1451,7 +1451,7 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">游戏路由规则</div>
-                <div class="panel-meta" id="routeMeta">limit 500</div>
+                <div class="panel-meta" id="routeMeta">最多 500 条</div>
               </div>
               <div class="inline-actions">
                 <button class="primary" type="button" data-open-route>新增规则</button>
@@ -1486,7 +1486,7 @@
               <div class="panel-head">
                 <div>
                   <div class="panel-title">运维工作流</div>
-                  <div class="panel-meta">node install / report / route</div>
+                  <div class="panel-meta">节点安装 / 上报 / 路由</div>
                 </div>
               </div>
               <div class="panel-body">
@@ -1557,9 +1557,9 @@
             <div class="field">
               <label for="nodeQuality">带宽质量</label>
               <select id="nodeQuality" name="bandwidth_quality">
-                <option value="normal">normal</option>
-                <option value="fast">fast</option>
-                <option value="slow">slow</option>
+                <option value="normal">普通</option>
+                <option value="fast">快速</option>
+                <option value="slow">较慢</option>
               </select>
             </div>
             <div class="field">
@@ -1640,7 +1640,7 @@
             <div class="field">
               <label for="routeProtocol">协议</label>
               <select id="routeProtocol" name="protocol">
-                <option value="udp">udp</option>
+                <option value="udp">UDP</option>
               </select>
             </div>
             <div class="field">
@@ -1651,8 +1651,8 @@
             <div class="field">
               <label for="routeStatus">状态</label>
               <select id="routeStatus" name="status">
-                <option value="enabled">enabled</option>
-                <option value="disabled">disabled</option>
+                <option value="enabled">启用</option>
+                <option value="disabled">禁用</option>
               </select>
             </div>
             <div class="field">
@@ -1834,9 +1834,9 @@
       function ageText(unix) {
         if (!unix || !state.serverTime) return "--";
         const delta = Math.max(0, state.serverTime - unix);
-        if (delta < 60) return `${delta}s`;
-        if (delta < 3600) return `${Math.floor(delta / 60)}m`;
-        return `${Math.floor(delta / 3600)}h`;
+        if (delta < 60) return `${delta}秒`;
+        if (delta < 3600) return `${Math.floor(delta / 60)}分钟`;
+        return `${Math.floor(delta / 3600)}小时`;
       }
 
       function ageClass(unix) {
@@ -1865,7 +1865,28 @@
         if (node.status === "pending_install") return "待安装";
         if (node.status === "disabled") return "禁用";
         if (node.status === "draining") return "排空";
+        if (node.status === "offline") return "离线";
+        if (node.status === "install_failed") return "安装失败";
         return node.status || "未知";
+      }
+
+      function routeStatusText(status) {
+        if (status === "enabled") return "启用";
+        if (status === "disabled") return "禁用";
+        return status || "未知";
+      }
+
+      function reportStatusText(status) {
+        if (status === "ready") return "就绪";
+        if (status === "error") return "异常";
+        if (status === "degraded") return "降级";
+        return status || "未知";
+      }
+
+      function protocolText(protocol) {
+        if (protocol === "udp") return "UDP";
+        if (protocol === "tcp") return "TCP";
+        return protocol || "--";
       }
 
       function areaText(node) {
@@ -1910,7 +1931,7 @@
 
       async function api(path, options = {}) {
         if (!state.token) {
-          throw new Error("管理员 Token 未设置");
+          throw new Error("管理员令牌未设置");
         }
         const headers = {
           Authorization: `Bearer ${state.token}`,
@@ -1988,7 +2009,7 @@
           </div>
           <div class="insight-card">
             <h3>运维节奏</h3>
-            <div class="insight-value">${state.autoRefresh ? "30s" : "手动"}</div>
+            <div class="insight-value">${state.autoRefresh ? "30 秒" : "手动"}</div>
             <div class="insight-note">自动刷新开启后，每 30 秒同步节点上报和路由规则。</div>
           </div>
         `;
@@ -1998,14 +2019,14 @@
         const recentNodes = [...state.nodes]
           .sort((left, right) => (right.last_report_at || 0) - (left.last_report_at || 0))
           .slice(0, 5);
-        els.overviewNodeMeta.textContent = `${recentNodes.length} nodes / 最新快照`;
+        els.overviewNodeMeta.textContent = `${recentNodes.length} 个节点 / 最新快照`;
         els.overviewNodeRows.innerHTML = recentNodes.length
           ? recentNodes
               .map((node) => {
                 const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
                 return `
                   <tr data-node-id="${node.id}">
-                    <td><span class="strong">${escapeHtml(node.name)}</span><div class="cell-note mono">id ${node.id}</div></td>
+                    <td><span class="strong">${escapeHtml(node.name)}</span><div class="cell-note mono">ID ${node.id}</div></td>
                     <td><span class="status ${statusClass(node)}"><span class="dot"></span>${escapeHtml(statusText(node))}</span></td>
                     <td class="mono"><span class="endpoint">${escapeHtml(endpoint)}</span></td>
                     <td class="mono age ${ageClass(node.last_report_at)}">${escapeHtml(ageText(node.last_report_at))}</td>
@@ -2018,7 +2039,7 @@
         const recentRoutes = [...state.routeRules]
           .sort((left, right) => left.priority - right.priority || left.id - right.id)
           .slice(0, 5);
-        els.overviewRouteMeta.textContent = `${recentRoutes.length} routes / 优先级快照`;
+        els.overviewRouteMeta.textContent = `${recentRoutes.length} 条规则 / 优先级快照`;
         els.overviewRouteRows.innerHTML = recentRoutes.length
           ? recentRoutes
               .map((rule) => `
@@ -2026,12 +2047,12 @@
                   <td>
                     <div class="node-name">
                       <span class="strong node-title" title="${escapeHtml(gameLabel(rule))}">${escapeHtml(gameLabel(rule))}</span>
-                      <span class="muted mono">id ${rule.game_id}</span>
+                      <span class="muted mono">ID ${rule.game_id}</span>
                     </div>
                   </td>
                   <td>${escapeHtml(rule.node_name)}</td>
                   <td class="mono"><span class="endpoint">${escapeHtml(rule.target_addr)}</span></td>
-                  <td><span class="chip ${rule.status === "enabled" ? "ok" : "bad"}">${escapeHtml(rule.status)}</span></td>
+                  <td><span class="chip ${rule.status === "enabled" ? "ok" : "bad"}">${escapeHtml(routeStatusText(rule.status))}</span></td>
                 </tr>
               `)
               .join("")
@@ -2062,7 +2083,7 @@
                 <td>
                   <div class="node-name">
                     <span class="strong node-title" title="${escapeHtml(node.name)}">${escapeHtml(node.name)}</span>
-                    <span class="muted mono">id ${node.id}</span>
+                    <span class="muted mono">ID ${node.id}</span>
                   </div>
                 </td>
                 <td>
@@ -2111,19 +2132,19 @@
                 <td>
                   <div class="node-name">
                     <span class="strong node-title" title="${escapeHtml(label)}">${escapeHtml(label)}</span>
-                    <span class="muted mono">id ${rule.game_id}</span>
+                    <span class="muted mono">ID ${rule.game_id}</span>
                   </div>
                 </td>
                 <td>
                   <div class="node-name">
                     <span class="strong node-title" title="${escapeHtml(rule.node_name)}">${escapeHtml(rule.node_name)}</span>
-                    <span class="muted mono">${escapeHtml(endpoint)} / id ${rule.node_id}</span>
+                    <span class="muted mono">${escapeHtml(endpoint)} / ID ${rule.node_id}</span>
                   </div>
                 </td>
                 <td class="mono"><span class="endpoint" title="${escapeHtml(rule.target_addr)}">${escapeHtml(rule.target_addr)}</span></td>
-                <td class="mono">${escapeHtml(rule.protocol)}</td>
+                <td class="mono">${escapeHtml(protocolText(rule.protocol))}</td>
                 <td class="mono">${rule.priority}</td>
-                <td><span class="chip ${enabled ? "ok" : "bad"}">${escapeHtml(rule.status)}</span></td>
+                <td><span class="chip ${enabled ? "ok" : "bad"}">${escapeHtml(routeStatusText(rule.status))}</span></td>
                 <td>
                   <div class="row-actions">
                     <button type="button" data-route-action="edit" data-route-id="${rule.id}">编辑</button>
@@ -2154,7 +2175,7 @@
           return;
         }
         const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
-        els.opsMeta.textContent = `${endpoint} / id ${node.id}`;
+        els.opsMeta.textContent = `${endpoint} / ID ${node.id}`;
         els.opsBody.innerHTML = `
           <div class="detail-grid">
             ${metric("节点", node.name)}
@@ -2181,13 +2202,13 @@
         const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
 
         els.detailTitle.textContent = node.name;
-        els.detailMeta.textContent = `${endpoint} / id ${node.id}`;
+        els.detailMeta.textContent = `${endpoint} / ID ${node.id}`;
         els.detailBody.innerHTML = `
           <div class="detail-overview">
             <div class="detail-section status-section">
               <div class="detail-kicker">
                 <span class="chip ${statusClass(node)}">${escapeHtml(statusText(node))}</span>
-                <span class="chip ${Number(control.handshake_last_http_status) === 200 ? "ok" : "warn"}">Handshake ${escapeHtml(control.handshake_last_http_status || "--")}</span>
+                <span class="chip ${Number(control.handshake_last_http_status) === 200 ? "ok" : "warn"}">握手 ${escapeHtml(control.handshake_last_http_status || "--")}</span>
                 <span class="chip">监听 ${escapeHtml(listenText(listeners))}</span>
                 <span class="chip ${Number(control.last_http_status) === 200 ? "ok" : "warn"}">控制面 ${escapeHtml(control.last_http_status || "--")}</span>
                 <span class="chip ${Number(control.config_last_http_status) === 200 ? "ok" : "warn"}">配置 ${escapeHtml(control.config_last_http_status || "--")}</span>
@@ -2206,16 +2227,16 @@
             <div class="detail-section">
               <div class="section-title">实时计数</div>
               <div class="detail-grid counter-grid">
-                ${metric("UDP RX", traffic.udp_rx_packets || 0)}
-                ${metric("UDP TX", traffic.udp_tx_packets || 0)}
-                ${metric("TCP Accepted", traffic.tcp_accepted || 0)}
-                ${metric("Active UDP", sessions.active_udp_sessions || 0)}
-                ${metric("Auth OK", sessions.auth_ok || 0)}
-                ${metric("Relay Timeout", sessions.udp_relay_timeout || 0)}
-                ${metric("Handshake OK", control.handshake_ok || 0)}
-                ${metric("Handshake Failed", control.handshake_failed || 0)}
-                ${metric("Config OK", control.config_ok || 0)}
-                ${metric("Config Failed", control.config_failed || 0)}
+                ${metric("UDP 接收", traffic.udp_rx_packets || 0)}
+                ${metric("UDP 发送", traffic.udp_tx_packets || 0)}
+                ${metric("TCP 接入", traffic.tcp_accepted || 0)}
+                ${metric("活跃 UDP", sessions.active_udp_sessions || 0)}
+                ${metric("认证成功", sessions.auth_ok || 0)}
+                ${metric("转发超时", sessions.udp_relay_timeout || 0)}
+                ${metric("握手成功", control.handshake_ok || 0)}
+                ${metric("握手失败", control.handshake_failed || 0)}
+                ${metric("配置成功", control.config_ok || 0)}
+                ${metric("配置失败", control.config_failed || 0)}
               </div>
             </div>
           </div>
@@ -2246,9 +2267,9 @@
                     <div class="field">
                       <label>带宽质量</label>
                       <select name="bandwidth_quality">
-                        <option value="normal" ${selectedAttr(node.bandwidth_quality, "normal")}>normal</option>
-                        <option value="fast" ${selectedAttr(node.bandwidth_quality, "fast")}>fast</option>
-                        <option value="slow" ${selectedAttr(node.bandwidth_quality, "slow")}>slow</option>
+                        <option value="normal" ${selectedAttr(node.bandwidth_quality, "normal")}>普通</option>
+                        <option value="fast" ${selectedAttr(node.bandwidth_quality, "fast")}>快速</option>
+                        <option value="slow" ${selectedAttr(node.bandwidth_quality, "slow")}>较慢</option>
                       </select>
                     </div>
                     <div class="field">
@@ -2334,8 +2355,8 @@
                     <div class="field">
                       <label>发布通道</label>
                       <select name="channel">
-                        <option value="stable">stable</option>
-                        <option value="beta">beta</option>
+                        <option value="stable">稳定版</option>
+                        <option value="beta">测试版</option>
                       </select>
                     </div>
                     <label class="checkbox">
@@ -2364,7 +2385,7 @@
                     (item) => `
                       <div class="report-row">
                         <span class="mono">#${item.id}</span>
-                        <span>${escapeHtml(item.status)}</span>
+                        <span>${escapeHtml(reportStatusText(item.status))}</span>
                         <span class="mono">${escapeHtml(ageText(item.reported_at))}</span>
                       </div>
                     `,
@@ -2375,7 +2396,7 @@
           </div>
           <div class="detail-section health-json-section">
             <details class="health-json" open>
-              <summary>Health JSON</summary>
+              <summary>健康原始数据</summary>
               <pre>${escapeHtml(JSON.stringify(health, null, 2))}</pre>
             </details>
           </div>
@@ -2407,7 +2428,7 @@
         renderOverviewTables();
         renderNodes();
         renderOps();
-        els.listMeta.textContent = `${state.nodes.length} nodes / 刷新 ${formatClock(data.server_time)}`;
+        els.listMeta.textContent = `${state.nodes.length} 个节点 / 刷新 ${formatClock(data.server_time)}`;
         els.statusLine.textContent = `已连接 / ${online}/${state.nodes.length} 在线 / 最新 ${ageText(latestReport)}`;
         els.statusLine.classList.add("connected");
         els.statusLine.classList.remove("error-state");
@@ -2434,7 +2455,7 @@
         const data = await api("/api/admin/v1/game-route-rules?limit=500");
         state.routeRules = data.rules || [];
         renderRouteRules();
-        els.routeMeta.textContent = `${state.routeRules.length} rules / 刷新 ${formatClock(data.server_time)}`;
+        els.routeMeta.textContent = `${state.routeRules.length} 条规则 / 刷新 ${formatClock(data.server_time)}`;
         renderSummary({ server_time: state.serverTime || data.server_time });
         renderOverviewTables();
       }
@@ -2450,7 +2471,7 @@
         clearInlineError(els.loginError);
         state.token = els.loginTokenInput.value.trim();
         if (!state.token) {
-          showInlineError(els.loginError, "请输入管理员 Token");
+          showInlineError(els.loginError, "请输入管理员令牌");
           return;
         }
         localStorage.setItem("xaccel_admin_token", state.token);

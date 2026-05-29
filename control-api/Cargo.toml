@@ -1,6 +1,6 @@
 [package]
 name = "xaccel-control-api"
-version = "0.25.3"
+version = "0.25.4"
 edition = "2021"
 rust-version = "1.75"
 

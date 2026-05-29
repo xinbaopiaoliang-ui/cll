@@ -256,6 +256,13 @@ Done in `v0.25.3`:
   header, aligning the action forms, and showing Health JSON in a bounded debug
   panel instead of an empty-looking collapsed block.
 
+Done in `v0.25.4`:
+
+- Localize remaining English-facing `/admin` dashboard labels into Chinese,
+  including initial summary hints, table metadata, route statuses, node detail
+  counters, report statuses, and select option labels while preserving protocol
+  names and API enum values.
+
 Goals:
 
 - Add nonce replay storage for node report requests.
