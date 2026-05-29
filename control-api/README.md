@@ -7,10 +7,11 @@ route tables through SQLx, selects an online node, signs a short-lived `xat.v1`
 credential, stores the intent, and returns the node candidate to the client.
 It also receives HMAC-signed node runtime reports and stores them in MySQL.
 Admin node management APIs are protected by an admin bearer token. The embedded
-dashboard is available at `/admin` and uses the same bearer token in the browser
-for login, node creation, status changes, and bootstrap install command
-generation. Route rules can also be managed from the dashboard, so day-to-day
-game target changes no longer require direct MySQL edits.
+dashboard is available at `/admin` and uses the same bearer token in the
+browser. The UI is organized as a management console with login, sidebar menus,
+overview, node management, game route management, and operations workspaces.
+Operators can create nodes, change status, generate bootstrap install commands,
+edit config, and manage route rules without direct MySQL edits.
 
 ## Run
 

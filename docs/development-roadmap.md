@@ -203,6 +203,16 @@ Done in `v0.21.0`:
   route rules.
 - Document the route-rule admin API in the OpenAPI spec and control API README.
 
+Done in `v0.22.0`:
+
+- Redesign `/admin` as a modern management console with a persistent sidebar,
+  top action bar, overview, node management, game route management, and
+  operations workspaces.
+- Refresh the login screen and dashboard visual system for a more polished
+  technology-ops product feel.
+- Keep the existing token-protected admin APIs and route-rule/node workflows
+  wired into the new UI shell.
+
 Goals:
 
 - Add nonce replay storage for node report requests.

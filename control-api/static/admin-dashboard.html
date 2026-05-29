@@ -6,36 +6,46 @@
     <title>XAccel 控制台</title>
     <style>
       :root {
-        --bg: #f6f7f9;
-        --panel: #ffffff;
-        --panel-soft: #fbfcfd;
-        --text: #17212b;
-        --muted: #637083;
-        --faint: #8b97a8;
-        --line: #dce3ea;
-        --line-strong: #c9d3de;
+        --bg: #f4f6f8;
+        --surface: #ffffff;
+        --surface-soft: #f9fafb;
+        --surface-strong: #eef3f5;
+        --ink: #101820;
+        --muted: #5f6d7a;
+        --faint: #94a0ad;
+        --line: #d9e1e7;
+        --line-strong: #c5d0d9;
+        --sidebar: #10181f;
+        --sidebar-2: #152229;
+        --sidebar-line: rgba(255, 255, 255, 0.08);
         --accent: #17786f;
         --accent-strong: #0f5f58;
+        --accent-soft: rgba(23, 120, 111, 0.1);
         --ok: #13835f;
         --warn: #a96717;
         --bad: #b42318;
         --idle: #7a8492;
-        --shadow: 0 18px 45px -30px rgba(23, 33, 43, 0.36);
+        --shadow: 0 24px 70px -44px rgba(16, 24, 32, 0.5);
+        --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+        --sans: "Geist", "Satoshi", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
       }
 
       * {
         box-sizing: border-box;
       }
 
+      html {
+        min-height: 100%;
+      }
+
       body {
+        min-height: 100%;
         margin: 0;
         background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(246, 247, 249, 0)),
-          var(--bg);
-        color: var(--text);
-        font-family:
-          "Geist", "Satoshi", "Segoe UI", "Microsoft YaHei", system-ui,
-          sans-serif;
+          linear-gradient(135deg, rgba(23, 120, 111, 0.08), transparent 34%),
+          linear-gradient(180deg, #fbfcfd 0, var(--bg) 42%, #eef2f5 100%);
+        color: var(--ink);
+        font-family: var(--sans);
         letter-spacing: 0;
       }
 
@@ -47,17 +57,18 @@
       }
 
       button {
-        border: 1px solid var(--line-strong);
-        background: var(--panel);
-        color: var(--text);
-        min-height: 36px;
+        min-height: 38px;
         padding: 0 14px;
+        border: 1px solid var(--line-strong);
         border-radius: 7px;
+        background: var(--surface);
+        color: var(--ink);
         cursor: pointer;
         transition:
-          transform 160ms ease,
-          border-color 160ms ease,
-          background 160ms ease;
+          transform 150ms ease,
+          border-color 150ms ease,
+          background 150ms ease,
+          color 150ms ease;
       }
 
       button:hover {
@@ -69,13 +80,13 @@
       }
 
       button.primary {
-        background: var(--accent);
         border-color: var(--accent);
+        background: var(--accent);
         color: #ffffff;
       }
 
-      button.secondary {
-        background: var(--panel-soft);
+      button.ghost {
+        background: transparent;
       }
 
       button.danger {
@@ -87,20 +98,20 @@
       select,
       textarea {
         width: 100%;
-        min-height: 36px;
+        min-height: 38px;
         padding: 0 12px;
         border: 1px solid var(--line-strong);
         border-radius: 7px;
         background: #ffffff;
-        color: var(--text);
+        color: var(--ink);
         outline: none;
       }
 
       textarea {
-        min-height: 96px;
+        min-height: 114px;
         padding: 10px 12px;
         resize: vertical;
-        line-height: 1.5;
+        line-height: 1.55;
       }
 
       input:focus,
@@ -110,43 +121,93 @@
         box-shadow: 0 0 0 3px rgba(23, 120, 111, 0.13);
       }
 
+      label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 720;
+      }
+
       .hidden {
         display: none !important;
+      }
+
+      .mono {
+        font-family: var(--mono);
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .strong {
+        font-weight: 760;
       }
 
       .login-screen {
         min-height: 100dvh;
         display: grid;
-        grid-template-columns: minmax(280px, 0.8fr) minmax(360px, 420px);
+        grid-template-columns: minmax(280px, 1fr) minmax(360px, 440px);
         gap: 64px;
         align-items: center;
-        max-width: 1180px;
+        width: min(1180px, calc(100% - 40px));
         margin: 0 auto;
-        padding: 28px;
+        padding: 28px 0;
       }
 
       .login-copy {
         display: grid;
-        gap: 16px;
+        gap: 18px;
       }
 
-      .login-copy h1 {
-        max-width: 680px;
+      .brand-mark {
+        display: inline-grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border: 1px solid rgba(23, 120, 111, 0.24);
+        border-radius: 8px;
+        background: #ffffff;
+        color: var(--accent-strong);
+        font-family: var(--mono);
+        font-weight: 820;
+        box-shadow: var(--shadow);
+      }
+
+      .eyebrow {
+        color: var(--accent-strong);
+        font-size: 12px;
+        font-weight: 760;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        letter-spacing: 0;
+      }
+
+      h1 {
+        max-width: 720px;
+        font-size: clamp(34px, 4vw, 54px);
+        line-height: 1.02;
+        font-weight: 820;
       }
 
       .login-note {
-        max-width: 520px;
+        max-width: 620px;
         color: var(--muted);
         font-size: 15px;
-        line-height: 1.7;
+        line-height: 1.8;
       }
 
       .login-card {
-        background: var(--panel);
         border: 1px solid var(--line);
         border-radius: 8px;
+        background: rgba(255, 255, 255, 0.9);
         box-shadow: var(--shadow);
-        padding: 22px;
+        padding: 24px;
       }
 
       .login-card form {
@@ -154,126 +215,202 @@
         gap: 16px;
       }
 
-      .form-help {
-        color: var(--faint);
-        font-size: 12px;
-        line-height: 1.5;
+      .login-card h2 {
+        font-size: 20px;
       }
 
-      .shell {
-        max-width: 1380px;
-        margin: 0 auto;
-        padding: 18px 24px 28px;
+      .app-shell {
+        min-height: 100dvh;
+        display: grid;
+        grid-template-columns: 248px minmax(0, 1fr);
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100dvh;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 18px;
+        padding: 18px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent),
+          var(--sidebar);
+        color: #e9f0f3;
+      }
+
+      .sidebar-brand {
+        display: grid;
+        grid-template-columns: 42px 1fr;
+        gap: 12px;
+        align-items: center;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--sidebar-line);
+      }
+
+      .sidebar-brand .brand-mark {
+        box-shadow: none;
+        background: rgba(255, 255, 255, 0.06);
+        color: #e9f0f3;
+      }
+
+      .sidebar-title {
+        font-weight: 820;
+      }
+
+      .sidebar-subtitle {
+        margin-top: 3px;
+        color: rgba(233, 240, 243, 0.62);
+        font-size: 12px;
+      }
+
+      .nav-group {
+        display: grid;
+        gap: 6px;
+        align-content: start;
+      }
+
+      .nav-label {
+        margin: 8px 0 6px;
+        color: rgba(233, 240, 243, 0.48);
+        font-size: 11px;
+        font-weight: 760;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .nav-item {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 22px 1fr;
+        gap: 10px;
+        align-items: center;
+        min-height: 40px;
+        padding: 0 11px;
+        border-color: transparent;
+        background: transparent;
+        color: rgba(233, 240, 243, 0.76);
+        text-align: left;
+      }
+
+      .nav-item:hover,
+      .nav-item.active {
+        border-color: rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.07);
+        color: #ffffff;
+      }
+
+      .nav-icon {
+        width: 18px;
+        height: 18px;
+        border: 1px solid rgba(233, 240, 243, 0.38);
+        border-radius: 5px;
+        position: relative;
+      }
+
+      .nav-icon::after {
+        content: "";
+        position: absolute;
+        inset: 5px;
+        border-radius: 2px;
+        background: currentColor;
+        opacity: 0.5;
+      }
+
+      .sidebar-foot {
+        display: grid;
+        gap: 9px;
+        padding-top: 14px;
+        border-top: 1px solid var(--sidebar-line);
+        color: rgba(233, 240, 243, 0.62);
+        font-size: 12px;
+      }
+
+      .workspace {
+        min-width: 0;
+        padding: 18px 22px 28px;
       }
 
       .topbar {
         display: grid;
         grid-template-columns: minmax(280px, 1fr) auto;
-        gap: 18px;
+        gap: 16px;
         align-items: center;
-        margin-bottom: 16px;
+        min-height: 72px;
+        margin-bottom: 18px;
       }
 
-      .brand {
+      .page-kicker {
         display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-
-      .eyebrow {
-        color: var(--accent-strong);
-        font-size: 12px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      h1 {
-        margin: 0;
-        font-size: clamp(28px, 3.2vw, 42px);
-        line-height: 1;
-        font-weight: 760;
-        letter-spacing: 0;
-      }
-
-      .subtitle {
-        display: inline-flex;
-        width: fit-content;
         align-items: center;
-        gap: 8px;
+        gap: 9px;
         color: var(--muted);
-        font-size: 14px;
+        font-size: 13px;
       }
 
-      .subtitle::before {
+      .page-kicker::before {
         content: "";
-        width: 7px;
-        height: 7px;
+        width: 8px;
+        height: 8px;
         border-radius: 999px;
         background: var(--idle);
-        box-shadow: 0 0 0 3px rgba(122, 132, 146, 0.12);
+        box-shadow: 0 0 0 4px rgba(122, 132, 146, 0.12);
       }
 
-      .subtitle.connected::before {
+      .page-kicker.connected::before {
         background: var(--ok);
-        box-shadow: 0 0 0 3px rgba(19, 131, 95, 0.13);
+        box-shadow: 0 0 0 4px rgba(19, 131, 95, 0.13);
       }
 
-      .subtitle.error-state::before {
+      .page-kicker.error-state::before {
         background: var(--bad);
-        box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.13);
+        box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.13);
       }
 
-      .authbar {
-        display: grid;
-        grid-template-columns: minmax(260px, 1fr) auto auto;
-        gap: 10px;
-        align-items: end;
-        padding: 12px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.78);
+      .page-title {
+        margin-top: 5px;
+        font-size: clamp(26px, 2.6vw, 38px);
+        line-height: 1;
+        font-weight: 820;
       }
 
-      .top-actions {
+      .top-actions,
+      .inline-actions,
+      .row-actions,
+      .form-actions {
         display: flex;
         flex-wrap: wrap;
-        justify-content: flex-end;
         gap: 10px;
+        align-items: center;
       }
 
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: 7px;
+      .top-actions,
+      .form-actions {
+        justify-content: flex-end;
       }
 
-      label {
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 680;
+      .view {
+        display: grid;
+        gap: 18px;
       }
 
       .summary {
         display: grid;
-        grid-template-columns: 1.1fr repeat(4, minmax(132px, 0.72fr));
-        gap: 0;
-        margin-bottom: 18px;
-        background: var(--panel);
+        grid-template-columns: 1.2fr repeat(4, minmax(130px, 0.72fr));
         border: 1px solid var(--line);
         border-radius: 8px;
-        box-shadow: var(--shadow);
         overflow: hidden;
+        background: var(--surface);
+        box-shadow: var(--shadow);
       }
 
       .summary-cell {
-        min-height: 82px;
-        padding: 15px 18px;
-        border-right: 1px solid var(--line);
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
+        min-height: 92px;
+        padding: 16px 18px;
+        display: grid;
+        align-content: center;
         gap: 8px;
+        border-right: 1px solid var(--line);
       }
 
       .summary-cell:last-child {
@@ -283,22 +420,20 @@
       .summary-label {
         color: var(--muted);
         font-size: 12px;
-        font-weight: 680;
+        font-weight: 720;
       }
 
       .summary-value {
-        font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+        font-family: var(--mono);
         font-size: 27px;
         line-height: 1;
-        font-weight: 760;
+        font-weight: 820;
         white-space: nowrap;
       }
 
       .summary-value.text {
-        font-family:
-          "Geist", "Satoshi", "Segoe UI", "Microsoft YaHei", system-ui,
-          sans-serif;
-        font-size: 24px;
+        font-family: var(--sans);
+        font-size: 23px;
       }
 
       .summary-note {
@@ -309,170 +444,79 @@
         text-overflow: ellipsis;
       }
 
-      .layout {
+      .grid-2 {
         display: grid;
-        grid-template-columns: minmax(0, 1.52fr) minmax(390px, 0.86fr);
+        grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.9fr);
         gap: 18px;
         align-items: start;
       }
 
-      .main-column {
+      .grid-3 {
         display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 18px;
       }
 
-      .action-grid {
-        display: grid;
-        gap: 12px;
-      }
-
-      .operation-card {
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: var(--panel-soft);
-        padding: 14px;
-      }
-
-      .operation-title {
-        margin-bottom: 10px;
-        font-size: 13px;
-        font-weight: 760;
-      }
-
-      .form-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
-      }
-
-      .form-grid.single {
-        grid-template-columns: 1fr;
-      }
-
-      .form-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        justify-content: flex-end;
-        margin-top: 14px;
-      }
-
-      .inline-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        align-items: center;
-        justify-content: flex-end;
-      }
-
-      .row-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-      }
-
-      .row-actions button {
-        min-height: 30px;
-        padding: 0 10px;
-        font-size: 12px;
-      }
-
-      .checkbox {
-        display: flex;
-        align-items: center;
-        gap: 9px;
-        min-height: 36px;
-        color: var(--muted);
-        font-size: 13px;
-      }
-
-      .checkbox input {
-        width: 16px;
-        min-height: 16px;
-        padding: 0;
-        accent-color: var(--accent);
-      }
-
-      .message {
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1.5;
-      }
-
-      .message.error-text {
-        color: var(--bad);
-      }
-
-      .command-output {
-        margin-top: 12px;
-      }
-
-      .command-output textarea {
-        min-height: 138px;
-        font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
-        font-size: 12px;
-      }
-
-      .modal-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 20;
-        display: grid;
-        place-items: center;
-        padding: 18px;
-        background: rgba(23, 33, 43, 0.34);
-      }
-
-      .modal {
-        width: min(760px, 100%);
-        max-height: calc(100dvh - 36px);
-        overflow: auto;
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        box-shadow: 0 28px 80px -35px rgba(23, 33, 43, 0.58);
-      }
-
-      .modal-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 16px 18px;
-        border-bottom: 1px solid var(--line);
-      }
-
-      .modal-body {
-        padding: 18px;
-      }
-
       .panel {
-        background: var(--panel);
         border: 1px solid var(--line);
         border-radius: 8px;
+        background: rgba(255, 255, 255, 0.92);
         box-shadow: var(--shadow);
         overflow: hidden;
       }
 
       .panel-head {
-        min-height: 58px;
-        padding: 15px 18px;
-        border-bottom: 1px solid var(--line);
+        min-height: 62px;
         display: flex;
+        align-items: center;
         justify-content: space-between;
         gap: 14px;
-        align-items: center;
+        padding: 15px 18px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(249, 250, 251, 0.72);
       }
 
       .panel-title {
         font-size: 16px;
-        font-weight: 760;
+        font-weight: 820;
       }
 
       .panel-meta {
+        margin-top: 4px;
         color: var(--muted);
+        font-family: var(--mono);
         font-size: 12px;
-        font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+      }
+
+      .panel-body {
+        padding: 18px;
+      }
+
+      .insight-card {
+        min-height: 150px;
+        display: grid;
+        gap: 12px;
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      .insight-card h3 {
+        font-size: 14px;
+        font-weight: 820;
+      }
+
+      .insight-value {
+        font-family: var(--mono);
+        font-size: 28px;
+        font-weight: 820;
+      }
+
+      .insight-note {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
       }
 
       .table-wrap {
@@ -481,12 +525,12 @@
 
       table {
         width: 100%;
+        min-width: 880px;
         border-collapse: collapse;
-        min-width: 860px;
       }
 
       .route-table {
-        min-width: 920px;
+        min-width: 960px;
       }
 
       th,
@@ -499,12 +543,12 @@
       }
 
       th {
-        background: var(--panel-soft);
+        background: var(--surface-soft);
         color: var(--muted);
         font-size: 11px;
-        font-weight: 760;
-        text-transform: uppercase;
+        font-weight: 820;
         letter-spacing: 0.04em;
+        text-transform: uppercase;
       }
 
       tbody tr {
@@ -514,7 +558,7 @@
 
       tbody tr:hover,
       tbody tr.selected {
-        background: #f2f7f6;
+        background: #f0f7f5;
       }
 
       tbody tr.selected {
@@ -522,89 +566,22 @@
       }
 
       .node-name {
+        min-width: 0;
         display: flex;
         flex-direction: column;
         gap: 4px;
-        min-width: 0;
       }
 
       .node-title {
-        max-width: 220px;
+        max-width: 230px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
 
-      .strong {
-        font-weight: 720;
-      }
-
-      .mono {
-        font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
-      }
-
-      .muted {
-        color: var(--muted);
-      }
-
-      .status {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 72px;
-        padding: 4px 8px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        background: #ffffff;
-        color: var(--muted);
-        font-weight: 680;
-      }
-
-      .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 999px;
-        background: var(--idle);
-        box-shadow: 0 0 0 3px rgba(122, 132, 146, 0.12);
-        flex: 0 0 auto;
-      }
-
-      .status.ok .dot {
-        background: var(--ok);
-        box-shadow: 0 0 0 3px rgba(19, 131, 95, 0.13);
-      }
-
-      .status.ok {
-        border-color: rgba(19, 131, 95, 0.22);
-        color: var(--ok);
-        background: rgba(19, 131, 95, 0.06);
-      }
-
-      .status.warn .dot {
-        background: var(--warn);
-        box-shadow: 0 0 0 3px rgba(169, 103, 23, 0.13);
-      }
-
-      .status.warn {
-        border-color: rgba(169, 103, 23, 0.22);
-        color: var(--warn);
-        background: rgba(169, 103, 23, 0.07);
-      }
-
-      .status.bad .dot {
-        background: var(--bad);
-        box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.13);
-      }
-
-      .status.bad {
-        border-color: rgba(180, 35, 24, 0.22);
-        color: var(--bad);
-        background: rgba(180, 35, 24, 0.06);
-      }
-
       .endpoint {
         display: inline-block;
-        max-width: 180px;
+        max-width: 210px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -614,6 +591,65 @@
         margin-top: 4px;
         color: var(--faint);
         font-size: 12px;
+      }
+
+      .status,
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-height: 26px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface-soft);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 720;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--idle);
+        box-shadow: 0 0 0 3px rgba(122, 132, 146, 0.12);
+      }
+
+      .status.ok,
+      .chip.ok {
+        border-color: rgba(19, 131, 95, 0.2);
+        background: rgba(19, 131, 95, 0.06);
+        color: var(--ok);
+      }
+
+      .status.ok .dot {
+        background: var(--ok);
+        box-shadow: 0 0 0 3px rgba(19, 131, 95, 0.13);
+      }
+
+      .status.warn,
+      .chip.warn {
+        border-color: rgba(169, 103, 23, 0.2);
+        background: rgba(169, 103, 23, 0.07);
+        color: var(--warn);
+      }
+
+      .status.warn .dot {
+        background: var(--warn);
+        box-shadow: 0 0 0 3px rgba(169, 103, 23, 0.13);
+      }
+
+      .status.bad,
+      .chip.bad {
+        border-color: rgba(180, 35, 24, 0.2);
+        background: rgba(180, 35, 24, 0.06);
+        color: var(--bad);
+      }
+
+      .status.bad .dot {
+        background: var(--bad);
+        box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.13);
       }
 
       .age.ok {
@@ -633,7 +669,7 @@
       }
 
       .detail-section {
-        padding: 15px 18px;
+        padding: 16px 18px;
         border-bottom: 1px solid var(--line);
       }
 
@@ -641,15 +677,15 @@
         border-bottom: 0;
       }
 
-      .detail-grid {
+      .detail-grid,
+      .form-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px;
+        gap: 12px;
       }
 
-      .detail-hero {
-        display: grid;
-        gap: 10px;
+      .form-grid.single {
+        grid-template-columns: 1fr;
       }
 
       .detail-kicker {
@@ -658,77 +694,43 @@
         gap: 8px;
       }
 
-      .chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        min-height: 26px;
-        padding: 0 9px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        color: var(--muted);
-        background: var(--panel-soft);
-        font-size: 12px;
-        font-weight: 680;
-      }
-
-      .chip.ok {
-        color: var(--ok);
-        border-color: rgba(19, 131, 95, 0.2);
-        background: rgba(19, 131, 95, 0.06);
-      }
-
-      .chip.warn {
-        color: var(--warn);
-        border-color: rgba(169, 103, 23, 0.2);
-        background: rgba(169, 103, 23, 0.07);
-      }
-
-      .chip.bad {
-        color: var(--bad);
-        border-color: rgba(180, 35, 24, 0.2);
-        background: rgba(180, 35, 24, 0.06);
-      }
-
       .metric {
-        border-top: 1px solid var(--line);
-        padding-top: 11px;
         min-width: 0;
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
       }
 
       .metric-label {
         color: var(--muted);
         font-size: 11px;
-        font-weight: 720;
+        font-weight: 760;
       }
 
       .metric-value {
         margin-top: 6px;
-        font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+        font-family: var(--mono);
         font-size: 17px;
-        font-weight: 760;
+        font-weight: 820;
         overflow-wrap: anywhere;
       }
 
       .section-title {
         margin-bottom: 12px;
-        color: var(--text);
         font-size: 13px;
-        font-weight: 760;
+        font-weight: 820;
       }
 
       .report-list {
+        max-height: 198px;
         display: grid;
-        gap: 0;
         border: 1px solid var(--line);
         border-radius: 8px;
-        max-height: 190px;
         overflow: auto;
       }
 
       .report-row {
         display: grid;
-        grid-template-columns: 72px 1fr 92px;
+        grid-template-columns: 74px 1fr 90px;
         gap: 10px;
         padding: 11px 12px;
         border-bottom: 1px solid var(--line);
@@ -739,16 +741,77 @@
         border-bottom: 0;
       }
 
-      pre {
-        margin: 0;
-        max-height: 220px;
-        overflow: auto;
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+
+      .checkbox {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 38px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .checkbox input {
+        width: 16px;
+        min-height: 16px;
+        padding: 0;
+        accent-color: var(--accent);
+      }
+
+      .form-help,
+      .message {
+        color: var(--faint);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .message.error-text,
+      .error {
+        color: var(--bad);
+      }
+
+      .operation-card {
         padding: 14px;
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: #111a22;
-        color: #d8e3ea;
+        background: var(--surface-soft);
+      }
+
+      .operation-title {
+        margin-bottom: 12px;
+        font-size: 13px;
+        font-weight: 820;
+      }
+
+      .action-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .command-output {
+        margin-top: 12px;
+      }
+
+      .command-output textarea,
+      pre {
+        font-family: var(--mono);
         font-size: 12px;
+      }
+
+      pre {
+        max-height: 240px;
+        margin: 0;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: auto;
+        background: #101820;
+        color: #d8e3ea;
         line-height: 1.55;
       }
 
@@ -756,7 +819,7 @@
         cursor: pointer;
         color: var(--muted);
         font-size: 13px;
-        font-weight: 720;
+        font-weight: 760;
         list-style: none;
       }
 
@@ -780,22 +843,17 @@
       }
 
       .empty,
-      .error,
       .loading {
-        padding: 36px 24px;
+        padding: 38px 24px;
         color: var(--muted);
         text-align: center;
-      }
-
-      .error {
-        color: var(--bad);
       }
 
       .skeleton {
         display: block;
         height: 14px;
         border-radius: 5px;
-        background: linear-gradient(90deg, #eef2f5, #f8fafb, #eef2f5);
+        background: linear-gradient(90deg, #eaf0f3, #f9fbfc, #eaf0f3);
         background-size: 220% 100%;
         animation: shimmer 1.2s ease-in-out infinite;
       }
@@ -809,22 +867,87 @@
         }
       }
 
-      @media (max-width: 980px) {
-        .shell {
-          padding: 16px;
-        }
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        background: rgba(16, 24, 32, 0.42);
+      }
 
-        .login-screen,
-        .topbar,
-        .layout,
-        .summary {
+      .modal {
+        width: min(820px, 100%);
+        max-height: calc(100dvh - 36px);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        box-shadow: 0 34px 100px -42px rgba(16, 24, 32, 0.72);
+        overflow: auto;
+      }
+
+      .modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .modal-body {
+        padding: 18px;
+      }
+
+      @media (max-width: 1120px) {
+        .app-shell {
           grid-template-columns: 1fr;
         }
 
+        .sidebar {
+          position: static;
+          height: auto;
+          grid-template-rows: auto auto;
+        }
+
+        .sidebar-foot {
+          display: none;
+        }
+
+        .nav-group {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .nav-label {
+          grid-column: 1 / -1;
+        }
+
+        .summary,
+        .grid-2,
+        .grid-3,
+        .topbar {
+          grid-template-columns: 1fr;
+        }
+
+        .top-actions {
+          justify-content: flex-start;
+        }
+      }
+
+      @media (max-width: 700px) {
         .login-screen {
-          gap: 22px;
-          align-items: start;
-          padding: 18px;
+          width: min(100% - 28px, 1180px);
+          grid-template-columns: 1fr;
+          gap: 24px;
+        }
+
+        .workspace {
+          padding: 14px;
+        }
+
+        .nav-group {
+          grid-template-columns: 1fr;
         }
 
         .summary-cell,
@@ -837,37 +960,7 @@
           border-bottom: 0;
         }
 
-        .authbar {
-          grid-template-columns: 1fr;
-        }
-
-        .top-actions {
-          justify-content: flex-start;
-        }
-      }
-
-      @media (max-width: 640px) {
-        .shell {
-          padding: 12px;
-        }
-
-        h1 {
-          font-size: 30px;
-        }
-
-        .summary-value {
-          font-size: 24px;
-        }
-
-        .panel-head {
-          align-items: flex-start;
-          flex-direction: column;
-        }
-
-        .detail-grid {
-          grid-template-columns: 1fr;
-        }
-
+        .detail-grid,
         .form-grid {
           grid-template-columns: 1fr;
         }
@@ -877,20 +970,24 @@
   <body>
     <section class="login-screen" id="loginScreen">
       <div class="login-copy">
+        <div class="brand-mark">XA</div>
         <div class="eyebrow">XAccel Control</div>
         <h1>登录节点后台</h1>
         <div class="login-note">
-          用控制面安装时生成的管理员 Token 登录。登录后可以查看节点状态、新增节点、生成一键安装命令，并处理节点下线、排空或禁用。
+          用控制面安装时生成的管理员 Token 登录。登录后可以查看节点状态、新增节点、管理游戏路由规则、生成一键安装命令，并处理节点下线、排空或禁用。
         </div>
       </div>
       <div class="login-card">
         <form id="loginForm">
+          <div>
+            <h2>管理员入口</h2>
+            <div class="form-help">Token 保存在本机浏览器，不会写入服务端。</div>
+          </div>
           <div class="field">
             <label for="loginTokenInput">管理员 Token</label>
             <input id="loginTokenInput" type="password" autocomplete="off" />
             <div class="form-help">
-              Token 保存在本机浏览器，不会写入服务端。服务器上可通过
-              /etc/xaccel-control-api/control-api.env 查看。
+              服务器上可通过 /etc/xaccel-control-api/control-api.env 查看。
             </div>
           </div>
           <div class="message error-text hidden" id="loginError"></div>
@@ -899,124 +996,283 @@
       </div>
     </section>
 
-    <main class="shell hidden" id="appShell">
-      <section class="topbar">
-        <div class="brand">
-          <div class="eyebrow">XAccel Control</div>
-          <h1>节点控制台</h1>
-          <div class="subtitle" id="statusLine">等待连接控制面</div>
+    <main class="app-shell hidden" id="appShell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-mark">XA</div>
+          <div>
+            <div class="sidebar-title">XAccel Control</div>
+            <div class="sidebar-subtitle">Node Operations</div>
+          </div>
         </div>
-        <div class="top-actions">
-          <button id="openCreateNode" class="primary" type="button">新增节点</button>
-          <button id="refreshNow" type="button">立即刷新</button>
-          <button id="logoutButton" class="danger" type="button">退出</button>
+        <nav class="nav-group" aria-label="主菜单">
+          <div class="nav-label">管理菜单</div>
+          <button class="nav-item active" type="button" data-view="overview">
+            <span class="nav-icon"></span>
+            <span>控制总览</span>
+          </button>
+          <button class="nav-item" type="button" data-view="nodes">
+            <span class="nav-icon"></span>
+            <span>节点管理</span>
+          </button>
+          <button class="nav-item" type="button" data-view="routes">
+            <span class="nav-icon"></span>
+            <span>游戏路由</span>
+          </button>
+          <button class="nav-item" type="button" data-view="ops">
+            <span class="nav-icon"></span>
+            <span>运维工具</span>
+          </button>
+        </nav>
+        <div class="sidebar-foot">
+          <span>当前版本</span>
+          <span class="mono">v0.22.0</span>
         </div>
-      </section>
+      </aside>
 
-      <section class="summary" id="summary">
-        <div class="summary-cell">
-          <div class="summary-label">连接状态</div>
-          <div class="summary-value">--</div>
-          <div class="summary-note">未加载</div>
-        </div>
-        <div class="summary-cell">
-          <div class="summary-label">节点总数</div>
-          <div class="summary-value">--</div>
-          <div class="summary-note">total</div>
-        </div>
-        <div class="summary-cell">
-          <div class="summary-label">在线节点</div>
-          <div class="summary-value">--</div>
-          <div class="summary-note">online</div>
-        </div>
-        <div class="summary-cell">
-          <div class="summary-label">活跃会话</div>
-          <div class="summary-value">--</div>
-          <div class="summary-note">sessions</div>
-        </div>
-        <div class="summary-cell">
-          <div class="summary-label">最近上报</div>
-          <div class="summary-value">--</div>
-          <div class="summary-note">last report</div>
-        </div>
-      </section>
-
-      <section class="layout">
-        <div class="main-column">
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <div class="panel-title">节点列表</div>
-              <div class="panel-meta" id="listMeta">limit 500</div>
-            </div>
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <div class="page-kicker" id="statusLine">等待连接控制面</div>
+            <h1 class="page-title" id="pageTitle">控制总览</h1>
+          </div>
+          <div class="top-actions">
+            <button id="openCreateNode" class="primary" type="button">新增节点</button>
+            <button id="openRouteRule" type="button">新增规则</button>
+            <button id="refreshNow" type="button">立即刷新</button>
             <button id="toggleAuto" type="button">自动刷新：开</button>
+            <button id="logoutButton" class="danger" type="button">退出</button>
           </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>节点</th>
-                  <th>状态</th>
-                  <th>入口</th>
-                  <th>版本</th>
-                  <th>区域</th>
-                  <th>最近上报</th>
-                  <th>会话</th>
-                </tr>
-              </thead>
-              <tbody id="nodeRows">
-                <tr>
-                  <td colspan="7"><span class="skeleton"></span></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+        </header>
 
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <div class="panel-title">游戏路由规则</div>
-              <div class="panel-meta" id="routeMeta">limit 500</div>
+        <section class="view" id="viewOverview" data-view-panel="overview">
+          <section class="summary" id="summary">
+            <div class="summary-cell">
+              <div class="summary-label">连接状态</div>
+              <div class="summary-value">--</div>
+              <div class="summary-note">未加载</div>
             </div>
-            <div class="inline-actions">
-              <button id="openRouteRule" class="primary" type="button">新增规则</button>
+            <div class="summary-cell">
+              <div class="summary-label">节点总数</div>
+              <div class="summary-value">--</div>
+              <div class="summary-note">total</div>
             </div>
-          </div>
-          <div class="table-wrap">
-            <table class="route-table">
-              <thead>
-                <tr>
-                  <th>游戏</th>
-                  <th>节点</th>
-                  <th>目标地址</th>
-                  <th>协议</th>
-                  <th>优先级</th>
-                  <th>状态</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody id="routeRows">
-                <tr>
-                  <td colspan="7"><span class="skeleton"></span></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-        </div>
+            <div class="summary-cell">
+              <div class="summary-label">在线节点</div>
+              <div class="summary-value">--</div>
+              <div class="summary-note">online</div>
+            </div>
+            <div class="summary-cell">
+              <div class="summary-label">路由规则</div>
+              <div class="summary-value">--</div>
+              <div class="summary-note">routes</div>
+            </div>
+            <div class="summary-cell">
+              <div class="summary-label">最近上报</div>
+              <div class="summary-value">--</div>
+              <div class="summary-note">last report</div>
+            </div>
+          </section>
 
-        <aside class="panel">
-          <div class="panel-head">
-            <div>
-              <div class="panel-title" id="detailTitle">节点详情</div>
-              <div class="panel-meta" id="detailMeta">未选择</div>
+          <section class="grid-3" id="overviewCards">
+            <div class="insight-card">
+              <h3>调度健康</h3>
+              <div class="insight-value">--</div>
+              <div class="insight-note">等待控制面数据。</div>
+            </div>
+            <div class="insight-card">
+              <h3>路由覆盖</h3>
+              <div class="insight-value">--</div>
+              <div class="insight-note">等待路由规则加载。</div>
+            </div>
+            <div class="insight-card">
+              <h3>运维节奏</h3>
+              <div class="insight-value">30s</div>
+              <div class="insight-note">自动刷新开启后，每 30 秒同步节点和路由状态。</div>
+            </div>
+          </section>
+
+          <section class="grid-2">
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">节点快照</div>
+                  <div class="panel-meta" id="overviewNodeMeta">limit 5</div>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>节点</th>
+                      <th>状态</th>
+                      <th>入口</th>
+                      <th>最近上报</th>
+                    </tr>
+                  </thead>
+                  <tbody id="overviewNodeRows">
+                    <tr>
+                      <td colspan="4"><span class="skeleton"></span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">路由快照</div>
+                  <div class="panel-meta" id="overviewRouteMeta">limit 5</div>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="route-table">
+                  <thead>
+                    <tr>
+                      <th>游戏</th>
+                      <th>节点</th>
+                      <th>目标</th>
+                      <th>状态</th>
+                    </tr>
+                  </thead>
+                  <tbody id="overviewRouteRows">
+                    <tr>
+                      <td colspan="4"><span class="skeleton"></span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="view hidden" id="viewNodes" data-view-panel="nodes">
+          <section class="grid-2">
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">节点列表</div>
+                  <div class="panel-meta" id="listMeta">limit 500</div>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>节点</th>
+                      <th>状态</th>
+                      <th>入口</th>
+                      <th>版本</th>
+                      <th>区域</th>
+                      <th>最近上报</th>
+                      <th>会话</th>
+                    </tr>
+                  </thead>
+                  <tbody id="nodeRows">
+                    <tr>
+                      <td colspan="7"><span class="skeleton"></span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <aside class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title" id="detailTitle">节点详情</div>
+                  <div class="panel-meta" id="detailMeta">未选择</div>
+                </div>
+              </div>
+              <div class="detail-body" id="detailBody">
+                <div class="empty">选择一个节点</div>
+              </div>
+            </aside>
+          </section>
+        </section>
+
+        <section class="view hidden" id="viewRoutes" data-view-panel="routes">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">游戏路由规则</div>
+                <div class="panel-meta" id="routeMeta">limit 500</div>
+              </div>
+              <div class="inline-actions">
+                <button class="primary" type="button" data-open-route>新增规则</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="route-table">
+                <thead>
+                  <tr>
+                    <th>游戏</th>
+                    <th>节点</th>
+                    <th>目标地址</th>
+                    <th>协议</th>
+                    <th>优先级</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="routeRows">
+                  <tr>
+                    <td colspan="7"><span class="skeleton"></span></td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
-          <div class="detail-body" id="detailBody">
-            <div class="empty">选择一个节点</div>
-          </div>
-        </aside>
+        </section>
+
+        <section class="view hidden" id="viewOps" data-view-panel="ops">
+          <section class="grid-2">
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">运维工作流</div>
+                  <div class="panel-meta">node install / report / route</div>
+                </div>
+              </div>
+              <div class="panel-body">
+                <div class="action-grid">
+                  <div class="operation-card">
+                    <div class="operation-title">新增节点</div>
+                    <div class="message">创建节点记录后生成一键安装命令，部署到 Linux 节点服务器。</div>
+                    <div class="form-actions">
+                      <button class="primary" type="button" data-open-node>新增节点</button>
+                    </div>
+                  </div>
+                  <div class="operation-card">
+                    <div class="operation-title">新增路由</div>
+                    <div class="message">为游戏 ID 绑定节点和目标 UDP 地址，客户端 connect-intent 会按优先级调度。</div>
+                    <div class="form-actions">
+                      <button class="primary" type="button" data-open-route>新增规则</button>
+                    </div>
+                  </div>
+                  <div class="operation-card">
+                    <div class="operation-title">升级控制面</div>
+                    <textarea readonly>curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \
+  --database-url 'mysql://xaccel:xaccel_password@127.0.0.1:3306/xaccel' \
+  --listen 0.0.0.0:18080 \
+  --public-base-url http://195.245.242.9:18080</textarea>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">当前选择</div>
+                  <div class="panel-meta" id="opsMeta">等待节点选择</div>
+                </div>
+              </div>
+              <div class="panel-body" id="opsBody">
+                <div class="empty">在节点管理里选择节点后，可以在详情中生成安装命令和调整状态。</div>
+              </div>
+            </div>
+          </section>
+        </section>
       </section>
     </main>
 
@@ -1057,7 +1313,7 @@
             </div>
             <div class="field">
               <label for="nodeTag">标签</label>
-              <input id="nodeTag" name="tag" autocomplete="off" placeholder="standalone" />
+              <input id="nodeTag" name="tag" autocomplete="off" placeholder="default" />
             </div>
             <div class="field">
               <label for="nodeRelayIp">中转 IP</label>
@@ -1159,6 +1415,13 @@
     </div>
 
     <script>
+      const PAGE_TITLES = {
+        overview: "控制总览",
+        nodes: "节点管理",
+        routes: "游戏路由",
+        ops: "运维工具",
+      };
+
       const state = {
         token: localStorage.getItem("xaccel_admin_token") || "",
         nodes: [],
@@ -1166,6 +1429,7 @@
         selectedId: null,
         serverTime: null,
         autoRefresh: true,
+        activeView: "overview",
         timer: null,
       };
 
@@ -1176,6 +1440,9 @@
         loginTokenInput: document.getElementById("loginTokenInput"),
         loginError: document.getElementById("loginError"),
         logoutButton: document.getElementById("logoutButton"),
+        navItems: [...document.querySelectorAll("[data-view]")],
+        viewPanels: [...document.querySelectorAll("[data-view-panel]")],
+        pageTitle: document.getElementById("pageTitle"),
         openCreateNode: document.getElementById("openCreateNode"),
         createNodeModal: document.getElementById("createNodeModal"),
         closeCreateNode: document.getElementById("closeCreateNode"),
@@ -1193,6 +1460,11 @@
         toggleAuto: document.getElementById("toggleAuto"),
         statusLine: document.getElementById("statusLine"),
         summary: document.getElementById("summary"),
+        overviewCards: document.getElementById("overviewCards"),
+        overviewNodeMeta: document.getElementById("overviewNodeMeta"),
+        overviewNodeRows: document.getElementById("overviewNodeRows"),
+        overviewRouteMeta: document.getElementById("overviewRouteMeta"),
+        overviewRouteRows: document.getElementById("overviewRouteRows"),
         listMeta: document.getElementById("listMeta"),
         nodeRows: document.getElementById("nodeRows"),
         routeMeta: document.getElementById("routeMeta"),
@@ -1200,6 +1472,8 @@
         detailTitle: document.getElementById("detailTitle"),
         detailMeta: document.getElementById("detailMeta"),
         detailBody: document.getElementById("detailBody"),
+        opsMeta: document.getElementById("opsMeta"),
+        opsBody: document.getElementById("opsBody"),
       };
 
       els.loginTokenInput.value = state.token;
@@ -1207,6 +1481,17 @@
       function setLoggedIn(loggedIn) {
         els.loginScreen.classList.toggle("hidden", loggedIn);
         els.appShell.classList.toggle("hidden", !loggedIn);
+      }
+
+      function setActiveView(view) {
+        state.activeView = PAGE_TITLES[view] ? view : "overview";
+        els.navItems.forEach((item) => {
+          item.classList.toggle("active", item.dataset.view === state.activeView);
+        });
+        els.viewPanels.forEach((panel) => {
+          panel.classList.toggle("hidden", panel.dataset.viewPanel !== state.activeView);
+        });
+        els.pageTitle.textContent = PAGE_TITLES[state.activeView];
       }
 
       function showInlineError(element, message) {
@@ -1309,7 +1594,7 @@
         if (node.status !== "online") return "bad";
         if (age === null) return "warn";
         if (age > 180) return "bad";
-        if (age !== null && age > 90) return "warn";
+        if (age > 90) return "warn";
         return "ok";
       }
 
@@ -1384,15 +1669,13 @@
         return data;
       }
 
-      function renderSummary(data) {
-        const nodes = data.nodes || [];
+      function renderSummary(data = {}) {
+        const nodes = state.nodes || [];
+        const routes = state.routeRules || [];
         const online = nodes.filter((node) => node.status === "online").length;
         const stale = nodes.filter((node) => statusClass(node) === "warn").length;
         const offline = nodes.length - online;
-        const activeSessions = nodes.reduce(
-          (sum, node) => sum + (node.latest_report?.active_sessions || 0),
-          0,
-        );
+        const enabledRoutes = routes.filter((rule) => rule.status === "enabled").length;
         const latestReport = nodes.reduce(
           (max, node) => Math.max(max, node.last_report_at || 0),
           0,
@@ -1402,7 +1685,7 @@
           <div class="summary-cell">
             <div class="summary-label">连接状态</div>
             <div class="summary-value text">正常</div>
-            <div class="summary-note">刷新于 ${escapeHtml(formatClock(data.server_time))}</div>
+            <div class="summary-note">刷新于 ${escapeHtml(formatClock(data.server_time || state.serverTime))}</div>
           </div>
           <div class="summary-cell">
             <div class="summary-label">节点总数</div>
@@ -1415,9 +1698,9 @@
             <div class="summary-note">${stale} 个上报延迟</div>
           </div>
           <div class="summary-cell">
-            <div class="summary-label">活跃会话</div>
-            <div class="summary-value">${activeSessions}</div>
-            <div class="summary-note">来自最近上报</div>
+            <div class="summary-label">路由规则</div>
+            <div class="summary-value">${routes.length}</div>
+            <div class="summary-note">${enabledRoutes} 条启用</div>
           </div>
           <div class="summary-cell">
             <div class="summary-label">最近上报</div>
@@ -1425,6 +1708,65 @@
             <div class="summary-note">${escapeHtml(formatTime(latestReport))}</div>
           </div>
         `;
+
+        const quality = nodes.length && online === nodes.length ? "优" : online > 0 ? "稳" : "--";
+        const games = new Set(routes.map((rule) => rule.game_id)).size;
+        els.overviewCards.innerHTML = `
+          <div class="insight-card">
+            <h3>调度健康</h3>
+            <div class="insight-value">${quality}</div>
+            <div class="insight-note">${online}/${nodes.length} 个节点在线，调度会优先选择在线且未禁用 QUIC 的节点。</div>
+          </div>
+          <div class="insight-card">
+            <h3>路由覆盖</h3>
+            <div class="insight-value">${games}</div>
+            <div class="insight-note">当前覆盖 ${games} 个游戏 ID，${enabledRoutes} 条规则处于启用状态。</div>
+          </div>
+          <div class="insight-card">
+            <h3>运维节奏</h3>
+            <div class="insight-value">${state.autoRefresh ? "30s" : "手动"}</div>
+            <div class="insight-note">自动刷新开启后，每 30 秒同步节点上报和路由规则。</div>
+          </div>
+        `;
+      }
+
+      function renderOverviewTables() {
+        const recentNodes = [...state.nodes]
+          .sort((left, right) => (right.last_report_at || 0) - (left.last_report_at || 0))
+          .slice(0, 5);
+        els.overviewNodeMeta.textContent = `${recentNodes.length} nodes / 最新快照`;
+        els.overviewNodeRows.innerHTML = recentNodes.length
+          ? recentNodes
+              .map((node) => {
+                const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
+                return `
+                  <tr data-node-id="${node.id}">
+                    <td><span class="strong">${escapeHtml(node.name)}</span><div class="cell-note mono">id ${node.id}</div></td>
+                    <td><span class="status ${statusClass(node)}"><span class="dot"></span>${escapeHtml(statusText(node))}</span></td>
+                    <td class="mono"><span class="endpoint">${escapeHtml(endpoint)}</span></td>
+                    <td class="mono age ${ageClass(node.last_report_at)}">${escapeHtml(ageText(node.last_report_at))}</td>
+                  </tr>
+                `;
+              })
+              .join("")
+          : `<tr><td colspan="4" class="empty">暂无节点</td></tr>`;
+
+        const recentRoutes = [...state.routeRules]
+          .sort((left, right) => left.priority - right.priority || left.id - right.id)
+          .slice(0, 5);
+        els.overviewRouteMeta.textContent = `${recentRoutes.length} routes / 优先级快照`;
+        els.overviewRouteRows.innerHTML = recentRoutes.length
+          ? recentRoutes
+              .map((rule) => `
+                <tr data-route-id="${rule.id}">
+                  <td class="mono">${rule.game_id}</td>
+                  <td>${escapeHtml(rule.node_name)}</td>
+                  <td class="mono"><span class="endpoint">${escapeHtml(rule.target_addr)}</span></td>
+                  <td><span class="chip ${rule.status === "enabled" ? "ok" : "bad"}">${escapeHtml(rule.status)}</span></td>
+                </tr>
+              `)
+              .join("")
+          : `<tr><td colspan="4" class="empty">暂无路由规则</td></tr>`;
       }
 
       function renderNodes() {
@@ -1445,8 +1787,6 @@
           .map((node) => {
             const selected = node.id === state.selectedId ? "selected" : "";
             const report = node.latest_report || {};
-            const cls = statusClass(node);
-            const ageCls = ageClass(node.last_report_at);
             const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
             return `
               <tr class="${selected}" data-node-id="${node.id}">
@@ -1457,7 +1797,7 @@
                   </div>
                 </td>
                 <td>
-                  <span class="status ${cls}">
+                  <span class="status ${statusClass(node)}">
                     <span class="dot"></span>
                     ${escapeHtml(statusText(node))}
                   </span>
@@ -1466,7 +1806,7 @@
                 <td class="mono">${escapeHtml(node.kernel_version || "--")}</td>
                 <td>${escapeHtml(areaText(node))}</td>
                 <td>
-                  <div class="mono age ${ageCls}">${escapeHtml(ageText(node.last_report_at))}</div>
+                  <div class="mono age ${ageClass(node.last_report_at)}">${escapeHtml(ageText(node.last_report_at))}</div>
                   <div class="cell-note">${escapeHtml(formatTime(node.last_report_at))}</div>
                 </td>
                 <td class="mono">${report.active_sessions || 0}</td>
@@ -1531,6 +1871,28 @@
         `;
       }
 
+      function renderOps() {
+        const node = state.nodes.find((item) => item.id === state.selectedId);
+        if (!node) {
+          els.opsMeta.textContent = "等待节点选择";
+          els.opsBody.innerHTML = `<div class="empty">在节点管理里选择节点后，可以在详情中生成安装命令和调整状态。</div>`;
+          return;
+        }
+        const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
+        els.opsMeta.textContent = `${endpoint} / id ${node.id}`;
+        els.opsBody.innerHTML = `
+          <div class="detail-grid">
+            ${metric("节点", node.name)}
+            ${metric("入口", endpoint)}
+            ${metric("状态", statusText(node))}
+            ${metric("版本", node.kernel_version || "--")}
+          </div>
+          <div class="form-actions">
+            <button type="button" data-jump-node="${node.id}">查看节点详情</button>
+          </div>
+        `;
+      }
+
       function renderDetail(data) {
         const node = data.node;
         const report = data.recent_reports?.[0];
@@ -1541,15 +1903,14 @@
         const sessions = health.sessions || {};
         const control = health.control_plane || {};
         const config = health.config || {};
-        const status = statusClass(node);
         const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
 
         els.detailTitle.textContent = node.name;
         els.detailMeta.textContent = `${endpoint} / id ${node.id}`;
         els.detailBody.innerHTML = `
-          <div class="detail-section detail-hero">
+          <div class="detail-section">
             <div class="detail-kicker">
-              <span class="chip ${status}">${escapeHtml(statusText(node))}</span>
+              <span class="chip ${statusClass(node)}">${escapeHtml(statusText(node))}</span>
               <span class="chip ${Number(control.handshake_last_http_status) === 200 ? "ok" : "warn"}">Handshake ${escapeHtml(control.handshake_last_http_status || "--")}</span>
               <span class="chip">监听 ${escapeHtml(listenText(listeners))}</span>
               <span class="chip ${Number(control.last_http_status) === 200 ? "ok" : "warn"}">控制面 ${escapeHtml(control.last_http_status || "--")}</span>
@@ -1738,6 +2099,7 @@
             </details>
           </div>
         `;
+        renderOps();
       }
 
       async function loadNodes({ silent = false } = {}) {
@@ -1754,14 +2116,16 @@
         if (!state.selectedId && state.nodes.length) {
           state.selectedId = state.nodes[0].id;
         }
+        await loadRouteRules({ silent: true });
         const latestReport = state.nodes.reduce(
           (max, node) => Math.max(max, node.last_report_at || 0),
           0,
         );
         const online = state.nodes.filter((node) => node.status === "online").length;
         renderSummary(data);
+        renderOverviewTables();
         renderNodes();
-        await loadRouteRules({ silent: true });
+        renderOps();
         els.listMeta.textContent = `${state.nodes.length} nodes / 刷新 ${formatClock(data.server_time)}`;
         els.statusLine.textContent = `已连接 / ${online}/${state.nodes.length} 在线 / 最新 ${ageText(latestReport)}`;
         els.statusLine.classList.add("connected");
@@ -1774,6 +2138,7 @@
       async function loadDetail(nodeId, { silent = false } = {}) {
         state.selectedId = Number(nodeId);
         renderNodes();
+        renderOps();
         if (!silent) {
           els.detailBody.innerHTML = `<div class="loading"><span class="skeleton"></span></div>`;
         }
@@ -1789,6 +2154,8 @@
         state.routeRules = data.rules || [];
         renderRouteRules();
         els.routeMeta.textContent = `${state.routeRules.length} rules / 刷新 ${formatClock(data.server_time)}`;
+        renderSummary({ server_time: state.serverTime || data.server_time });
+        renderOverviewTables();
       }
 
       function showError(error) {
@@ -1881,6 +2248,7 @@
         });
         state.selectedId = data.node.id;
         closeCreateNodeModal();
+        setActiveView("nodes");
         await loadNodes();
       }
 
@@ -1897,6 +2265,7 @@
           body: JSON.stringify(payload),
         });
         closeRouteRuleModal();
+        setActiveView("routes");
         await loadRouteRules();
       }
 
@@ -1998,7 +2367,14 @@
 
       els.logoutButton.addEventListener("click", logout);
 
+      els.navItems.forEach((item) => {
+        item.addEventListener("click", () => setActiveView(item.dataset.view));
+      });
+
       els.openCreateNode.addEventListener("click", openCreateNodeModal);
+      document.querySelectorAll("[data-open-node]").forEach((button) => {
+        button.addEventListener("click", openCreateNodeModal);
+      });
       els.closeCreateNode.addEventListener("click", closeCreateNodeModal);
       els.cancelCreateNode.addEventListener("click", closeCreateNodeModal);
       els.createNodeModal.addEventListener("click", (event) => {
@@ -2006,6 +2382,9 @@
       });
 
       els.openRouteRule.addEventListener("click", () => openRouteRuleModal());
+      document.querySelectorAll("[data-open-route]").forEach((button) => {
+        button.addEventListener("click", () => openRouteRuleModal());
+      });
       els.closeRouteRule.addEventListener("click", closeRouteRuleModal);
       els.cancelRouteRule.addEventListener("click", closeRouteRuleModal);
       els.routeRuleModal.addEventListener("click", (event) => {
@@ -2033,6 +2412,7 @@
       els.toggleAuto.addEventListener("click", () => {
         state.autoRefresh = !state.autoRefresh;
         resetTimer();
+        renderSummary({ server_time: state.serverTime });
       });
 
       els.nodeRows.addEventListener("click", (event) => {
@@ -2040,6 +2420,13 @@
         if (row) {
           loadDetail(row.dataset.nodeId).catch(showError);
         }
+      });
+
+      els.overviewNodeRows.addEventListener("click", (event) => {
+        const row = event.target.closest("tr[data-node-id]");
+        if (!row) return;
+        setActiveView("nodes");
+        loadDetail(row.dataset.nodeId).catch(showError);
       });
 
       els.routeRows.addEventListener("click", (event) => {
@@ -2091,6 +2478,14 @@
         });
       });
 
+      els.opsBody.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-jump-node]");
+        if (!button) return;
+        setActiveView("nodes");
+        loadDetail(button.dataset.jumpNode).catch(showError);
+      });
+
+      setActiveView("overview");
       if (state.token) {
         setLoggedIn(true);
         resetTimer();
