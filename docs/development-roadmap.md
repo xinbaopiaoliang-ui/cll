@@ -230,6 +230,15 @@ Done in `v0.24.0`:
   reports, and node actions across a full-width detail panel for quicker
   operations scanning.
 
+Done in `v0.25.0`:
+
+- Refresh the embedded `/admin` dashboard visual system against the newer
+  design baseline with a cleaner operations shell, refined summary cards,
+  sticky page actions, and subtler technology-console styling.
+- Compress the Node Management detail page further by turning the large node
+  config form into an on-demand drawer while keeping status, counters, recent
+  reports, and install/status actions visible for daily operations.
+
 Goals:
 
 - Add nonce replay storage for node report requests.

@@ -6,26 +6,28 @@
     <title>XAccel 控制台</title>
     <style>
       :root {
-        --bg: #f4f6f8;
+        --bg: #f6f9f8;
         --surface: #ffffff;
-        --surface-soft: #f9fafb;
-        --surface-strong: #eef3f5;
-        --ink: #101820;
-        --muted: #5f6d7a;
-        --faint: #94a0ad;
-        --line: #d9e1e7;
-        --line-strong: #c5d0d9;
-        --sidebar: #10181f;
-        --sidebar-2: #152229;
-        --sidebar-line: rgba(255, 255, 255, 0.08);
+        --surface-soft: #f7faf9;
+        --surface-strong: #eaf1f2;
+        --ink: #0b151a;
+        --muted: #5a6875;
+        --faint: #8c9aa6;
+        --line: #d6e0e5;
+        --line-strong: #bbc9d2;
+        --sidebar: #0f171d;
+        --sidebar-2: #17242b;
+        --sidebar-line: rgba(234, 241, 242, 0.1);
         --accent: #17786f;
-        --accent-strong: #0f5f58;
-        --accent-soft: rgba(23, 120, 111, 0.1);
-        --ok: #13835f;
-        --warn: #a96717;
+        --accent-strong: #0d5e57;
+        --accent-soft: rgba(23, 120, 111, 0.11);
+        --accent-line: rgba(23, 120, 111, 0.24);
+        --ok: #12825f;
+        --warn: #a66512;
         --bad: #b42318;
-        --idle: #7a8492;
-        --shadow: 0 24px 70px -44px rgba(16, 24, 32, 0.5);
+        --idle: #758291;
+        --shadow: 0 24px 68px -48px rgba(9, 22, 30, 0.64);
+        --shadow-soft: 0 18px 44px -36px rgba(9, 22, 30, 0.42);
         --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
         --sans: "Geist", "Satoshi", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
       }
@@ -39,14 +41,28 @@
       }
 
       body {
+        position: relative;
         min-height: 100%;
         margin: 0;
         background:
-          linear-gradient(135deg, rgba(23, 120, 111, 0.08), transparent 34%),
-          linear-gradient(180deg, #fbfcfd 0, var(--bg) 42%, #eef2f5 100%);
+          linear-gradient(135deg, rgba(23, 120, 111, 0.09), transparent 32%),
+          linear-gradient(180deg, #fbfdfc 0, var(--bg) 46%, #eef4f3 100%);
         color: var(--ink);
         font-family: var(--sans);
         letter-spacing: 0;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(11, 21, 26, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(11, 21, 26, 0.035) 1px, transparent 1px);
+        background-size: 42px 42px;
+        mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.75), transparent 76%);
       }
 
       button,
@@ -60,19 +76,22 @@
         min-height: 38px;
         padding: 0 14px;
         border: 1px solid var(--line-strong);
-        border-radius: 7px;
+        border-radius: 8px;
         background: var(--surface);
         color: var(--ink);
         cursor: pointer;
         transition:
-          transform 150ms ease,
-          border-color 150ms ease,
-          background 150ms ease,
-          color 150ms ease;
+          transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+          border-color 220ms ease,
+          background 220ms ease,
+          color 220ms ease,
+          box-shadow 220ms ease;
       }
 
       button:hover {
         border-color: var(--accent);
+        box-shadow: 0 10px 24px -22px rgba(9, 22, 30, 0.64);
+        transform: translateY(-1px);
       }
 
       button:active {
@@ -81,7 +100,7 @@
 
       button.primary {
         border-color: var(--accent);
-        background: var(--accent);
+        background: linear-gradient(180deg, var(--accent), var(--accent-strong));
         color: #ffffff;
       }
 
@@ -101,10 +120,14 @@
         min-height: 38px;
         padding: 0 12px;
         border: 1px solid var(--line-strong);
-        border-radius: 7px;
+        border-radius: 8px;
         background: #ffffff;
         color: var(--ink);
         outline: none;
+        transition:
+          border-color 180ms ease,
+          box-shadow 180ms ease,
+          background 180ms ease;
       }
 
       textarea {
@@ -118,7 +141,7 @@
       select:focus,
       textarea:focus {
         border-color: var(--accent);
-        box-shadow: 0 0 0 3px rgba(23, 120, 111, 0.13);
+        box-shadow: 0 0 0 3px rgba(23, 120, 111, 0.12);
       }
 
       label {
@@ -144,10 +167,12 @@
       }
 
       .login-screen {
+        position: relative;
+        z-index: 1;
         min-height: 100dvh;
         display: grid;
-        grid-template-columns: minmax(280px, 1fr) minmax(360px, 440px);
-        gap: 64px;
+        grid-template-columns: minmax(320px, 1.25fr) minmax(360px, 440px);
+        gap: 76px;
         align-items: center;
         width: min(1180px, calc(100% - 40px));
         margin: 0 auto;
@@ -164,7 +189,7 @@
         width: 42px;
         height: 42px;
         place-items: center;
-        border: 1px solid rgba(23, 120, 111, 0.24);
+        border: 1px solid var(--accent-line);
         border-radius: 8px;
         background: #ffffff;
         color: var(--accent-strong);
@@ -177,7 +202,7 @@
         color: var(--accent-strong);
         font-size: 12px;
         font-weight: 760;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
       }
 
@@ -199,13 +224,15 @@
         max-width: 620px;
         color: var(--muted);
         font-size: 15px;
-        line-height: 1.8;
+        line-height: 1.75;
       }
 
       .login-card {
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: rgba(255, 255, 255, 0.9);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.88)),
+          var(--surface);
         box-shadow: var(--shadow);
         padding: 24px;
       }
@@ -220,9 +247,11 @@
       }
 
       .app-shell {
+        position: relative;
+        z-index: 1;
         min-height: 100dvh;
         display: grid;
-        grid-template-columns: 248px minmax(0, 1fr);
+        grid-template-columns: 264px minmax(0, 1fr);
       }
 
       .sidebar {
@@ -232,9 +261,11 @@
         display: grid;
         grid-template-rows: auto 1fr auto;
         gap: 18px;
-        padding: 18px;
+        padding: 20px 18px;
+        border-right: 1px solid rgba(234, 241, 242, 0.08);
         background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 38%),
+          linear-gradient(135deg, rgba(23, 120, 111, 0.1), transparent 42%),
           var(--sidebar);
         color: #e9f0f3;
       }
@@ -266,7 +297,7 @@
 
       .nav-group {
         display: grid;
-        gap: 6px;
+        gap: 7px;
         align-content: start;
       }
 
@@ -285,19 +316,22 @@
         grid-template-columns: 22px 1fr;
         gap: 10px;
         align-items: center;
-        min-height: 40px;
+        min-height: 42px;
         padding: 0 11px;
         border-color: transparent;
         background: transparent;
         color: rgba(233, 240, 243, 0.76);
         text-align: left;
+        box-shadow: none;
       }
 
       .nav-item:hover,
       .nav-item.active {
-        border-color: rgba(255, 255, 255, 0.08);
-        background: rgba(255, 255, 255, 0.07);
+        border-color: rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.075);
         color: #ffffff;
+        transform: translateY(0);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
       }
 
       .nav-icon {
@@ -328,16 +362,24 @@
 
       .workspace {
         min-width: 0;
-        padding: 18px 22px 28px;
+        width: min(100%, 1720px);
+        margin: 0 auto;
+        padding: 18px 28px 36px;
       }
 
       .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 3;
         display: grid;
         grid-template-columns: minmax(280px, 1fr) auto;
         gap: 16px;
         align-items: center;
-        min-height: 72px;
+        min-height: 76px;
         margin-bottom: 18px;
+        padding: 12px 0;
+        background: linear-gradient(180deg, rgba(246, 249, 248, 0.94), rgba(246, 249, 248, 0.72));
+        backdrop-filter: blur(16px);
       }
 
       .page-kicker {
@@ -369,7 +411,7 @@
 
       .page-title {
         margin-top: 5px;
-        font-size: clamp(26px, 2.6vw, 38px);
+        font-size: clamp(27px, 2.3vw, 38px);
         line-height: 1;
         font-weight: 820;
       }
@@ -396,21 +438,29 @@
 
       .summary {
         display: grid;
-        grid-template-columns: 1.2fr repeat(4, minmax(130px, 0.72fr));
+        grid-template-columns: minmax(240px, 1.35fr) repeat(4, minmax(132px, 0.72fr));
         border: 1px solid var(--line);
         border-radius: 8px;
         overflow: hidden;
-        background: var(--surface);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.9)),
+          var(--surface);
         box-shadow: var(--shadow);
       }
 
       .summary-cell {
-        min-height: 92px;
+        min-height: 98px;
         padding: 16px 18px;
         display: grid;
         align-content: center;
         gap: 8px;
         border-right: 1px solid var(--line);
+      }
+
+      .summary-cell:first-child {
+        background:
+          linear-gradient(135deg, rgba(23, 120, 111, 0.12), transparent 58%),
+          var(--surface-soft);
       }
 
       .summary-cell:last-child {
@@ -446,14 +496,14 @@
 
       .grid-2 {
         display: grid;
-        grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.9fr);
+        grid-template-columns: minmax(0, 1.38fr) minmax(360px, 0.82fr);
         gap: 18px;
         align-items: start;
       }
 
       .grid-3 {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: minmax(280px, 1.28fr) repeat(2, minmax(220px, 0.86fr));
         gap: 18px;
       }
 
@@ -464,7 +514,7 @@
       }
 
       .nodes-list-panel .table-wrap {
-        max-height: 360px;
+        max-height: 320px;
       }
 
       .node-detail-panel {
@@ -473,27 +523,30 @@
 
       .node-detail-panel .panel-head {
         position: sticky;
-        top: 0;
-        z-index: 1;
+        top: 82px;
+        z-index: 2;
       }
 
       .panel {
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: rgba(255, 255, 255, 0.92);
-        box-shadow: var(--shadow);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.91)),
+          var(--surface);
+        box-shadow: var(--shadow-soft);
         overflow: hidden;
       }
 
       .panel-head {
-        min-height: 62px;
+        min-height: 64px;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 14px;
         padding: 15px 18px;
         border-bottom: 1px solid var(--line);
-        background: rgba(249, 250, 251, 0.72);
+        background: rgba(247, 250, 249, 0.78);
+        backdrop-filter: blur(12px);
       }
 
       .panel-title {
@@ -519,7 +572,16 @@
         padding: 18px;
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: var(--surface);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.88)),
+          var(--surface);
+        box-shadow: var(--shadow-soft);
+      }
+
+      .insight-card:first-child {
+        background:
+          linear-gradient(135deg, rgba(23, 120, 111, 0.13), transparent 56%),
+          var(--surface);
       }
 
       .insight-card h3 {
@@ -569,11 +631,16 @@
         font-weight: 820;
         letter-spacing: 0.04em;
         text-transform: uppercase;
+        position: sticky;
+        top: 0;
+        z-index: 1;
       }
 
       tbody tr {
         cursor: pointer;
-        transition: background 150ms ease;
+        transition:
+          background 180ms ease,
+          box-shadow 180ms ease;
       }
 
       tbody tr:hover,
@@ -708,7 +775,7 @@
 
       .node-detail-panel .detail-overview {
         display: grid;
-        grid-template-columns: minmax(320px, 0.72fr) minmax(0, 1.28fr);
+        grid-template-columns: minmax(360px, 0.82fr) minmax(0, 1.18fr);
         gap: 18px;
         align-items: start;
         padding: 18px;
@@ -719,7 +786,7 @@
       .node-detail-panel .detail-ops-grid .detail-section {
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: rgba(249, 250, 251, 0.58);
+        background: rgba(247, 250, 249, 0.78);
       }
 
       .node-detail-panel .detail-overview .detail-section {
@@ -736,12 +803,12 @@
       }
 
       .node-detail-panel .counter-grid {
-        grid-template-columns: repeat(5, minmax(120px, 1fr));
+        grid-template-columns: repeat(5, minmax(124px, 1fr));
       }
 
       .node-detail-panel .detail-ops-grid {
         display: grid;
-        grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.7fr);
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 0.36fr);
         gap: 18px;
         padding: 18px;
         border-bottom: 1px solid var(--line);
@@ -766,7 +833,7 @@
 
       .metric {
         min-width: 0;
-        padding-top: 12px;
+        padding: 12px 0 0;
         border-top: 1px solid var(--line);
       }
 
@@ -779,13 +846,14 @@
       .metric-value {
         margin-top: 6px;
         font-family: var(--mono);
-        font-size: 17px;
+        font-size: 16px;
         font-weight: 820;
         overflow-wrap: anywhere;
       }
 
       .section-title {
         margin-bottom: 12px;
+        color: var(--ink);
         font-size: 13px;
         font-weight: 820;
       }
@@ -849,7 +917,42 @@
         padding: 14px;
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: var(--surface-soft);
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      details.operation-card {
+        padding: 0;
+      }
+
+      details.operation-card > summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 48px;
+        padding: 0 14px;
+        color: var(--ink);
+      }
+
+      details.operation-card > summary::after {
+        content: "展开";
+        color: var(--accent-strong);
+        font-size: 12px;
+      }
+
+      details.operation-card[open] > summary {
+        border-bottom: 1px solid var(--line);
+        margin-bottom: 0;
+      }
+
+      details.operation-card[open] > summary::after {
+        content: "收起";
+      }
+
+      .operation-card-body {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
       }
 
       .operation-title {
@@ -864,7 +967,7 @@
       }
 
       .node-actions-grid {
-        grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.78fr) minmax(320px, 0.92fr);
+        grid-template-columns: minmax(0, 0.92fr) minmax(260px, 0.72fr) minmax(300px, 0.86fr);
         align-items: start;
       }
 
@@ -1111,7 +1214,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.24.0</span>
+          <span class="mono">v0.25.0</span>
         </div>
       </aside>
 
@@ -2053,9 +2156,13 @@
             <div class="detail-section">
               <div class="section-title">节点操作</div>
               <div class="action-grid node-actions-grid">
-              <div class="operation-card">
-                <div class="operation-title">编辑配置</div>
+              <details class="operation-card">
+                <summary>
+                  <span class="strong">编辑配置</span>
+                  <span class="muted">网络与标签</span>
+                </summary>
                 <form data-action="edit-node">
+                  <div class="operation-card-body">
                   <div class="form-grid">
                     <div class="field">
                       <label>节点名称</label>
@@ -2118,8 +2225,9 @@
                   <div class="form-actions">
                     <button class="primary" type="submit">保存配置</button>
                   </div>
+                  </div>
                 </form>
-              </div>
+              </details>
               <div class="operation-card">
                 <div class="operation-title">调整状态</div>
                 <form data-action="status">
