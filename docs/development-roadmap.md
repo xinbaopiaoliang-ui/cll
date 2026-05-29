@@ -283,6 +283,13 @@ Done in `v0.27.0`:
   and bandwidth profile, then inspect the selected candidate node, route target,
   transport, credential expiry, token preview, and raw scheduling response.
 
+Done in `v0.28.0`:
+
+- Upgrade the dashboard diagnostic into a full server-side connectivity test.
+  The admin API can now run connect-intent, UDP probe, and session.data relay
+  checks from the control plane, then return probe latency, relay latency,
+  upstream response text, selected route, and exact failure step to `/admin`.
+
 Goals:
 
 - Add nonce replay storage for node report requests.

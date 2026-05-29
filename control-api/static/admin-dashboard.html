@@ -1075,6 +1075,35 @@
         overflow-wrap: anywhere;
       }
 
+      .diagnostic-strip {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .diagnostic-step {
+        display: grid;
+        gap: 6px;
+        min-height: 82px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .diagnostic-step-title {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .diagnostic-step-value {
+        font-family: var(--mono);
+        font-size: 17px;
+        font-weight: 820;
+      }
+
       .action-grid {
         display: grid;
         gap: 12px;
@@ -1310,6 +1339,7 @@
         }
 
         .detail-grid,
+        .diagnostic-strip,
         .node-detail-panel .detail-grid,
         .node-actions-grid .operation-card:first-child .form-grid,
         .form-grid {
@@ -1377,7 +1407,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.27.0</span>
+          <span class="mono">v0.28.0</span>
         </div>
       </aside>
 
@@ -1630,6 +1660,26 @@
                         <option value="slow">较慢</option>
                       </select>
                       <div class="form-help">用于模拟客户端请求，查看控制面实际选择的节点和路由。</div>
+                    </div>
+                    <div class="field">
+                      <label for="diagnosticPayload">测试载荷</label>
+                      <input id="diagnosticPayload" name="payload" value="hello" autocomplete="off" />
+                    </div>
+                    <div class="field">
+                      <label for="diagnosticTimeoutSec">节点响应超时</label>
+                      <input id="diagnosticTimeoutSec" name="timeout_sec" type="number" min="1" max="15" value="3" />
+                      <div class="form-help">控制面等待节点 UDP 回包的秒数。</div>
+                    </div>
+                    <div class="field">
+                      <label for="diagnosticResponseTimeoutMs">上游响应超时</label>
+                      <input
+                        id="diagnosticResponseTimeoutMs"
+                        name="response_timeout_ms"
+                        type="number"
+                        min="1"
+                        max="10000"
+                        value="500"
+                      />
                     </div>
                   </div>
                   <div class="message error-text hidden" id="diagnosticError"></div>
@@ -2793,20 +2843,54 @@
           const value = textOrNull(form.elements[key]?.value);
           if (value) payload[key] = value;
         }
+        const testPayload = textOrNull(form.elements.payload?.value);
+        const timeoutSec = numberOrNull(form.elements.timeout_sec?.value);
+        const responseTimeoutMs = numberOrNull(form.elements.response_timeout_ms?.value);
+        if (testPayload) payload.payload = testPayload;
+        if (timeoutSec) payload.timeout_sec = timeoutSec;
+        if (responseTimeoutMs) payload.response_timeout_ms = responseTimeoutMs;
         return payload;
       }
 
       function renderDiagnosticResult(data) {
-        const candidates = data.candidates || [];
+        const intent = data.connect_intent || data;
+        const candidates = intent.candidates || [];
+        const statusOk = data.status === "ok";
+        const selected = data.node;
+        const probe = data.probe;
+        const sessionData = data.session_data;
+        const error = data.error;
         els.diagnosticResult.classList.toggle("empty", candidates.length === 0);
         els.diagnosticResult.innerHTML = `
+          <div class="diagnostic-strip">
+            <div class="diagnostic-step">
+              <div class="diagnostic-step-title">控制面调度</div>
+              <div class="diagnostic-step-value">${escapeHtml(intent.intent_id || "--")}</div>
+              <span class="chip ok">已生成凭证</span>
+            </div>
+            <div class="diagnostic-step">
+              <div class="diagnostic-step-title">节点探测</div>
+              <div class="diagnostic-step-value">${probe ? `${probe.latency_ms}ms` : "--"}</div>
+              <span class="chip ${probe ? "ok" : "warn"}">${probe ? "Probe 正常" : "等待结果"}</span>
+            </div>
+            <div class="diagnostic-step">
+              <div class="diagnostic-step-title">上游转发</div>
+              <div class="diagnostic-step-value">${sessionData ? `${sessionData.latency_ms}ms` : "--"}</div>
+              <span class="chip ${statusOk ? "ok" : "bad"}">${escapeHtml(
+                statusOk ? "连通正常" : error?.code || "未完成",
+              )}</span>
+            </div>
+          </div>
           <div class="detail-grid">
-            ${metric("连接意图", data.intent_id || "--")}
-            ${metric("有效期", `${data.ttl_sec || 0} 秒`)}
+            ${metric("诊断状态", statusOk ? "通过" : "失败")}
+            ${metric("连接意图", intent.intent_id || "--")}
+            ${metric("有效期", `${intent.ttl_sec || 0} 秒`)}
             ${metric("候选节点", candidates.length)}
-            ${metric("客户端运营商", ispText(data.client?.client_isp))}
-            ${metric("客户端 IP", data.client?.client_ip || "--")}
-            ${metric("带宽偏好", qualityText(data.client?.bandwidth_quality))}
+            ${metric("客户端运营商", ispText(intent.client?.client_isp))}
+            ${metric("客户端 IP", intent.client?.client_ip || "--")}
+            ${metric("带宽偏好", qualityText(intent.client?.bandwidth_quality))}
+            ${metric("节点版本", selected?.node_version || "--")}
+            ${metric("测试响应", sessionData?.response_payload_text || sessionData?.status || "--")}
           </div>
           <div class="candidate-list">
             ${
@@ -2815,6 +2899,7 @@
                   const node = state.nodes.find((item) => item.id === candidate.node_id);
                   const endpoint = `${candidate.host}:${candidate.port}`;
                   const token = candidate.credential?.token || "";
+                  const isSelected = selected?.node_id === candidate.node_id;
                   return `
                     <div class="candidate-card">
                       <div class="candidate-head">
@@ -2822,8 +2907,8 @@
                           <div class="strong">${escapeHtml(node?.name || `节点 ${candidate.node_id}`)}</div>
                           <div class="cell-note mono">${escapeHtml(endpoint)} / ID ${candidate.node_id}</div>
                         </div>
-                        <span class="chip ${node ? statusClass(node) : "warn"}">${escapeHtml(
-                          node ? statusText(node) : "候选节点",
+                        <span class="chip ${isSelected ? (statusOk ? "ok" : "bad") : node ? statusClass(node) : "warn"}">${escapeHtml(
+                          isSelected ? (statusOk ? "已通过" : "诊断失败") : node ? statusText(node) : "候选节点",
                         )}</span>
                       </div>
                       <div class="candidate-body">
@@ -2846,6 +2931,11 @@
               '<div class="empty">没有候选节点。请检查游戏路由是否启用、节点是否在线、节点密钥是否存在。</div>'
             }
           </div>
+          ${
+            error
+              ? `<div class="message error-text">失败步骤：${escapeHtml(error.step)} / ${escapeHtml(error.code)} / ${escapeHtml(error.message)}</div>`
+              : ""
+          }
           <details class="health-json">
             <summary>原始诊断数据</summary>
             <pre>${escapeHtml(JSON.stringify(data, null, 2))}</pre>
@@ -2857,15 +2947,15 @@
         clearInlineError(els.diagnosticError);
         els.diagnosticResult.classList.add("empty");
         els.diagnosticResult.innerHTML = `<span class="skeleton"></span>`;
-        const data = await api("/api/client/v1/connect-intent", {
+        const data = await api("/api/admin/v1/connectivity-diagnostic", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(diagnosticPayloadFromForm(form)),
         });
         renderDiagnosticResult(data);
-        els.statusLine.textContent = `调度诊断完成 / ${data.candidates?.length || 0} 个候选节点`;
-        els.statusLine.classList.add("connected");
-        els.statusLine.classList.remove("error-state");
+        els.statusLine.textContent = `连通性诊断${data.status === "ok" ? "通过" : "失败"} / ${data.node?.address || "--"}`;
+        els.statusLine.classList.toggle("connected", data.status === "ok");
+        els.statusLine.classList.toggle("error-state", data.status !== "ok");
       }
 
       async function createNode(form) {
@@ -3063,7 +3153,7 @@
         runConnectDiagnostic(els.diagnosticForm).catch((error) => {
           showInlineError(els.diagnosticError, error.message);
           els.diagnosticResult.classList.add("empty");
-          els.diagnosticResult.textContent = "诊断失败，请检查游戏路由、节点状态和请求参数。";
+          els.diagnosticResult.textContent = "诊断失败，请检查游戏路由、节点状态、UDP 防火墙和请求参数。";
         });
       });
 

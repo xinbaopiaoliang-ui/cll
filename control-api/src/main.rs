@@ -21,9 +21,12 @@ use sqlx::{mysql::MySqlPoolOptions, FromRow, MySql, MySqlPool, QueryBuilder};
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::net::TcpListener;
+use tokio::{
+    net::{TcpListener, UdpSocket},
+    time::timeout,
+};
 use tracing::{error, info};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -42,6 +45,11 @@ const DEFAULT_INSTALL_URL: &str =
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const MIN_NODE_VERSION: &str = "0.1.0";
 const ADMIN_DASHBOARD_HTML: &str = include_str!("../static/admin-dashboard.html");
+const PROTOCOL_VERSION: &str = "xaccel/1";
+const UDP_BUFFER_BYTES: usize = 64 * 1024;
+const DEFAULT_DIAGNOSTIC_PAYLOAD: &str = "hello";
+const DEFAULT_DIAGNOSTIC_TIMEOUT_SEC: u64 = 3;
+const DEFAULT_DIAGNOSTIC_RESPONSE_TIMEOUT_MS: u64 = 500;
 
 #[derive(Debug, Parser)]
 #[command(name = "xaccel-control-api")]
@@ -91,6 +99,168 @@ struct ConnectIntentResponse {
     ttl_sec: u64,
     client: ClientContext,
     candidates: Vec<NodeCandidate>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminConnectivityDiagnosticRequest {
+    user_id: u64,
+    device_id: String,
+    game_id: u64,
+    platform: Option<String>,
+    client_isp: Option<String>,
+    client_ip: Option<String>,
+    bandwidth_quality: Option<String>,
+    payload: Option<String>,
+    timeout_sec: Option<u64>,
+    response_timeout_ms: Option<u64>,
+    candidate_index: Option<usize>,
+    skip_session_data: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminConnectivityDiagnosticResponse {
+    status: &'static str,
+    version: &'static str,
+    server_time: u64,
+    connect_intent: ConnectIntentResponse,
+    selected_candidate_index: usize,
+    node: DiagnosticNodeSummary,
+    probe: Option<DiagnosticProbeSummary>,
+    session_data: Option<DiagnosticSessionDataSummary>,
+    error: Option<DiagnosticStepError>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticNodeSummary {
+    node_id: u64,
+    node_version: Option<String>,
+    address: String,
+    area: String,
+    tag: String,
+    transports: Vec<String>,
+    bandwidth_quality: String,
+    route: ClientRouteClaims,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticProbeSummary {
+    latency_ms: u128,
+    transport: String,
+    session_id: String,
+    ttl_sec: u64,
+    intent_id: Option<String>,
+    route_target_addr: Option<String>,
+    credential_valid: bool,
+    credential_expires_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticSessionDataSummary {
+    latency_ms: u128,
+    status: String,
+    request_payload_bytes: u64,
+    response_payload_bytes: u64,
+    response_payload_base64: String,
+    response_payload_text: Option<String>,
+    target_addr: Option<String>,
+    relay: Option<DiagnosticRelaySummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticRelaySummary {
+    mode: String,
+    timeout_ms: u64,
+    timed_out: bool,
+    upstream_tx_bytes: u64,
+    upstream_rx_bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticStepError {
+    step: &'static str,
+    code: String,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct NodeProbeRequest {
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    protocol: &'static str,
+    client_nonce: String,
+    user_id: u64,
+    device_id: String,
+    game_id: u64,
+    transport: &'static str,
+    token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeProbeResponse {
+    #[serde(rename = "type")]
+    message_type: String,
+    node_id: Option<u64>,
+    node_version: String,
+    transport: String,
+    session: NodeProbeSession,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeProbeSession {
+    session_id: String,
+    ttl_sec: u64,
+    intent_id: Option<String>,
+    route_target_addr: Option<String>,
+    credential_valid: bool,
+    credential_expires_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct NodeSessionDataRequest {
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    protocol: &'static str,
+    session_id: String,
+    client_nonce: String,
+    payload: String,
+    response_timeout_ms: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeSessionDataResponse {
+    #[serde(rename = "type")]
+    message_type: String,
+    status: String,
+    payload: String,
+    payload_bytes: u64,
+    request_payload_bytes: u64,
+    target: Option<NodeTargetInfo>,
+    relay: Option<NodeRelayInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeTargetInfo {
+    address: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeRelayInfo {
+    mode: String,
+    timeout_ms: u64,
+    timed_out: bool,
+    upstream_tx_bytes: u64,
+    upstream_rx_bytes: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeErrorResponse {
+    error: NodeErrorBody,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeErrorBody {
+    code: String,
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -755,6 +925,10 @@ async fn main() -> anyhow::Result<()> {
             post(admin_create_bootstrap_token),
         )
         .route(
+            "/api/admin/v1/connectivity-diagnostic",
+            post(admin_connectivity_diagnostic),
+        )
+        .route(
             "/api/admin/v1/game-route-rules",
             get(admin_list_route_rules).post(admin_create_route_rule),
         )
@@ -881,6 +1055,17 @@ async fn connect_intent(
 ) -> Result<Json<ConnectIntentResponse>, AppError> {
     validate_connect_intent_request(&request)?;
     let response = issue_connect_intent(&state.pool, state.token_ttl_sec, request).await?;
+    Ok(Json(response))
+}
+
+async fn admin_connectivity_diagnostic(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<AdminConnectivityDiagnosticRequest>,
+) -> Result<Json<AdminConnectivityDiagnosticResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    validate_connectivity_diagnostic_request(&request)?;
+    let response = run_connectivity_diagnostic(&state, request).await?;
     Ok(Json(response))
 }
 
@@ -1263,6 +1448,411 @@ async fn admin_delete_route_rule(
         deleted,
         server_time: now_unix(),
     }))
+}
+
+async fn run_connectivity_diagnostic(
+    state: &AppState,
+    request: AdminConnectivityDiagnosticRequest,
+) -> Result<AdminConnectivityDiagnosticResponse, AppError> {
+    let timeout_sec = request
+        .timeout_sec
+        .unwrap_or(DEFAULT_DIAGNOSTIC_TIMEOUT_SEC);
+    let response_timeout_ms = request
+        .response_timeout_ms
+        .unwrap_or(DEFAULT_DIAGNOSTIC_RESPONSE_TIMEOUT_MS);
+    let payload = request
+        .payload
+        .clone()
+        .unwrap_or_else(|| DEFAULT_DIAGNOSTIC_PAYLOAD.to_string());
+    let candidate_index = request.candidate_index.unwrap_or(0);
+    let connect_request = ConnectIntentRequest {
+        user_id: request.user_id,
+        device_id: request.device_id.clone(),
+        game_id: request.game_id,
+        platform: request.platform.clone(),
+        client_isp: request.client_isp.clone(),
+        client_ip: request.client_ip.clone(),
+        bandwidth_quality: request.bandwidth_quality.clone(),
+    };
+    let connect_intent =
+        issue_connect_intent(&state.pool, state.token_ttl_sec, connect_request).await?;
+    let candidate = connect_intent
+        .candidates
+        .get(candidate_index)
+        .ok_or_else(|| {
+            AppError::bad_request(
+                "invalid_candidate_index",
+                "candidate_index is outside the returned candidate list",
+            )
+        })?;
+
+    let mut node = DiagnosticNodeSummary {
+        node_id: candidate.node_id,
+        node_version: None,
+        address: format!("{}:{}", candidate.host, candidate.port),
+        area: candidate.area.clone(),
+        tag: candidate.tag.clone(),
+        transports: candidate
+            .transports
+            .iter()
+            .map(|transport| (*transport).to_string())
+            .collect(),
+        bandwidth_quality: candidate.bandwidth_quality.clone(),
+        route: candidate.route.clone(),
+    };
+    let node_addr = match node.address.parse::<SocketAddr>() {
+        Ok(addr) => addr,
+        Err(error) => {
+            return Ok(failed_diagnostic_response(
+                connect_intent,
+                candidate_index,
+                node,
+                "probe",
+                "invalid_node_address",
+                format!("selected node address is invalid: {error}"),
+            ));
+        }
+    };
+    if !candidate
+        .transports
+        .iter()
+        .any(|transport| transport.eq_ignore_ascii_case("udp"))
+    {
+        return Ok(failed_diagnostic_response(
+            connect_intent,
+            candidate_index,
+            node,
+            "probe",
+            "udp_not_supported",
+            "selected node does not advertise UDP transport",
+        ));
+    }
+
+    let deadline = Duration::from_secs(timeout_sec);
+    let socket = match UdpSocket::bind("0.0.0.0:0").await {
+        Ok(socket) => socket,
+        Err(error) => {
+            return Ok(failed_diagnostic_response(
+                connect_intent,
+                candidate_index,
+                node,
+                "probe",
+                "udp_bind_failed",
+                format!("failed to bind local UDP socket: {error}"),
+            ));
+        }
+    };
+    if let Err(error) = socket.connect(node_addr).await {
+        return Ok(failed_diagnostic_response(
+            connect_intent,
+            candidate_index,
+            node,
+            "probe",
+            "udp_connect_failed",
+            format!("failed to connect UDP socket to node: {error}"),
+        ));
+    }
+
+    let probe_request = NodeProbeRequest {
+        message_type: "probe",
+        protocol: PROTOCOL_VERSION,
+        client_nonce: format!("diag-probe-{}-{}", request.user_id, now_unix()),
+        user_id: request.user_id,
+        device_id: request.device_id.clone(),
+        game_id: request.game_id,
+        transport: "udp",
+        token: candidate.credential.token.clone(),
+    };
+    let probe_timer = Instant::now();
+    let probe_value = match send_node_json_udp(&socket, &probe_request, deadline).await {
+        Ok(value) => value,
+        Err(error) => {
+            return Ok(failed_diagnostic_response(
+                connect_intent,
+                candidate_index,
+                node,
+                "probe",
+                "udp_probe_failed",
+                error.to_string(),
+            ));
+        }
+    };
+    if let Some(error) = node_response_error(&probe_value, "probe") {
+        return Ok(diagnostic_response(
+            "failed",
+            connect_intent,
+            candidate_index,
+            node,
+            None,
+            None,
+            Some(error),
+        ));
+    }
+    let probe_response: NodeProbeResponse = match serde_json::from_value(probe_value) {
+        Ok(response) => response,
+        Err(error) => {
+            return Ok(failed_diagnostic_response(
+                connect_intent,
+                candidate_index,
+                node,
+                "probe",
+                "invalid_probe_response",
+                format!("failed to decode probe response: {error}"),
+            ));
+        }
+    };
+    if probe_response.message_type != "probe.ok" {
+        return Ok(failed_diagnostic_response(
+            connect_intent,
+            candidate_index,
+            node,
+            "probe",
+            "unexpected_probe_response",
+            format!(
+                "unexpected probe response type: {}",
+                probe_response.message_type
+            ),
+        ));
+    }
+    if probe_response
+        .node_id
+        .is_some_and(|node_id| node_id != node.node_id)
+    {
+        return Ok(failed_diagnostic_response(
+            connect_intent,
+            candidate_index,
+            node,
+            "probe",
+            "node_id_mismatch",
+            "probe response node_id does not match selected candidate",
+        ));
+    }
+
+    node.node_version = Some(probe_response.node_version.clone());
+    let probe = DiagnosticProbeSummary {
+        latency_ms: probe_timer.elapsed().as_millis(),
+        transport: probe_response.transport,
+        session_id: probe_response.session.session_id.clone(),
+        ttl_sec: probe_response.session.ttl_sec,
+        intent_id: probe_response.session.intent_id,
+        route_target_addr: probe_response.session.route_target_addr,
+        credential_valid: probe_response.session.credential_valid,
+        credential_expires_at: probe_response.session.credential_expires_at,
+    };
+
+    if request.skip_session_data.unwrap_or(false) {
+        return Ok(diagnostic_response(
+            "ok",
+            connect_intent,
+            candidate_index,
+            node,
+            Some(probe),
+            None,
+            None,
+        ));
+    }
+
+    let session_result = run_diagnostic_session_data(
+        &socket,
+        request.user_id,
+        &probe.session_id,
+        &payload,
+        response_timeout_ms,
+        deadline,
+    )
+    .await;
+    let session_data = match session_result {
+        Ok(session_data) => session_data,
+        Err(error) => {
+            return Ok(diagnostic_response(
+                "failed",
+                connect_intent,
+                candidate_index,
+                node,
+                Some(probe),
+                None,
+                Some(error),
+            ));
+        }
+    };
+    if session_data.status != "forwarded" {
+        let status = session_data.status.clone();
+        return Ok(diagnostic_response(
+            "failed",
+            connect_intent,
+            candidate_index,
+            node,
+            Some(probe),
+            Some(session_data),
+            Some(DiagnosticStepError {
+                step: "session.data",
+                code: status.clone(),
+                message: format!("upstream relay did not complete successfully: {status}"),
+            }),
+        ));
+    }
+
+    Ok(diagnostic_response(
+        "ok",
+        connect_intent,
+        candidate_index,
+        node,
+        Some(probe),
+        Some(session_data),
+        None,
+    ))
+}
+
+async fn run_diagnostic_session_data(
+    socket: &UdpSocket,
+    user_id: u64,
+    session_id: &str,
+    payload: &str,
+    response_timeout_ms: u64,
+    deadline: Duration,
+) -> Result<DiagnosticSessionDataSummary, DiagnosticStepError> {
+    let request = NodeSessionDataRequest {
+        message_type: "session.data",
+        protocol: PROTOCOL_VERSION,
+        session_id: session_id.to_string(),
+        client_nonce: format!("diag-data-{}-{}", user_id, now_unix()),
+        payload: BASE64.encode(payload.as_bytes()),
+        response_timeout_ms,
+    };
+    let timer = Instant::now();
+    let response_value = send_node_json_udp(socket, &request, deadline)
+        .await
+        .map_err(|error| DiagnosticStepError {
+            step: "session.data",
+            code: "udp_session_data_failed".to_string(),
+            message: error.to_string(),
+        })?;
+    if let Some(error) = node_response_error(&response_value, "session.data") {
+        return Err(error);
+    }
+    let response: NodeSessionDataResponse =
+        serde_json::from_value(response_value).map_err(|error| DiagnosticStepError {
+            step: "session.data",
+            code: "invalid_session_data_response".to_string(),
+            message: format!("failed to decode session.data response: {error}"),
+        })?;
+    if response.message_type != "session.data.ok" {
+        return Err(DiagnosticStepError {
+            step: "session.data",
+            code: "unexpected_session_data_response".to_string(),
+            message: format!(
+                "unexpected session.data response type: {}",
+                response.message_type
+            ),
+        });
+    }
+
+    Ok(DiagnosticSessionDataSummary {
+        latency_ms: timer.elapsed().as_millis(),
+        status: response.status,
+        request_payload_bytes: response.request_payload_bytes,
+        response_payload_bytes: response.payload_bytes,
+        response_payload_text: decode_payload_text(&response.payload),
+        response_payload_base64: response.payload,
+        target_addr: response.target.map(|target| target.address),
+        relay: response.relay.map(|relay| DiagnosticRelaySummary {
+            mode: relay.mode,
+            timeout_ms: relay.timeout_ms,
+            timed_out: relay.timed_out,
+            upstream_tx_bytes: relay.upstream_tx_bytes,
+            upstream_rx_bytes: relay.upstream_rx_bytes,
+        }),
+    })
+}
+
+async fn send_node_json_udp<T: Serialize>(
+    socket: &UdpSocket,
+    message: &T,
+    deadline: Duration,
+) -> anyhow::Result<Value> {
+    let mut encoded = serde_json::to_vec(message).context("failed to encode UDP JSON message")?;
+    encoded.push(b'\n');
+    socket
+        .send(&encoded)
+        .await
+        .context("failed to send UDP message")?;
+
+    let mut buf = vec![0_u8; UDP_BUFFER_BYTES];
+    let size = timeout(deadline, socket.recv(&mut buf))
+        .await
+        .context("timed out waiting for UDP response")?
+        .context("failed to receive UDP response")?;
+    serde_json::from_slice(&buf[..size]).context("failed to decode UDP JSON response")
+}
+
+fn node_response_error(value: &Value, step: &'static str) -> Option<DiagnosticStepError> {
+    let Some(message_type) = value.get("type").and_then(Value::as_str) else {
+        return Some(DiagnosticStepError {
+            step,
+            code: "missing_response_type".to_string(),
+            message: format!("{step} response is missing type"),
+        });
+    };
+    if !message_type.ends_with(".error") {
+        return None;
+    }
+    match serde_json::from_value::<NodeErrorResponse>(value.clone()) {
+        Ok(error) => Some(DiagnosticStepError {
+            step,
+            code: error.error.code,
+            message: error.error.message,
+        }),
+        Err(error) => Some(DiagnosticStepError {
+            step,
+            code: "invalid_error_response".to_string(),
+            message: format!("failed to decode {step} error response: {error}"),
+        }),
+    }
+}
+
+fn diagnostic_response(
+    status: &'static str,
+    connect_intent: ConnectIntentResponse,
+    selected_candidate_index: usize,
+    node: DiagnosticNodeSummary,
+    probe: Option<DiagnosticProbeSummary>,
+    session_data: Option<DiagnosticSessionDataSummary>,
+    error: Option<DiagnosticStepError>,
+) -> AdminConnectivityDiagnosticResponse {
+    AdminConnectivityDiagnosticResponse {
+        status,
+        version: VERSION,
+        server_time: now_unix(),
+        connect_intent,
+        selected_candidate_index,
+        node,
+        probe,
+        session_data,
+        error,
+    }
+}
+
+fn failed_diagnostic_response(
+    connect_intent: ConnectIntentResponse,
+    selected_candidate_index: usize,
+    node: DiagnosticNodeSummary,
+    step: &'static str,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> AdminConnectivityDiagnosticResponse {
+    diagnostic_response(
+        "failed",
+        connect_intent,
+        selected_candidate_index,
+        node,
+        None,
+        None,
+        Some(DiagnosticStepError {
+            step,
+            code: code.into(),
+            message: message.into(),
+        }),
+    )
 }
 
 async fn issue_connect_intent(
@@ -2418,6 +3008,58 @@ fn validate_connect_intent_request(request: &ConnectIntentRequest) -> Result<(),
     Ok(())
 }
 
+fn validate_connectivity_diagnostic_request(
+    request: &AdminConnectivityDiagnosticRequest,
+) -> Result<(), AppError> {
+    let connect_request = ConnectIntentRequest {
+        user_id: request.user_id,
+        device_id: request.device_id.clone(),
+        game_id: request.game_id,
+        platform: request.platform.clone(),
+        client_isp: request.client_isp.clone(),
+        client_ip: request.client_ip.clone(),
+        bandwidth_quality: request.bandwidth_quality.clone(),
+    };
+    validate_connect_intent_request(&connect_request)?;
+    if request
+        .payload
+        .as_deref()
+        .unwrap_or(DEFAULT_DIAGNOSTIC_PAYLOAD)
+        .len()
+        > 1200
+    {
+        return Err(AppError::bad_request(
+            "invalid_payload",
+            "payload must not exceed 1200 bytes",
+        ));
+    }
+    let timeout_sec = request
+        .timeout_sec
+        .unwrap_or(DEFAULT_DIAGNOSTIC_TIMEOUT_SEC);
+    if timeout_sec == 0 || timeout_sec > 15 {
+        return Err(AppError::bad_request(
+            "invalid_timeout",
+            "timeout_sec must be between 1 and 15",
+        ));
+    }
+    let response_timeout_ms = request
+        .response_timeout_ms
+        .unwrap_or(DEFAULT_DIAGNOSTIC_RESPONSE_TIMEOUT_MS);
+    if response_timeout_ms == 0 || response_timeout_ms > 10_000 {
+        return Err(AppError::bad_request(
+            "invalid_response_timeout",
+            "response_timeout_ms must be between 1 and 10000",
+        ));
+    }
+    if request.candidate_index.unwrap_or(0) > 32 {
+        return Err(AppError::bad_request(
+            "invalid_candidate_index",
+            "candidate_index is too large",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_bootstrap_request(request: &BootstrapRequest) -> Result<(), AppError> {
     if request.bootstrap_token.trim().is_empty() {
         return Err(AppError::bad_request(
@@ -3074,6 +3716,11 @@ fn sign_client_token(claims: &ClientTokenClaims, secret: &str) -> anyhow::Result
     Ok(format!("{signing_input}.{signature}"))
 }
 
+fn decode_payload_text(payload: &str) -> Option<String> {
+    let bytes = BASE64.decode(payload.as_bytes()).ok()?;
+    String::from_utf8(bytes).ok()
+}
+
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -3350,6 +3997,33 @@ mod tests {
     }
 
     #[test]
+    fn validates_connectivity_diagnostic_request() {
+        let request = AdminConnectivityDiagnosticRequest {
+            user_id: 1001,
+            device_id: "pc-001".to_string(),
+            game_id: 8888,
+            platform: Some("pc".to_string()),
+            client_isp: Some("telecom".to_string()),
+            client_ip: Some("127.0.0.1".to_string()),
+            bandwidth_quality: Some("fast".to_string()),
+            payload: Some("hello".to_string()),
+            timeout_sec: Some(3),
+            response_timeout_ms: Some(500),
+            candidate_index: Some(0),
+            skip_session_data: Some(false),
+        };
+        validate_connectivity_diagnostic_request(&request).expect("diagnostic request is valid");
+
+        let invalid = AdminConnectivityDiagnosticRequest {
+            timeout_sec: Some(0),
+            ..request
+        };
+        let error = validate_connectivity_diagnostic_request(&invalid).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_timeout");
+    }
+
+    #[test]
     fn rejects_unknown_quality() {
         let mut request = valid_request();
         request.bandwidth_quality = Some("turbo".to_string());
@@ -3432,7 +4106,7 @@ mod tests {
 
     #[test]
     fn verifies_node_handshake_signature() {
-        let body = br#"{"node_id":1,"node_version":"0.27.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
+        let body = br#"{"node_id":1,"node_version":"0.28.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
         let timestamp = now_unix();
         let nonce = "handshake-nonce";
         let body_sha256 = BASE64.encode(Sha256::digest(body));
@@ -3499,7 +4173,7 @@ mod tests {
         let timestamp = now_unix();
         let request = NodeHandshakeRequest {
             node_id: 1,
-            node_version: "0.27.0".to_string(),
+            node_version: "0.28.0".to_string(),
             os: "linux".to_string(),
             arch: "x86_64".to_string(),
             boot_id: "boot-1".to_string(),
@@ -3574,7 +4248,7 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("data-resume-node"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/game-route-rules"));
-        assert!(ADMIN_DASHBOARD_HTML.contains("/api/client/v1/connect-intent"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/connectivity-diagnostic"));
         assert!(ADMIN_DASHBOARD_HTML.contains("method: \"PATCH\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("bootstrap-token"));
     }
