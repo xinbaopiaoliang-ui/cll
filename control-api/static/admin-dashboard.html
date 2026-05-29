@@ -1300,7 +1300,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.26.0</span>
+          <span class="mono">v0.26.1</span>
         </div>
       </aside>
 
@@ -2246,6 +2246,7 @@
         const control = health.control_plane || {};
         const config = health.config || {};
         const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
+        const canResumeScheduling = node.status === "draining" || node.status === "disabled";
 
         els.detailTitle.textContent = node.name;
         els.detailMeta.textContent = `${endpoint} / ID ${node.id}`;
@@ -2385,6 +2386,17 @@
                     <button type="submit">保存状态</button>
                   </div>
                 </form>
+              </div>
+              <div class="operation-card">
+                <div class="operation-title">恢复调度</div>
+                <div class="message">
+                  用于退出排空或禁用保护。提交后节点会先进入离线等待态，下一次健康上报成功后自动恢复在线并重新参与客户端调度。
+                </div>
+                <div class="form-actions">
+                  <button class="primary" type="button" data-resume-node ${canResumeScheduling ? "" : "disabled"}>
+                    ${canResumeScheduling ? "恢复调度" : "当前无需恢复"}
+                  </button>
+                </div>
               </div>
               <div class="operation-card">
                 <div class="operation-title">生成安装命令</div>
@@ -2693,6 +2705,26 @@
         await loadNodes();
       }
 
+      async function resumeNodeScheduling() {
+        if (!state.selectedId) return;
+        const node = state.nodes.find((item) => item.id === Number(state.selectedId));
+        const confirmed = window.confirm(
+          `确定恢复 ${node?.name || `节点 ${state.selectedId}`} 的调度吗？提交后会退出排空或禁用保护，等待节点健康上报恢复在线。`,
+        );
+        if (!confirmed) return;
+
+        await api(`/api/admin/v1/nodes/${state.selectedId}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            status: "offline",
+            reason: "恢复调度：退出排空或禁用保护，等待节点健康上报恢复在线",
+          }),
+        });
+        els.statusLine.textContent = `已提交节点 ${state.selectedId} 恢复调度，等待节点上报恢复在线`;
+        await loadNodes();
+      }
+
       async function createBootstrapCommand(form) {
         if (!state.selectedId) return;
         const payload = {
@@ -2836,6 +2868,11 @@
       });
 
       els.detailBody.addEventListener("click", (event) => {
+        const resumeButton = event.target.closest("[data-resume-node]");
+        if (resumeButton) {
+          resumeNodeScheduling().catch(showError);
+          return;
+        }
         const button = event.target.closest("[data-copy-install]");
         if (!button) return;
         const output = button.closest("form").querySelector("[data-install-command]");
