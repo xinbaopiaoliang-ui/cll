@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.25.1`.
+Current version: `v0.25.2`.
 
 The node can:
 
@@ -43,8 +43,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.25.1
-git push origin v0.25.1
+git tag v0.25.2
+git push origin v0.25.2
 ```
 
 GitHub Actions will publish:

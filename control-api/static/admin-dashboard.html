@@ -375,45 +375,65 @@
         grid-template-columns: minmax(280px, 1fr) auto;
         gap: 16px;
         align-items: center;
-        min-height: 76px;
+        min-height: 82px;
         margin-bottom: 18px;
-        padding: 12px 0;
-        background: linear-gradient(180deg, rgba(246, 249, 248, 0.94), rgba(246, 249, 248, 0.72));
+        padding: 14px 16px;
+        border: 1px solid rgba(214, 224, 229, 0.84);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 253, 252, 0.84)),
+          var(--surface);
+        box-shadow: 0 18px 42px -34px rgba(9, 22, 30, 0.42);
         backdrop-filter: blur(16px);
       }
 
+      .topbar > div:first-child {
+        min-width: 0;
+        display: grid;
+        gap: 8px;
+      }
+
       .page-kicker {
-        display: flex;
+        width: fit-content;
+        min-height: 28px;
+        display: inline-flex;
         align-items: center;
-        gap: 9px;
-        color: var(--muted);
-        font-size: 13px;
+        gap: 8px;
+        padding: 0 10px;
+        border: 1px solid rgba(23, 120, 111, 0.16);
+        border-radius: 999px;
+        background: rgba(23, 120, 111, 0.055);
+        color: #48606b;
+        font-size: 12px;
+        font-weight: 650;
+        line-height: 1;
       }
 
       .page-kicker::before {
         content: "";
-        width: 8px;
-        height: 8px;
+        width: 7px;
+        height: 7px;
         border-radius: 999px;
         background: var(--idle);
-        box-shadow: 0 0 0 4px rgba(122, 132, 146, 0.12);
+        box-shadow: 0 0 0 3px rgba(122, 132, 146, 0.1);
       }
 
       .page-kicker.connected::before {
         background: var(--ok);
-        box-shadow: 0 0 0 4px rgba(19, 131, 95, 0.13);
+        box-shadow: 0 0 0 3px rgba(19, 131, 95, 0.12);
       }
 
       .page-kicker.error-state::before {
         background: var(--bad);
-        box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.13);
+        box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.12);
       }
 
       .page-title {
-        margin-top: 5px;
-        font-size: clamp(27px, 2.3vw, 38px);
-        line-height: 1;
-        font-weight: 820;
+        margin: 0;
+        color: #0b151a;
+        font-size: clamp(24px, 1.75vw, 31px);
+        line-height: 1.12;
+        font-weight: 760;
       }
 
       .top-actions,
@@ -1214,7 +1234,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.25.1</span>
+          <span class="mono">v0.25.2</span>
         </div>
       </aside>
 

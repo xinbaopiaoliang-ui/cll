@@ -245,6 +245,11 @@ Done in `v0.25.1`:
   decoding of `information_schema.COLUMNS` existence probes on MySQL installs
   that return signed `BIGINT` marker values.
 
+Done in `v0.25.2`:
+
+- Refine the embedded `/admin` page header so the connection status is a compact
+  pill and the page title uses a calmer operations-console typography scale.
+
 Goals:
 
 - Add nonce replay storage for node report requests.
