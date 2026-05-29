@@ -3432,7 +3432,7 @@ mod tests {
 
     #[test]
     fn verifies_node_handshake_signature() {
-        let body = br#"{"node_id":1,"node_version":"0.26.2","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
+        let body = br#"{"node_id":1,"node_version":"0.27.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
         let timestamp = now_unix();
         let nonce = "handshake-nonce";
         let body_sha256 = BASE64.encode(Sha256::digest(body));
@@ -3499,7 +3499,7 @@ mod tests {
         let timestamp = now_unix();
         let request = NodeHandshakeRequest {
             node_id: 1,
-            node_version: "0.26.2".to_string(),
+            node_version: "0.27.0".to_string(),
             os: "linux".to_string(),
             arch: "x86_64".to_string(),
             boot_id: "boot-1".to_string(),
@@ -3570,9 +3570,11 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("游戏路由"));
         assert!(ADMIN_DASHBOARD_HTML.contains("操作日志"));
         assert!(ADMIN_DASHBOARD_HTML.contains("恢复调度"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("调度诊断"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-resume-node"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/game-route-rules"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/client/v1/connect-intent"));
         assert!(ADMIN_DASHBOARD_HTML.contains("method: \"PATCH\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("bootstrap-token"));
     }

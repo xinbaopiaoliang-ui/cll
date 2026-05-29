@@ -1018,6 +1018,63 @@
         font-weight: 820;
       }
 
+      .diagnostic-result {
+        margin-top: 14px;
+        text-align: left;
+      }
+
+      .diagnostic-result.empty {
+        min-height: 112px;
+        display: grid;
+        place-items: center;
+        padding: 22px;
+        border: 1px dashed var(--line);
+        border-radius: 8px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .candidate-list {
+        display: grid;
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .candidate-card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(247, 250, 249, 0.78);
+        overflow: hidden;
+      }
+
+      .candidate-head {
+        min-height: 58px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .candidate-body {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+      }
+
+      .token-preview {
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.82);
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.55;
+        overflow-wrap: anywhere;
+      }
+
       .action-grid {
         display: grid;
         gap: 12px;
@@ -1034,6 +1091,10 @@
 
       .node-actions-grid .operation-card:first-child .form-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .ops-grid > .panel:first-child {
+        grid-column: 1 / -1;
       }
 
       .command-output {
@@ -1316,7 +1377,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.26.2</span>
+          <span class="mono">v0.27.0</span>
         </div>
       </aside>
 
@@ -1517,7 +1578,70 @@
         </section>
 
         <section class="view hidden" id="viewOps" data-view-panel="ops">
-          <section class="grid-2">
+          <section class="grid-2 ops-grid">
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">调度诊断</div>
+                  <div class="panel-meta">connect-intent / 候选节点</div>
+                </div>
+              </div>
+              <div class="panel-body">
+                <form id="diagnosticForm">
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="diagnosticUserId">用户 ID</label>
+                      <input id="diagnosticUserId" name="user_id" type="number" min="1" value="1001" required />
+                    </div>
+                    <div class="field">
+                      <label for="diagnosticDeviceId">设备 ID</label>
+                      <input id="diagnosticDeviceId" name="device_id" value="pc-001" autocomplete="off" required />
+                    </div>
+                    <div class="field">
+                      <label for="diagnosticGameId">游戏 ID</label>
+                      <input id="diagnosticGameId" name="game_id" type="number" min="1" value="8888" required />
+                    </div>
+                    <div class="field">
+                      <label for="diagnosticPlatform">平台</label>
+                      <select id="diagnosticPlatform" name="platform">
+                        <option value="pc">PC</option>
+                        <option value="android">Android</option>
+                        <option value="ios">iOS</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label for="diagnosticIsp">运营商</label>
+                      <select id="diagnosticIsp" name="client_isp">
+                        <option value="telecom">电信</option>
+                        <option value="unicom">联通</option>
+                        <option value="mobile">移动</option>
+                        <option value="">未知</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label for="diagnosticClientIp">客户端 IP</label>
+                      <input id="diagnosticClientIp" name="client_ip" value="127.0.0.1" autocomplete="off" />
+                    </div>
+                    <div class="field">
+                      <label for="diagnosticQuality">带宽质量</label>
+                      <select id="diagnosticQuality" name="bandwidth_quality">
+                        <option value="fast">快速</option>
+                        <option value="normal">普通</option>
+                        <option value="slow">较慢</option>
+                      </select>
+                      <div class="form-help">用于模拟客户端请求，查看控制面实际选择的节点和路由。</div>
+                    </div>
+                  </div>
+                  <div class="message error-text hidden" id="diagnosticError"></div>
+                  <div class="form-actions">
+                    <button class="primary" type="submit">开始诊断</button>
+                  </div>
+                </form>
+                <div class="diagnostic-result empty" id="diagnosticResult">
+                  输入用户、设备和游戏 ID 后，可以查看 connect-intent 命中的节点和路由。
+                </div>
+              </div>
+            </div>
             <div class="panel">
               <div class="panel-head">
                 <div>
@@ -1767,6 +1891,9 @@
         detailTitle: document.getElementById("detailTitle"),
         detailMeta: document.getElementById("detailMeta"),
         detailBody: document.getElementById("detailBody"),
+        diagnosticForm: document.getElementById("diagnosticForm"),
+        diagnosticError: document.getElementById("diagnosticError"),
+        diagnosticResult: document.getElementById("diagnosticResult"),
         opsMeta: document.getElementById("opsMeta"),
         opsBody: document.getElementById("opsBody"),
       };
@@ -1954,6 +2081,26 @@
         if (protocol === "udp") return "UDP";
         if (protocol === "tcp") return "TCP";
         return protocol || "--";
+      }
+
+      function qualityText(value) {
+        if (value === "fast") return "快速";
+        if (value === "normal") return "普通";
+        if (value === "slow") return "较慢";
+        return value || "未知";
+      }
+
+      function ispText(value) {
+        if (value === "telecom") return "电信";
+        if (value === "unicom") return "联通";
+        if (value === "mobile") return "移动";
+        return value || "未知";
+      }
+
+      function shortToken(token) {
+        if (!token) return "--";
+        if (token.length <= 46) return token;
+        return `${token.slice(0, 30)}...${token.slice(-12)}`;
       }
 
       function areaText(node) {
@@ -2636,6 +2783,91 @@
         return payload;
       }
 
+      function diagnosticPayloadFromForm(form) {
+        const payload = {
+          user_id: Number(form.elements.user_id.value),
+          device_id: form.elements.device_id.value.trim(),
+          game_id: Number(form.elements.game_id.value),
+        };
+        for (const key of ["platform", "client_isp", "client_ip", "bandwidth_quality"]) {
+          const value = textOrNull(form.elements[key]?.value);
+          if (value) payload[key] = value;
+        }
+        return payload;
+      }
+
+      function renderDiagnosticResult(data) {
+        const candidates = data.candidates || [];
+        els.diagnosticResult.classList.toggle("empty", candidates.length === 0);
+        els.diagnosticResult.innerHTML = `
+          <div class="detail-grid">
+            ${metric("连接意图", data.intent_id || "--")}
+            ${metric("有效期", `${data.ttl_sec || 0} 秒`)}
+            ${metric("候选节点", candidates.length)}
+            ${metric("客户端运营商", ispText(data.client?.client_isp))}
+            ${metric("客户端 IP", data.client?.client_ip || "--")}
+            ${metric("带宽偏好", qualityText(data.client?.bandwidth_quality))}
+          </div>
+          <div class="candidate-list">
+            ${
+              candidates
+                .map((candidate) => {
+                  const node = state.nodes.find((item) => item.id === candidate.node_id);
+                  const endpoint = `${candidate.host}:${candidate.port}`;
+                  const token = candidate.credential?.token || "";
+                  return `
+                    <div class="candidate-card">
+                      <div class="candidate-head">
+                        <div>
+                          <div class="strong">${escapeHtml(node?.name || `节点 ${candidate.node_id}`)}</div>
+                          <div class="cell-note mono">${escapeHtml(endpoint)} / ID ${candidate.node_id}</div>
+                        </div>
+                        <span class="chip ${node ? statusClass(node) : "warn"}">${escapeHtml(
+                          node ? statusText(node) : "候选节点",
+                        )}</span>
+                      </div>
+                      <div class="candidate-body">
+                        <div class="detail-grid">
+                          ${metric("区域", candidate.area || "--")}
+                          ${metric("标签", candidate.tag || "--")}
+                          ${metric("传输方式", (candidate.transports || []).join(" / ") || "--")}
+                          ${metric("探测协议", candidate.probe?.protocol || "--")}
+                          ${metric("目标路由", candidate.route?.target_addr || "--")}
+                          ${metric("路由协议", protocolText(candidate.route?.protocol))}
+                          ${metric("凭证过期", formatTime(candidate.credential?.expires_at))}
+                          ${metric("带宽质量", qualityText(candidate.bandwidth_quality))}
+                        </div>
+                        <div class="token-preview">${escapeHtml(shortToken(token))}</div>
+                      </div>
+                    </div>
+                  `;
+                })
+                .join("") ||
+              '<div class="empty">没有候选节点。请检查游戏路由是否启用、节点是否在线、节点密钥是否存在。</div>'
+            }
+          </div>
+          <details class="health-json">
+            <summary>原始诊断数据</summary>
+            <pre>${escapeHtml(JSON.stringify(data, null, 2))}</pre>
+          </details>
+        `;
+      }
+
+      async function runConnectDiagnostic(form) {
+        clearInlineError(els.diagnosticError);
+        els.diagnosticResult.classList.add("empty");
+        els.diagnosticResult.innerHTML = `<span class="skeleton"></span>`;
+        const data = await api("/api/client/v1/connect-intent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(diagnosticPayloadFromForm(form)),
+        });
+        renderDiagnosticResult(data);
+        els.statusLine.textContent = `调度诊断完成 / ${data.candidates?.length || 0} 个候选节点`;
+        els.statusLine.classList.add("connected");
+        els.statusLine.classList.remove("error-state");
+      }
+
       async function createNode(form) {
         clearInlineError(els.createNodeError);
         const payload = nodePayloadFromForm(form);
@@ -2823,6 +3055,15 @@
         event.preventDefault();
         saveRouteRule(els.routeRuleForm).catch((error) => {
           showInlineError(els.routeRuleError, error.message);
+        });
+      });
+
+      els.diagnosticForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        runConnectDiagnostic(els.diagnosticForm).catch((error) => {
+          showInlineError(els.diagnosticError, error.message);
+          els.diagnosticResult.classList.add("empty");
+          els.diagnosticResult.textContent = "诊断失败，请检查游戏路由、节点状态和请求参数。";
         });
       });
 

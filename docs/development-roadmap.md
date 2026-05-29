@@ -276,6 +276,13 @@ Done in `v0.26.2`:
   offline waiting state with an audit reason, and then lets the next signed
   health report move the node back online for scheduling.
 
+Done in `v0.27.0`:
+
+- Add an operations-page connect-intent diagnostic tool to the embedded
+  control dashboard. Operators can submit a user, device, game, ISP, client IP,
+  and bandwidth profile, then inspect the selected candidate node, route target,
+  transport, credential expiry, token preview, and raw scheduling response.
+
 Goals:
 
 - Add nonce replay storage for node report requests.
