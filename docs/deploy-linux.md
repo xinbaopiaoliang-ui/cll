@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.22.0`.
+Current version: `v0.23.0`.
 
 The node can:
 
@@ -32,6 +32,7 @@ The node can:
 - expose token-protected admin node APIs for backend Web panels;
 - serve a browser dashboard at `/admin` backed by token-protected admin APIs;
 - edit node configuration from `/admin` and generate one-time install commands;
+- manage game route names in `/admin` alongside numeric game IDs;
 - validate the full flow with the packaged `xaccel-client-probe` binary.
 
 It does not yet fetch production game rules or connect-intents from a real
@@ -42,8 +43,8 @@ backend API.
 From the local repository:
 
 ```bash
-git tag v0.22.0
-git push origin v0.22.0
+git tag v0.23.0
+git push origin v0.23.0
 ```
 
 GitHub Actions will publish:

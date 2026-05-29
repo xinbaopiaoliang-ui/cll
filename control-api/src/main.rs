@@ -337,6 +337,7 @@ struct AdminListRouteRulesQuery {
 #[derive(Debug, Deserialize)]
 struct AdminRouteRuleRequest {
     game_id: u64,
+    game_name: String,
     node_id: u64,
     target_addr: String,
     protocol: Option<String>,
@@ -448,6 +449,7 @@ struct AdminNodeSummary {
 struct AdminRouteRuleSummary {
     id: u64,
     game_id: u64,
+    game_name: String,
     node_id: u64,
     node_name: String,
     node_endpoint: String,
@@ -555,6 +557,7 @@ struct AdminReportRow {
 struct AdminRouteRuleRow {
     id: u64,
     game_id: u64,
+    game_name: String,
     node_id: u64,
     node_name: String,
     node_server_ip: String,
@@ -590,6 +593,7 @@ struct NormalizedCreateNode {
 #[derive(Debug)]
 struct NormalizedRouteRule {
     game_id: u64,
+    game_name: String,
     node_id: u64,
     target_addr: String,
     protocol: String,
@@ -683,6 +687,9 @@ async fn main() -> anyhow::Result<()> {
         .connect(&cli.database_url)
         .await
         .context("failed to connect MySQL")?;
+    run_schema_migrations(&pool)
+        .await
+        .context("failed to run schema migrations")?;
 
     let state = AppState {
         pool,
@@ -748,6 +755,41 @@ async fn main() -> anyhow::Result<()> {
 
 async fn admin_dashboard() -> Html<&'static str> {
     Html(ADMIN_DASHBOARD_HTML)
+}
+
+async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
+    ensure_game_route_game_name_column(pool).await?;
+    Ok(())
+}
+
+async fn ensure_game_route_game_name_column(pool: &MySqlPool) -> anyhow::Result<()> {
+    let exists = sqlx::query_scalar::<_, u64>(
+        r#"
+SELECT 1
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'game_route_rules'
+  AND COLUMN_NAME = 'game_name'
+LIMIT 1
+"#,
+    )
+    .fetch_optional(pool)
+    .await
+    .context("failed to inspect game_route_rules.game_name")?;
+
+    if exists.is_none() {
+        sqlx::query(
+            r#"
+ALTER TABLE game_route_rules
+ADD COLUMN game_name VARCHAR(128) NOT NULL DEFAULT '' AFTER game_id
+"#,
+        )
+        .execute(pool)
+        .await
+        .context("failed to add game_route_rules.game_name")?;
+    }
+
+    Ok(())
 }
 
 fn validate_cli(cli: &Cli) -> anyhow::Result<()> {
@@ -1672,6 +1714,7 @@ async fn select_admin_route_rules(
 SELECT
   r.id,
   r.game_id,
+  COALESCE(NULLIF(r.game_name, ''), CONCAT('游戏 ', r.game_id)) AS game_name,
   r.node_id,
   n.name AS node_name,
   n.server_ip AS node_server_ip,
@@ -1733,6 +1776,7 @@ async fn select_admin_route_rule(
 SELECT
   r.id,
   r.game_id,
+  COALESCE(NULLIF(r.game_name, ''), CONCAT('游戏 ', r.game_id)) AS game_name,
   r.node_id,
   n.name AS node_name,
   n.server_ip AS node_server_ip,
@@ -1768,6 +1812,7 @@ async fn insert_admin_route_rule(
         r#"
 INSERT INTO game_route_rules (
   game_id,
+  game_name,
   node_id,
   target_addr,
   protocol,
@@ -1777,10 +1822,11 @@ INSERT INTO game_route_rules (
   status,
   created_at,
   updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 "#,
     )
     .bind(rule.game_id)
+    .bind(&rule.game_name)
     .bind(rule.node_id)
     .bind(&rule.target_addr)
     .bind(&rule.protocol)
@@ -1813,6 +1859,7 @@ async fn update_admin_route_rule(
 UPDATE game_route_rules
 SET
   game_id = ?,
+  game_name = ?,
   node_id = ?,
   target_addr = ?,
   protocol = ?,
@@ -1825,6 +1872,7 @@ WHERE id = ?
 "#,
     )
     .bind(rule.game_id)
+    .bind(&rule.game_name)
     .bind(rule.node_id)
     .bind(&rule.target_addr)
     .bind(&rule.protocol)
@@ -2458,6 +2506,7 @@ fn normalize_route_rule_request(
 
     Ok(NormalizedRouteRule {
         game_id: request.game_id,
+        game_name: normalize_required_text(&request.game_name, "game_name", 128)?,
         node_id: request.node_id,
         target_addr: validate_target_addr(&request.target_addr)?,
         protocol: protocol.to_string(),
@@ -3077,6 +3126,7 @@ impl AdminRouteRuleSummary {
         Self {
             id: row.id,
             game_id: row.game_id,
+            game_name: row.game_name,
             node_id: row.node_id,
             node_name: row.node_name,
             node_endpoint: format!("{}:{}", row.node_server_ip, row.node_server_port),
@@ -3200,6 +3250,7 @@ mod tests {
     fn valid_route_rule_request() -> AdminRouteRuleRequest {
         AdminRouteRuleRequest {
             game_id: 8888,
+            game_name: "Local Echo Test".to_string(),
             node_id: 1,
             target_addr: "127.0.0.1:7777".to_string(),
             protocol: Some("udp".to_string()),
@@ -3298,7 +3349,7 @@ mod tests {
 
     #[test]
     fn verifies_node_handshake_signature() {
-        let body = br#"{"node_id":1,"node_version":"0.22.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
+        let body = br#"{"node_id":1,"node_version":"0.23.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
         let timestamp = now_unix();
         let nonce = "handshake-nonce";
         let body_sha256 = BASE64.encode(Sha256::digest(body));
@@ -3365,7 +3416,7 @@ mod tests {
         let timestamp = now_unix();
         let request = NodeHandshakeRequest {
             node_id: 1,
-            node_version: "0.22.0".to_string(),
+            node_version: "0.23.0".to_string(),
             os: "linux".to_string(),
             arch: "x86_64".to_string(),
             boot_id: "boot-1".to_string(),
@@ -3461,6 +3512,7 @@ mod tests {
         let rule = normalize_route_rule_request(&valid_route_rule_request()).expect("rule");
 
         assert_eq!(rule.game_id, 8888);
+        assert_eq!(rule.game_name, "Local Echo Test");
         assert_eq!(rule.node_id, 1);
         assert_eq!(rule.target_addr, "127.0.0.1:7777");
         assert_eq!(rule.protocol, "udp");
@@ -3476,6 +3528,16 @@ mod tests {
         let error = normalize_route_rule_request(&request).unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.code, "invalid_target_addr");
+    }
+
+    #[test]
+    fn rejects_empty_route_rule_game_name() {
+        let mut request = valid_route_rule_request();
+        request.game_name = "  ".to_string();
+
+        let error = normalize_route_rule_request(&request).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_field");
     }
 
     #[test]

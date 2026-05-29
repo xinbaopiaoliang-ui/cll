@@ -38,7 +38,7 @@ mysql -uroot -p xaccel < db/control-api.seed.example.sql
 The seed creates:
 
 - node `1` at `103.201.131.99:666`;
-- game route for `game_id = 8888`;
+- game route for `game_id = 8888` with a human-readable `game_name`;
 - route target `127.0.0.1:7777`.
 
 ## Run

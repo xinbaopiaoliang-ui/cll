@@ -49,6 +49,7 @@ CREATE TABLE accel_nodes (
 CREATE TABLE game_route_rules (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   game_id BIGINT UNSIGNED NOT NULL,
+  game_name VARCHAR(128) NOT NULL DEFAULT '',
   node_id BIGINT UNSIGNED NOT NULL,
   target_addr VARCHAR(255) NOT NULL,
   protocol ENUM('udp') NOT NULL DEFAULT 'udp',

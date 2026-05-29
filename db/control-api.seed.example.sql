@@ -41,6 +41,7 @@ INSERT INTO accel_nodes (
 
 INSERT INTO game_route_rules (
   game_id,
+  game_name,
   node_id,
   target_addr,
   protocol,
@@ -50,6 +51,7 @@ INSERT INTO game_route_rules (
   status
 ) VALUES (
   8888,
+  'Local Echo Test',
   1,
   '127.0.0.1:7777',
   'udp',
@@ -58,6 +60,7 @@ INSERT INTO game_route_rules (
   10,
   'enabled'
 ) ON DUPLICATE KEY UPDATE
+  game_name = VALUES(game_name),
   target_addr = VALUES(target_addr),
   priority = VALUES(priority),
   status = VALUES(status);

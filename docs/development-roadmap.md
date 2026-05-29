@@ -213,6 +213,14 @@ Done in `v0.22.0`:
 - Keep the existing token-protected admin APIs and route-rule/node workflows
   wired into the new UI shell.
 
+Done in `v0.23.0`:
+
+- Add `game_name` to game route rules in MySQL, admin APIs, OpenAPI, and the
+  embedded control-panel UI.
+- Run a startup schema migration so existing control-plane databases receive
+  the new `game_route_rules.game_name` column automatically.
+- Display route rows as game name plus game ID for easier operations work.
+
 Goals:
 
 - Add nonce replay storage for node report requests.

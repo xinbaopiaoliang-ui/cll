@@ -9,7 +9,7 @@
 | 字段 | 归属 | 说明 |
 | --- | --- | --- |
 | `game_id` | 后台/客户端 | 游戏唯一 ID |
-| `game_name` | 后台/客户端 | 游戏名称 |
+| `game_name` | 后台/客户端 | 游戏名称；路由规则也保存一份用于控制台展示 |
 | `platform` | 后台/客户端 | `pc`、`ios`、`android` |
 | `game_type` | 后台/客户端 | `platform`、`game`、`web` |
 | `game_platform` | 后台/客户端 | `steam`、`rockstar` 等 |
@@ -84,4 +84,3 @@ flowchart LR
   Client --> AccelSession["AccelSession 加速会话"]
   LinuxNode --> AccelSession
 ```
-

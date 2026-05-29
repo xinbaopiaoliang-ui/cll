@@ -95,5 +95,5 @@ Create a game route rule:
 curl -fsSL -X POST http://127.0.0.1:18080/api/admin/v1/game-route-rules \
   -H "Authorization: Bearer ${XACCEL_ADMIN_TOKEN}" \
   -H 'Content-Type: application/json' \
-  -d '{"game_id":8888,"node_id":1,"target_addr":"127.0.0.1:7777","protocol":"udp","priority":100,"status":"enabled"}'
+  -d '{"game_id":8888,"game_name":"Local Echo Test","node_id":1,"target_addr":"127.0.0.1:7777","protocol":"udp","priority":100,"status":"enabled"}'
 ```
