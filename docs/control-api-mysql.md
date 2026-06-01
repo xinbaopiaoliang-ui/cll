@@ -6,6 +6,7 @@ manual token minting and `backend-mock` for the client `connect-intent` path.
 ## Responsibilities
 
 - Read online nodes from MySQL.
+- Read and manage the game catalog from MySQL.
 - Read game route rules from MySQL.
 - Select a node for `user_id`, `device_id`, and `game_id`.
 - Sign a short-lived `xat.v1` token with the selected node secret.
@@ -38,6 +39,7 @@ mysql -uroot -p xaccel < db/control-api.seed.example.sql
 The seed creates:
 
 - node `1` at `103.201.131.99:666`;
+- game catalog entry for `game_id = 8888`;
 - game route for `game_id = 8888` with a human-readable `game_name`;
 - route target `127.0.0.1:7777`.
 

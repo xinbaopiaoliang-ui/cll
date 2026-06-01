@@ -27,7 +27,7 @@ INSERT INTO accel_nodes (
   'online',
   'PASTE_NODE_SECRET',
   CURRENT_TIMESTAMP,
-  '0.16.0',
+  '0.29.0',
   1
 ) ON DUPLICATE KEY UPDATE
   server_ip = VALUES(server_ip),
@@ -38,6 +38,27 @@ INSERT INTO accel_nodes (
   node_secret = VALUES(node_secret),
   last_seen_at = VALUES(last_seen_at),
   kernel_version = VALUES(kernel_version);
+
+INSERT INTO accel_games (
+  game_id,
+  name,
+  platform,
+  category,
+  status,
+  remark
+) VALUES (
+  8888,
+  'Local Echo Test',
+  'pc',
+  'test',
+  'enabled',
+  'Local UDP echo route for control-plane validation'
+) ON DUPLICATE KEY UPDATE
+  name = VALUES(name),
+  platform = VALUES(platform),
+  category = VALUES(category),
+  status = VALUES(status),
+  remark = VALUES(remark);
 
 INSERT INTO game_route_rules (
   game_id,

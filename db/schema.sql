@@ -46,6 +46,22 @@ CREATE TABLE accel_nodes (
   UNIQUE KEY uniq_server_endpoint (server_ip, server_port)
 );
 
+CREATE TABLE accel_games (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  game_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  platform ENUM('pc', 'android', 'ios', 'multi') NOT NULL DEFAULT 'pc',
+  category VARCHAR(64) NULL,
+  icon_url VARCHAR(512) NULL,
+  status ENUM('enabled', 'disabled') NOT NULL DEFAULT 'enabled',
+  remark VARCHAR(512) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_game_id (game_id),
+  INDEX idx_status_platform (status, platform),
+  INDEX idx_category (category)
+);
+
 CREATE TABLE game_route_rules (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   game_id BIGINT UNSIGNED NOT NULL,

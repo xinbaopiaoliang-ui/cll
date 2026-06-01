@@ -497,6 +497,27 @@ struct AdminCreateBootstrapTokenRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct AdminListGamesQuery {
+    status: Option<String>,
+    platform: Option<String>,
+    keyword: Option<String>,
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminGameRequest {
+    game_id: u64,
+    name: String,
+    platform: Option<String>,
+    category: Option<String>,
+    icon_url: Option<String>,
+    status: Option<String>,
+    remark: Option<String>,
+}
+
+type AdminUpdateGameRequest = AdminGameRequest;
+
+#[derive(Debug, Deserialize)]
 struct AdminListRouteRulesQuery {
     game_id: Option<u64>,
     node_id: Option<u64>,
@@ -570,6 +591,28 @@ struct AdminCreateBootstrapTokenResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct AdminListGamesResponse {
+    games: Vec<AdminGameSummary>,
+    total: usize,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminGameResponse {
+    status: &'static str,
+    game: AdminGameSummary,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminDeleteGameResponse {
+    status: &'static str,
+    game_id: u64,
+    deleted: bool,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
 struct AdminListRouteRulesResponse {
     rules: Vec<AdminRouteRuleSummary>,
     total: usize,
@@ -614,6 +657,21 @@ struct AdminNodeSummary {
     last_seen_at: Option<u64>,
     last_report_at: Option<u64>,
     latest_report: Option<AdminReportSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminGameSummary {
+    id: u64,
+    game_id: u64,
+    name: String,
+    platform: String,
+    category: Option<String>,
+    icon_url: Option<String>,
+    status: String,
+    remark: Option<String>,
+    route_count: u64,
+    created_at: Option<u64>,
+    updated_at: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -691,6 +749,21 @@ struct CandidateRow {
     node_secret: String,
     target_addr: String,
     protocol: String,
+}
+
+#[derive(Debug, FromRow)]
+struct AdminGameRow {
+    id: u64,
+    game_id: u64,
+    name: String,
+    platform: String,
+    category: Option<String>,
+    icon_url: Option<String>,
+    status: String,
+    remark: Option<String>,
+    route_count: u64,
+    created_at: Option<u64>,
+    updated_at: Option<u64>,
 }
 
 #[derive(Debug, FromRow)]
@@ -781,6 +854,17 @@ struct NormalizedCreateNode {
     mobile_ip: Option<String>,
     unicom_ip: Option<String>,
     tag: Option<String>,
+}
+
+#[derive(Debug)]
+struct NormalizedGame {
+    game_id: u64,
+    name: String,
+    platform: String,
+    category: Option<String>,
+    icon_url: Option<String>,
+    status: String,
+    remark: Option<String>,
 }
 
 #[derive(Debug)]
@@ -929,6 +1013,14 @@ async fn main() -> anyhow::Result<()> {
             post(admin_connectivity_diagnostic),
         )
         .route(
+            "/api/admin/v1/games",
+            get(admin_list_games).post(admin_create_game),
+        )
+        .route(
+            "/api/admin/v1/games/:game_id",
+            patch(admin_update_game).delete(admin_delete_game),
+        )
+        .route(
             "/api/admin/v1/game-route-rules",
             get(admin_list_route_rules).post(admin_create_route_rule),
         )
@@ -956,6 +1048,8 @@ async fn admin_dashboard() -> Html<&'static str> {
 
 async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
     ensure_game_route_game_name_column(pool).await?;
+    ensure_game_catalog_table(pool).await?;
+    seed_game_catalog_from_routes(pool).await?;
     Ok(())
 }
 
@@ -986,6 +1080,60 @@ ADD COLUMN game_name VARCHAR(128) NOT NULL DEFAULT '' AFTER game_id
         .context("failed to add game_route_rules.game_name")?;
     }
 
+    Ok(())
+}
+
+async fn ensure_game_catalog_table(pool: &MySqlPool) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+CREATE TABLE IF NOT EXISTS accel_games (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  game_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  platform ENUM('pc', 'android', 'ios', 'multi') NOT NULL DEFAULT 'pc',
+  category VARCHAR(64) NULL,
+  icon_url VARCHAR(512) NULL,
+  status ENUM('enabled', 'disabled') NOT NULL DEFAULT 'enabled',
+  remark VARCHAR(512) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_game_id (game_id),
+  INDEX idx_status_platform (status, platform),
+  INDEX idx_category (category)
+)
+"#,
+    )
+    .execute(pool)
+    .await
+    .context("failed to create accel_games")?;
+    Ok(())
+}
+
+async fn seed_game_catalog_from_routes(pool: &MySqlPool) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+INSERT IGNORE INTO accel_games (
+  game_id,
+  name,
+  platform,
+  status,
+  created_at,
+  updated_at
+)
+SELECT
+  game_id,
+  COALESCE(NULLIF(MAX(game_name), ''), CONCAT('游戏 ', game_id)),
+  'pc',
+  'enabled',
+  CURRENT_TIMESTAMP,
+  CURRENT_TIMESTAMP
+FROM game_route_rules
+GROUP BY game_id
+"#,
+    )
+    .execute(pool)
+    .await
+    .context("failed to seed accel_games from game_route_rules")?;
     Ok(())
 }
 
@@ -1362,6 +1510,86 @@ async fn admin_create_bootstrap_token(
         bootstrap_url,
         expires_at,
         install_command,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_list_games(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<AdminListGamesQuery>,
+) -> Result<Json<AdminListGamesResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    validate_game_query(&query)?;
+    let limit = clamp_limit(query.limit, 200, 500);
+    let rows = select_admin_games(&state.pool, &query, limit).await?;
+    let games = rows
+        .into_iter()
+        .map(AdminGameSummary::from_row)
+        .collect::<Vec<_>>();
+
+    Ok(Json(AdminListGamesResponse {
+        total: games.len(),
+        games,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_create_game(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<AdminGameRequest>,
+) -> Result<Json<AdminGameResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let game_id = insert_admin_game(&state.pool, request).await?;
+    let game = select_admin_game(&state.pool, game_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("game_not_found", "created game does not exist"))?;
+
+    Ok(Json(AdminGameResponse {
+        status: "ok",
+        game: AdminGameSummary::from_row(game),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_update_game(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(game_id): Path<u64>,
+    Json(request): Json<AdminUpdateGameRequest>,
+) -> Result<Json<AdminGameResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    update_admin_game(&state.pool, game_id, request).await?;
+    let game = select_admin_game(&state.pool, game_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("game_not_found", "updated game does not exist"))?;
+
+    Ok(Json(AdminGameResponse {
+        status: "ok",
+        game: AdminGameSummary::from_row(game),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_delete_game(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(game_id): Path<u64>,
+) -> Result<Json<AdminDeleteGameResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    if game_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_game",
+            "game_id must be positive",
+        ));
+    }
+    let deleted = delete_admin_game(&state.pool, game_id).await?;
+
+    Ok(Json(AdminDeleteGameResponse {
+        status: "ok",
+        game_id,
+        deleted,
         server_time: now_unix(),
     }))
 }
@@ -2352,6 +2580,130 @@ LIMIT ?
     .map_err(AppError::database)
 }
 
+async fn select_admin_games(
+    pool: &MySqlPool,
+    query: &AdminListGamesQuery,
+    limit: u32,
+) -> Result<Vec<AdminGameRow>, AppError> {
+    let mut builder = QueryBuilder::<MySql>::new(
+        r#"
+SELECT
+  g.id,
+  g.game_id,
+  g.name,
+  g.platform,
+  g.category,
+  g.icon_url,
+  g.status,
+  g.remark,
+  CAST(COUNT(r.id) AS UNSIGNED) AS route_count,
+  CAST(UNIX_TIMESTAMP(g.created_at) AS UNSIGNED) AS created_at,
+  CAST(UNIX_TIMESTAMP(g.updated_at) AS UNSIGNED) AS updated_at
+FROM accel_games g
+LEFT JOIN game_route_rules r ON r.game_id = g.game_id
+WHERE 1 = 1
+"#,
+    );
+
+    if let Some(status) = query
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|status| !status.is_empty())
+    {
+        builder.push(" AND g.status = ");
+        builder.push_bind(status);
+    }
+    if let Some(platform) = query
+        .platform
+        .as_deref()
+        .map(str::trim)
+        .filter(|platform| !platform.is_empty())
+    {
+        builder.push(" AND g.platform = ");
+        builder.push_bind(platform);
+    }
+    if let Some(keyword) = query
+        .keyword
+        .as_deref()
+        .map(str::trim)
+        .filter(|keyword| !keyword.is_empty())
+    {
+        let like = format!("%{keyword}%");
+        builder.push(" AND (g.name LIKE ");
+        builder.push_bind(like.clone());
+        builder.push(" OR CAST(g.game_id AS CHAR) LIKE ");
+        builder.push_bind(like);
+        builder.push(")");
+    }
+
+    builder.push(
+        r#"
+GROUP BY
+  g.id,
+  g.game_id,
+  g.name,
+  g.platform,
+  g.category,
+  g.icon_url,
+  g.status,
+  g.remark,
+  g.created_at,
+  g.updated_at
+ORDER BY g.status ASC, g.game_id ASC
+LIMIT
+"#,
+    );
+    builder.push_bind(limit);
+
+    builder
+        .build_query_as::<AdminGameRow>()
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::database)
+}
+
+async fn select_admin_game(
+    pool: &MySqlPool,
+    game_id: u64,
+) -> Result<Option<AdminGameRow>, AppError> {
+    sqlx::query_as::<_, AdminGameRow>(
+        r#"
+SELECT
+  g.id,
+  g.game_id,
+  g.name,
+  g.platform,
+  g.category,
+  g.icon_url,
+  g.status,
+  g.remark,
+  CAST(COUNT(r.id) AS UNSIGNED) AS route_count,
+  CAST(UNIX_TIMESTAMP(g.created_at) AS UNSIGNED) AS created_at,
+  CAST(UNIX_TIMESTAMP(g.updated_at) AS UNSIGNED) AS updated_at
+FROM accel_games g
+LEFT JOIN game_route_rules r ON r.game_id = g.game_id
+WHERE g.game_id = ?
+GROUP BY
+  g.id,
+  g.game_id,
+  g.name,
+  g.platform,
+  g.category,
+  g.icon_url,
+  g.status,
+  g.remark,
+  g.created_at,
+  g.updated_at
+LIMIT 1
+"#,
+    )
+    .bind(game_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::database)
+}
+
 async fn select_admin_route_rules(
     pool: &MySqlPool,
     query: &AdminListRouteRulesQuery,
@@ -2448,6 +2800,101 @@ LIMIT 1
     .fetch_optional(pool)
     .await
     .map_err(AppError::database)
+}
+
+async fn insert_admin_game(pool: &MySqlPool, request: AdminGameRequest) -> Result<u64, AppError> {
+    let game = normalize_game_request(&request)?;
+    sqlx::query(
+        r#"
+INSERT INTO accel_games (
+  game_id,
+  name,
+  platform,
+  category,
+  icon_url,
+  status,
+  remark,
+  created_at,
+  updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(game.game_id)
+    .bind(&game.name)
+    .bind(&game.platform)
+    .bind(&game.category)
+    .bind(&game.icon_url)
+    .bind(&game.status)
+    .bind(&game.remark)
+    .execute(pool)
+    .await
+    .map_err(map_game_write_error)?;
+
+    Ok(game.game_id)
+}
+
+async fn update_admin_game(
+    pool: &MySqlPool,
+    game_id: u64,
+    request: AdminUpdateGameRequest,
+) -> Result<(), AppError> {
+    if game_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_game",
+            "game_id must be positive",
+        ));
+    }
+    if request.game_id != game_id {
+        return Err(AppError::bad_request(
+            "invalid_game",
+            "request game_id must match path game_id",
+        ));
+    }
+    let game = normalize_game_request(&request)?;
+    let result = sqlx::query(
+        r#"
+UPDATE accel_games
+SET
+  name = ?,
+  platform = ?,
+  category = ?,
+  icon_url = ?,
+  status = ?,
+  remark = ?,
+  updated_at = CURRENT_TIMESTAMP
+WHERE game_id = ?
+"#,
+    )
+    .bind(&game.name)
+    .bind(&game.platform)
+    .bind(&game.category)
+    .bind(&game.icon_url)
+    .bind(&game.status)
+    .bind(&game.remark)
+    .bind(game_id)
+    .execute(pool)
+    .await
+    .map_err(map_game_write_error)?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::not_found("game_not_found", "game does not exist"));
+    }
+    Ok(())
+}
+
+async fn delete_admin_game(pool: &MySqlPool, game_id: u64) -> Result<bool, AppError> {
+    let result = sqlx::query(
+        r#"
+DELETE FROM accel_games
+WHERE game_id = ?
+"#,
+    )
+    .bind(game_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+
+    Ok(result.rows_affected() > 0)
 }
 
 async fn insert_admin_route_rule(
@@ -3156,6 +3603,85 @@ fn normalize_create_node_request(
     })
 }
 
+fn validate_game_query(query: &AdminListGamesQuery) -> Result<(), AppError> {
+    if let Some(status) = query
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|status| !status.is_empty())
+    {
+        validate_game_status(status)?;
+    }
+    if let Some(platform) = query
+        .platform
+        .as_deref()
+        .map(str::trim)
+        .filter(|platform| !platform.is_empty())
+    {
+        validate_game_platform(platform)?;
+    }
+    if query
+        .keyword
+        .as_deref()
+        .is_some_and(|keyword| keyword.chars().count() > 128)
+    {
+        return Err(AppError::bad_request(
+            "invalid_keyword",
+            "keyword must be at most 128 characters",
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_game_request(request: &AdminGameRequest) -> Result<NormalizedGame, AppError> {
+    if request.game_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_game",
+            "game_id must be positive",
+        ));
+    }
+    let platform = validate_game_platform(request.platform.as_deref().unwrap_or("pc"))?;
+    let status = validate_game_status(request.status.as_deref().unwrap_or("enabled"))?;
+    let icon_url = normalize_optional_text(request.icon_url.as_deref(), 512)?;
+    if let Some(icon_url) = icon_url.as_deref() {
+        normalize_url_arg(icon_url)?;
+    }
+
+    Ok(NormalizedGame {
+        game_id: request.game_id,
+        name: normalize_required_text(&request.name, "name", 128)?,
+        platform: platform.to_string(),
+        category: normalize_optional_text(request.category.as_deref(), 64)?,
+        icon_url,
+        status: status.to_string(),
+        remark: normalize_optional_text(request.remark.as_deref(), 512)?,
+    })
+}
+
+fn validate_game_platform(platform: &str) -> Result<&'static str, AppError> {
+    match platform.trim() {
+        "" | "pc" => Ok("pc"),
+        "android" => Ok("android"),
+        "ios" => Ok("ios"),
+        "multi" => Ok("multi"),
+        _ => Err(AppError::bad_request(
+            "invalid_game_platform",
+            "platform must be pc, android, ios, or multi",
+        )),
+    }
+}
+
+fn validate_game_status(status: &str) -> Result<&'static str, AppError> {
+    match status.trim() {
+        "" | "enabled" => Ok("enabled"),
+        "disabled" => Ok("disabled"),
+        _ => Err(AppError::bad_request(
+            "invalid_game_status",
+            "status must be enabled or disabled",
+        )),
+    }
+}
+
 fn validate_route_rule_query(query: &AdminListRouteRulesQuery) -> Result<(), AppError> {
     if query.game_id == Some(0) {
         return Err(AppError::bad_request(
@@ -3728,6 +4254,15 @@ fn now_unix() -> u64 {
         .unwrap_or_default()
 }
 
+fn map_game_write_error(error: sqlx::Error) -> AppError {
+    match error {
+        sqlx::Error::Database(error) if error.code().as_deref() == Some("1062") => {
+            AppError::conflict("game_exists", "a game with the same game_id already exists")
+        }
+        error => AppError::database(error),
+    }
+}
+
 fn map_route_rule_write_error(error: sqlx::Error) -> AppError {
     match error {
         sqlx::Error::Database(error) if error.code().as_deref() == Some("1062") => {
@@ -3822,6 +4357,24 @@ impl AdminNodeSummary {
                 tcp_sessions: row.latest_tcp_sessions.unwrap_or_default(),
                 reported_at: row.latest_reported_at,
             }),
+        }
+    }
+}
+
+impl AdminGameSummary {
+    fn from_row(row: AdminGameRow) -> Self {
+        Self {
+            id: row.id,
+            game_id: row.game_id,
+            name: row.name,
+            platform: row.platform,
+            category: row.category,
+            icon_url: row.icon_url,
+            status: row.status,
+            remark: row.remark,
+            route_count: row.route_count,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         }
     }
 }
@@ -3991,6 +4544,18 @@ mod tests {
         }
     }
 
+    fn valid_game_request() -> AdminGameRequest {
+        AdminGameRequest {
+            game_id: 8888,
+            name: "Local Echo Test".to_string(),
+            platform: Some("pc".to_string()),
+            category: Some("测试".to_string()),
+            icon_url: Some("https://example.com/game.png".to_string()),
+            status: Some("enabled".to_string()),
+            remark: Some("UDP echo route".to_string()),
+        }
+    }
+
     #[test]
     fn validates_connect_intent_request() {
         validate_connect_intent_request(&valid_request()).expect("request is valid");
@@ -4106,7 +4671,7 @@ mod tests {
 
     #[test]
     fn verifies_node_handshake_signature() {
-        let body = br#"{"node_id":1,"node_version":"0.28.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
+        let body = br#"{"node_id":1,"node_version":"0.29.0","os":"linux","arch":"x86_64","boot_id":"boot-1","timestamp":1779250000,"nonce":"handshake-nonce","config_revision":1,"listen_addr":"0.0.0.0:666"}"#;
         let timestamp = now_unix();
         let nonce = "handshake-nonce";
         let body_sha256 = BASE64.encode(Sha256::digest(body));
@@ -4173,7 +4738,7 @@ mod tests {
         let timestamp = now_unix();
         let request = NodeHandshakeRequest {
             node_id: 1,
-            node_version: "0.28.0".to_string(),
+            node_version: "0.29.0".to_string(),
             os: "linux".to_string(),
             arch: "x86_64".to_string(),
             boot_id: "boot-1".to_string(),
@@ -4241,12 +4806,14 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("新增节点"));
         assert!(ADMIN_DASHBOARD_HTML.contains("编辑配置"));
         assert!(ADMIN_DASHBOARD_HTML.contains("控制总览"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("游戏管理"));
         assert!(ADMIN_DASHBOARD_HTML.contains("游戏路由"));
         assert!(ADMIN_DASHBOARD_HTML.contains("操作日志"));
         assert!(ADMIN_DASHBOARD_HTML.contains("恢复调度"));
         assert!(ADMIN_DASHBOARD_HTML.contains("调度诊断"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-resume-node"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/games"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/game-route-rules"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/connectivity-diagnostic"));
         assert!(ADMIN_DASHBOARD_HTML.contains("method: \"PATCH\""));
@@ -4286,6 +4853,37 @@ mod tests {
         assert_eq!(node.bandwidth_quality, "fast");
         assert_eq!(node.disable_quic, 0);
         assert_eq!(node.area, "UNKNOWN");
+    }
+
+    #[test]
+    fn normalizes_game_request() {
+        let game = normalize_game_request(&valid_game_request()).expect("game is valid");
+
+        assert_eq!(game.game_id, 8888);
+        assert_eq!(game.name, "Local Echo Test");
+        assert_eq!(game.platform, "pc");
+        assert_eq!(game.category.as_deref(), Some("测试"));
+        assert_eq!(game.status, "enabled");
+    }
+
+    #[test]
+    fn rejects_invalid_game_platform() {
+        let mut request = valid_game_request();
+        request.platform = Some("console".to_string());
+
+        let error = normalize_game_request(&request).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_game_platform");
+    }
+
+    #[test]
+    fn rejects_invalid_game_icon_url() {
+        let mut request = valid_game_request();
+        request.icon_url = Some("ftp://example.com/game.png".to_string());
+
+        let error = normalize_game_request(&request).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_url");
     }
 
     #[test]

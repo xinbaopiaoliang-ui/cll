@@ -549,6 +549,43 @@
         gap: 18px;
       }
 
+      .catalog-toolbar {
+        display: grid;
+        grid-template-columns: minmax(280px, 1fr) repeat(2, minmax(150px, 190px)) auto;
+        gap: 10px;
+        align-items: end;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.58);
+      }
+
+      .game-cell {
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+      }
+
+      .game-icon {
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--accent-line);
+        border-radius: 8px;
+        background:
+          linear-gradient(135deg, rgba(23, 120, 111, 0.16), rgba(255, 255, 255, 0.84)),
+          var(--surface);
+        color: var(--accent-strong);
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 820;
+      }
+
+      .field.span-2 {
+        grid-column: span 2;
+      }
+
       .nodes-list-panel .table-wrap {
         max-height: 320px;
       }
@@ -1290,7 +1327,7 @@
         }
 
         .nav-group {
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: repeat(5, minmax(0, 1fr));
         }
 
         .nav-label {
@@ -1342,8 +1379,13 @@
         .diagnostic-strip,
         .node-detail-panel .detail-grid,
         .node-actions-grid .operation-card:first-child .form-grid,
+        .catalog-toolbar,
         .form-grid {
           grid-template-columns: 1fr;
+        }
+
+        .field.span-2 {
+          grid-column: auto;
         }
       }
     </style>
@@ -1396,6 +1438,10 @@
             <span class="nav-icon"></span>
             <span>节点管理</span>
           </button>
+          <button class="nav-item" type="button" data-view="games">
+            <span class="nav-icon"></span>
+            <span>游戏管理</span>
+          </button>
           <button class="nav-item" type="button" data-view="routes">
             <span class="nav-icon"></span>
             <span>游戏路由</span>
@@ -1407,7 +1453,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.28.0</span>
+          <span class="mono">v0.29.0</span>
         </div>
       </aside>
 
@@ -1419,6 +1465,7 @@
           </div>
           <div class="top-actions">
             <button id="openCreateNode" class="primary" type="button">新增节点</button>
+            <button id="openGame" type="button">新增游戏</button>
             <button id="openRouteRule" type="button">新增规则</button>
             <button id="refreshNow" type="button">立即刷新</button>
             <button id="toggleAuto" type="button">自动刷新：开</button>
@@ -1571,6 +1618,65 @@
               </div>
             </aside>
           </section>
+        </section>
+
+        <section class="view hidden" id="viewGames" data-view-panel="games">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">游戏库</div>
+                <div class="panel-meta" id="gameMeta">最多 500 条</div>
+              </div>
+              <div class="inline-actions">
+                <button class="primary" type="button" data-open-game>新增游戏</button>
+              </div>
+            </div>
+            <div class="catalog-toolbar">
+              <div class="field">
+                <label for="gameKeyword">搜索游戏</label>
+                <input id="gameKeyword" autocomplete="off" placeholder="输入游戏名称或游戏 ID" />
+              </div>
+              <div class="field">
+                <label for="gamePlatformFilter">平台</label>
+                <select id="gamePlatformFilter">
+                  <option value="">全部平台</option>
+                  <option value="pc">PC</option>
+                  <option value="android">Android</option>
+                  <option value="ios">iOS</option>
+                  <option value="multi">多平台</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="gameStatusFilter">状态</label>
+                <select id="gameStatusFilter">
+                  <option value="">全部状态</option>
+                  <option value="enabled">启用</option>
+                  <option value="disabled">禁用</option>
+                </select>
+              </div>
+              <button type="button" id="refreshGames">筛选</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>游戏</th>
+                    <th>平台</th>
+                    <th>分类</th>
+                    <th>路由</th>
+                    <th>状态</th>
+                    <th>更新时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="gameRows">
+                  <tr>
+                    <td colspan="7"><span class="skeleton"></span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </section>
 
         <section class="view hidden" id="viewRoutes" data-view-panel="routes">
@@ -1830,6 +1936,11 @@
         <form class="modal-body" id="routeRuleForm">
           <input name="rule_id" type="hidden" />
           <div class="form-grid">
+            <div class="field span-2">
+              <label for="routeGameSelect">游戏库</label>
+              <select id="routeGameSelect" data-route-game-select></select>
+              <div class="form-help">选择后会自动填入游戏 ID 和名称；如果游戏还不存在，请先到游戏管理新增。</div>
+            </div>
             <div class="field">
               <label for="routeGameId">游戏 ID</label>
               <input id="routeGameId" name="game_id" type="number" min="1" placeholder="8888" required />
@@ -1883,10 +1994,70 @@
       </div>
     </div>
 
+    <div class="modal-backdrop hidden" id="gameModal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="gameModalTitle">
+        <div class="modal-head">
+          <div>
+            <div class="panel-title" id="gameModalTitle">新增游戏</div>
+            <div class="panel-meta">维护游戏名称、平台和分类，路由规则会从游戏库里选择对应游戏。</div>
+          </div>
+          <button id="closeGameModal" type="button">关闭</button>
+        </div>
+        <form class="modal-body" id="gameForm">
+          <input name="original_game_id" type="hidden" />
+          <div class="form-grid">
+            <div class="field">
+              <label for="gameId">游戏 ID</label>
+              <input id="gameId" name="game_id" type="number" min="1" placeholder="8888" required />
+              <div class="form-help">业务后台和客户端 connect-intent 使用的游戏编号。</div>
+            </div>
+            <div class="field">
+              <label for="gameName">游戏名称</label>
+              <input id="gameName" name="name" autocomplete="off" maxlength="128" placeholder="英雄联盟" required />
+            </div>
+            <div class="field">
+              <label for="gamePlatform">平台</label>
+              <select id="gamePlatform" name="platform">
+                <option value="pc">PC</option>
+                <option value="android">Android</option>
+                <option value="ios">iOS</option>
+                <option value="multi">多平台</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="gameCategory">分类</label>
+              <input id="gameCategory" name="category" autocomplete="off" maxlength="64" placeholder="MOBA / FPS / MMORPG" />
+            </div>
+            <div class="field">
+              <label for="gameStatus">状态</label>
+              <select id="gameStatus" name="status">
+                <option value="enabled">启用</option>
+                <option value="disabled">禁用</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="gameIconUrl">图标 URL</label>
+              <input id="gameIconUrl" name="icon_url" autocomplete="off" maxlength="512" placeholder="https://example.com/icon.png" />
+            </div>
+            <div class="field span-2">
+              <label for="gameRemark">备注</label>
+              <textarea id="gameRemark" name="remark" maxlength="512" placeholder="可选，记录游戏路由或测试说明"></textarea>
+            </div>
+          </div>
+          <div class="message error-text hidden" id="gameError"></div>
+          <div class="form-actions">
+            <button id="cancelGameModal" type="button">取消</button>
+            <button class="primary" type="submit">保存游戏</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <script>
       const PAGE_TITLES = {
         overview: "控制总览",
         nodes: "节点管理",
+        games: "游戏管理",
         routes: "游戏路由",
         ops: "运维工具",
       };
@@ -1894,6 +2065,7 @@
       const state = {
         token: localStorage.getItem("xaccel_admin_token") || "",
         nodes: [],
+        games: [],
         routeRules: [],
         selectedId: null,
         serverTime: null,
@@ -1918,6 +2090,19 @@
         cancelCreateNode: document.getElementById("cancelCreateNode"),
         createNodeForm: document.getElementById("createNodeForm"),
         createNodeError: document.getElementById("createNodeError"),
+        openGame: document.getElementById("openGame"),
+        gameModal: document.getElementById("gameModal"),
+        closeGameModal: document.getElementById("closeGameModal"),
+        cancelGameModal: document.getElementById("cancelGameModal"),
+        gameForm: document.getElementById("gameForm"),
+        gameModalTitle: document.getElementById("gameModalTitle"),
+        gameError: document.getElementById("gameError"),
+        gameMeta: document.getElementById("gameMeta"),
+        gameRows: document.getElementById("gameRows"),
+        gameKeyword: document.getElementById("gameKeyword"),
+        gamePlatformFilter: document.getElementById("gamePlatformFilter"),
+        gameStatusFilter: document.getElementById("gameStatusFilter"),
+        refreshGames: document.getElementById("refreshGames"),
         openRouteRule: document.getElementById("openRouteRule"),
         routeRuleModal: document.getElementById("routeRuleModal"),
         closeRouteRule: document.getElementById("closeRouteRule"),
@@ -1925,6 +2110,7 @@
         routeRuleForm: document.getElementById("routeRuleForm"),
         routeRuleTitle: document.getElementById("routeRuleTitle"),
         routeRuleError: document.getElementById("routeRuleError"),
+        routeGameSelect: document.getElementById("routeGameSelect"),
         refreshNow: document.getElementById("refreshNow"),
         toggleAuto: document.getElementById("toggleAuto"),
         statusLine: document.getElementById("statusLine"),
@@ -1989,6 +2175,27 @@
         els.createNodeModal.classList.add("hidden");
       }
 
+      function openGameModal(game = null) {
+        clearInlineError(els.gameError);
+        els.gameForm.reset();
+        els.gameForm.elements.original_game_id.value = game?.game_id || "";
+        els.gameForm.elements.game_id.value = game?.game_id || "";
+        els.gameForm.elements.game_id.readOnly = Boolean(game);
+        els.gameForm.elements.name.value = game?.name || "";
+        els.gameForm.elements.platform.value = game?.platform || "pc";
+        els.gameForm.elements.category.value = game?.category || "";
+        els.gameForm.elements.icon_url.value = game?.icon_url || "";
+        els.gameForm.elements.status.value = game?.status || "enabled";
+        els.gameForm.elements.remark.value = game?.remark || "";
+        els.gameModalTitle.textContent = game ? "编辑游戏" : "新增游戏";
+        els.gameModal.classList.remove("hidden");
+        els.gameForm.elements[game ? "name" : "game_id"].focus();
+      }
+
+      function closeGameModal() {
+        els.gameModal.classList.add("hidden");
+      }
+
       function populateRouteNodeOptions(selectedNodeId) {
         els.routeRuleForm.elements.node_id.innerHTML = state.nodes
           .map((node) => {
@@ -1999,10 +2206,31 @@
           .join("");
       }
 
+      function populateRouteGameOptions(selectedGameId) {
+        const games = [...state.games].sort((left, right) => left.game_id - right.game_id);
+        els.routeGameSelect.innerHTML = [
+          `<option value="">手动输入游戏</option>`,
+          ...games.map((game) => {
+            const selected = Number(selectedGameId) === Number(game.game_id) ? "selected" : "";
+            return `<option value="${game.game_id}" ${selected}>${escapeHtml(game.name)} / ID ${game.game_id}</option>`;
+          }),
+        ].join("");
+      }
+
+      function applyRouteGameSelection() {
+        const gameId = Number(els.routeGameSelect.value);
+        if (!gameId) return;
+        const game = state.games.find((item) => Number(item.game_id) === gameId);
+        if (!game) return;
+        els.routeRuleForm.elements.game_id.value = game.game_id;
+        els.routeRuleForm.elements.game_name.value = game.name;
+      }
+
       function openRouteRuleModal(rule = null) {
         clearInlineError(els.routeRuleError);
         els.routeRuleForm.reset();
         populateRouteNodeOptions(rule?.node_id || state.selectedId || state.nodes[0]?.id);
+        populateRouteGameOptions(rule?.game_id);
         els.routeRuleForm.elements.rule_id.value = rule?.id || "";
         els.routeRuleForm.elements.game_id.value = rule?.game_id || "";
         els.routeRuleForm.elements.game_name.value = rule?.game_name || "";
@@ -2014,7 +2242,7 @@
         els.routeRuleForm.elements.tag.value = rule?.tag || "";
         els.routeRuleTitle.textContent = rule ? "编辑路由规则" : "新增路由规则";
         els.routeRuleModal.classList.remove("hidden");
-        els.routeRuleForm.elements.game_name.focus();
+        els.routeGameSelect.focus();
       }
 
       function closeRouteRuleModal() {
@@ -2093,6 +2321,24 @@
         if (status === "enabled") return "启用";
         if (status === "disabled") return "禁用";
         return status || "未知";
+      }
+
+      function gameStatusText(status) {
+        return routeStatusText(status);
+      }
+
+      function platformText(platform) {
+        if (platform === "pc") return "PC";
+        if (platform === "android") return "Android";
+        if (platform === "ios") return "iOS";
+        if (platform === "multi") return "多平台";
+        return platform || "未知";
+      }
+
+      function gameInitials(game) {
+        const name = (game?.name || "").trim();
+        if (!name) return "GM";
+        return name.slice(0, 2).toUpperCase();
       }
 
       function reportStatusText(status) {
@@ -2371,6 +2617,57 @@
                       ? `<button type="button" data-resume-node="${node.id}">恢复调度</button>`
                       : `<span class="muted mono">--</span>`
                   }
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      function renderGames() {
+        if (!state.games.length) {
+          els.gameRows.innerHTML = `<tr><td colspan="7" class="empty">暂无游戏，请先新增一个游戏再配置路由。</td></tr>`;
+          return;
+        }
+
+        const sortedGames = [...state.games].sort((left, right) => {
+          const statusRank = { enabled: 0, disabled: 1 };
+          return (
+            (statusRank[left.status] ?? 2) - (statusRank[right.status] ?? 2) ||
+            left.game_id - right.game_id
+          );
+        });
+
+        els.gameRows.innerHTML = sortedGames
+          .map((game) => {
+            const enabled = game.status === "enabled";
+            const nextStatus = enabled ? "disabled" : "enabled";
+            return `
+              <tr data-game-id="${game.game_id}">
+                <td>
+                  <div class="game-cell">
+                    <div class="game-icon">${escapeHtml(gameInitials(game))}</div>
+                    <div class="node-name">
+                      <span class="strong node-title" title="${escapeHtml(game.name)}">${escapeHtml(game.name)}</span>
+                      <span class="muted mono">ID ${game.game_id}</span>
+                    </div>
+                  </div>
+                </td>
+                <td>${escapeHtml(platformText(game.platform))}</td>
+                <td>${escapeHtml(game.category || "--")}</td>
+                <td class="mono">${game.route_count || 0}</td>
+                <td><span class="chip ${enabled ? "ok" : "bad"}">${escapeHtml(gameStatusText(game.status))}</span></td>
+                <td>
+                  <div class="mono">${escapeHtml(formatTime(game.updated_at))}</div>
+                  <div class="cell-note">${escapeHtml(game.remark || "")}</div>
+                </td>
+                <td>
+                  <div class="row-actions">
+                    <button type="button" data-game-action="route" data-game-id="${game.game_id}">配路由</button>
+                    <button type="button" data-game-action="edit" data-game-id="${game.game_id}">编辑</button>
+                    <button type="button" data-game-action="toggle" data-game-status="${nextStatus}" data-game-id="${game.game_id}">${enabled ? "禁用" : "启用"}</button>
+                    <button class="danger" type="button" data-game-action="delete" data-game-id="${game.game_id}">删除</button>
+                  </div>
                 </td>
               </tr>
             `;
@@ -2710,6 +3007,7 @@
         if (!state.selectedId && state.nodes.length) {
           state.selectedId = state.nodes[0].id;
         }
+        await loadGames({ silent: true });
         await loadRouteRules({ silent: true });
         const latestReport = state.nodes.reduce(
           (max, node) => Math.max(max, node.last_report_at || 0),
@@ -2727,6 +3025,25 @@
         if (state.selectedId) {
           await loadDetail(state.selectedId, { silent: true });
         }
+      }
+
+      async function loadGames({ silent = false } = {}) {
+        if (!silent) {
+          els.gameRows.innerHTML = `<tr><td colspan="7"><span class="skeleton"></span></td></tr>`;
+        }
+        const params = new URLSearchParams({ limit: "500" });
+        const keyword = textOrNull(els.gameKeyword?.value);
+        const platform = textOrNull(els.gamePlatformFilter?.value);
+        const status = textOrNull(els.gameStatusFilter?.value);
+        if (keyword) params.set("keyword", keyword);
+        if (platform) params.set("platform", platform);
+        if (status) params.set("status", status);
+
+        const data = await api(`/api/admin/v1/games?${params.toString()}`);
+        state.games = data.games || [];
+        renderGames();
+        populateRouteGameOptions(els.routeRuleForm?.elements?.game_id?.value);
+        els.gameMeta.textContent = `${state.games.length} 个游戏 / 刷新 ${formatClock(data.server_time)}`;
       }
 
       async function loadDetail(nodeId, { silent = false } = {}) {
@@ -2783,6 +3100,7 @@
         localStorage.removeItem("xaccel_admin_token");
         state.token = "";
         state.nodes = [];
+        state.games = [];
         state.routeRules = [];
         state.selectedId = null;
         clearInterval(state.timer);
@@ -2813,6 +3131,20 @@
         }
         const relayPort = numberOrNull(form.elements.relay_server_port.value);
         if (relayPort) payload.relay_server_port = relayPort;
+        return payload;
+      }
+
+      function gamePayloadFromForm(form) {
+        const payload = {
+          game_id: Number(form.elements.game_id.value),
+          name: form.elements.name.value.trim(),
+          platform: form.elements.platform.value || "pc",
+          status: form.elements.status.value || "enabled",
+        };
+        for (const key of ["category", "icon_url", "remark"]) {
+          const value = textOrNull(form.elements[key]?.value);
+          if (value) payload[key] = value;
+        }
         return payload;
       }
 
@@ -2972,6 +3304,58 @@
         await loadNodes();
       }
 
+      async function saveGame(form) {
+        clearInlineError(els.gameError);
+        const originalGameId = numberOrNull(form.elements.original_game_id.value);
+        const payload = gamePayloadFromForm(form);
+        const path = originalGameId
+          ? `/api/admin/v1/games/${originalGameId}`
+          : "/api/admin/v1/games";
+        await api(path, {
+          method: originalGameId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        closeGameModal();
+        setActiveView("games");
+        await loadGames();
+      }
+
+      async function setGameStatus(game, status) {
+        const payload = {
+          game_id: game.game_id,
+          name: game.name,
+          platform: game.platform,
+          status,
+        };
+        if (game.category) payload.category = game.category;
+        if (game.icon_url) payload.icon_url = game.icon_url;
+        if (game.remark) payload.remark = game.remark;
+        await api(`/api/admin/v1/games/${game.game_id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        await loadGames();
+      }
+
+      async function deleteGame(gameId) {
+        await api(`/api/admin/v1/games/${gameId}`, {
+          method: "DELETE",
+        });
+        await loadGames();
+      }
+
+      function openRouteForGame(game) {
+        openRouteRuleModal({
+          game_id: game.game_id,
+          game_name: game.name,
+          protocol: "udp",
+          priority: 100,
+          status: "enabled",
+        });
+      }
+
       async function saveRouteRule(form) {
         clearInlineError(els.routeRuleError);
         const ruleId = numberOrNull(form.elements.rule_id.value);
@@ -3124,6 +3508,16 @@
         if (event.target === els.createNodeModal) closeCreateNodeModal();
       });
 
+      els.openGame.addEventListener("click", () => openGameModal());
+      document.querySelectorAll("[data-open-game]").forEach((button) => {
+        button.addEventListener("click", () => openGameModal());
+      });
+      els.closeGameModal.addEventListener("click", closeGameModal);
+      els.cancelGameModal.addEventListener("click", closeGameModal);
+      els.gameModal.addEventListener("click", (event) => {
+        if (event.target === els.gameModal) closeGameModal();
+      });
+
       els.openRouteRule.addEventListener("click", () => openRouteRuleModal());
       document.querySelectorAll("[data-open-route]").forEach((button) => {
         button.addEventListener("click", () => openRouteRuleModal());
@@ -3140,6 +3534,29 @@
           showInlineError(els.createNodeError, error.message);
         });
       });
+
+      els.gameForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        saveGame(els.gameForm).catch((error) => {
+          showInlineError(els.gameError, error.message);
+        });
+      });
+
+      els.refreshGames.addEventListener("click", () => {
+        loadGames().catch(showError);
+      });
+
+      els.gameKeyword.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          loadGames().catch(showError);
+        }
+      });
+
+      els.gamePlatformFilter.addEventListener("change", () => loadGames().catch(showError));
+      els.gameStatusFilter.addEventListener("change", () => loadGames().catch(showError));
+
+      els.routeGameSelect.addEventListener("change", applyRouteGameSelection);
 
       els.routeRuleForm.addEventListener("submit", (event) => {
         event.preventDefault();
@@ -3186,6 +3603,30 @@
         if (!row) return;
         setActiveView("nodes");
         loadDetail(row.dataset.nodeId).catch(showError);
+      });
+
+      els.gameRows.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-game-action]");
+        if (!button) return;
+        const gameId = Number(button.dataset.gameId);
+        const game = state.games.find((item) => Number(item.game_id) === gameId);
+        if (!game) return;
+
+        if (button.dataset.gameAction === "route") {
+          openRouteForGame(game);
+        }
+        if (button.dataset.gameAction === "edit") {
+          openGameModal(game);
+        }
+        if (button.dataset.gameAction === "toggle") {
+          setGameStatus(game, button.dataset.gameStatus).catch(showError);
+        }
+        if (button.dataset.gameAction === "delete") {
+          const confirmed = window.confirm(`确定删除游戏 ${game.name}（${game.game_id}）吗？已有路由规则不会被删除。`);
+          if (confirmed) {
+            deleteGame(game.game_id).catch(showError);
+          }
+        }
       });
 
       els.routeRows.addEventListener("click", (event) => {

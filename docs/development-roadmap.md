@@ -290,6 +290,14 @@ Done in `v0.28.0`:
   checks from the control plane, then return probe latency, relay latency,
   upstream response text, selected route, and exact failure step to `/admin`.
 
+Done in `v0.29.0`:
+
+- Add a first-class game catalog for the control plane. Operators can create,
+  edit, enable, disable, filter, and delete game records from `/admin`, while
+  route-rule forms can select from the catalog and auto-fill game ID and name.
+- Add token-protected admin APIs for `accel_games` and MySQL schema migration
+  that seeds the game catalog from existing route rules.
+
 Goals:
 
 - Add nonce replay storage for node report requests.
