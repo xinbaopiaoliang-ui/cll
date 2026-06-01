@@ -7,11 +7,15 @@ manual token minting and `backend-mock` for the client `connect-intent` path.
 
 - Read online nodes from MySQL.
 - Read and manage the game catalog from MySQL.
+- Read synced game regions from MySQL.
 - Read game route rules from MySQL.
-- Select a node for `user_id`, `device_id`, and `game_id`.
+- Select a node for `user_id`, `device_id`, `game_id`, and optional
+  `region_id`.
 - Sign a short-lived `xat.v1` token with the selected node secret.
 - Store the issued connect intent for audit and later billing.
 - Return node address, route target, and credential to the client.
+- Accept token-protected business backend catalog syncs for games, regions, and
+  route rules.
 
 ## Database
 
@@ -40,6 +44,7 @@ The seed creates:
 
 - node `1` at `103.201.131.99:666`;
 - game catalog entry for `game_id = 8888`;
+- default region `region_id = 1` for `game_id = 8888`;
 - game route for `game_id = 8888` with a human-readable `game_name`;
 - route target `127.0.0.1:7777`.
 
@@ -89,12 +94,54 @@ curl -fsSL http://127.0.0.1:18080/api/client/v1/connect-intent \
   -d '{"user_id":1001,"device_id":"pc-001","game_id":8888,"platform":"pc","client_isp":"telecom","client_ip":"127.0.0.1","bandwidth_quality":"fast"}'
 ```
 
+Region-aware connect intent:
+
+```bash
+curl -fsSL http://127.0.0.1:18080/api/client/v1/connect-intent \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":1001,"device_id":"pc-001","game_id":8888,"region_id":1,"platform":"pc","client_isp":"telecom","client_ip":"127.0.0.1","bandwidth_quality":"fast"}'
+```
+
 Use `candidates[0].credential.token` in the UDP `probe` packet. The node will
 bind `candidates[0].route.target_addr` to the returned session.
 
+## Business Backend Sync
+
+The business management backend should own products, users, entitlements, game
+metadata, regions, and rule authoring. The control plane keeps an execution copy
+for scheduling nodes. Configure a separate sync token:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \
+  --database-url 'mysql://xaccel:password@127.0.0.1:3306/xaccel' \
+  --listen 0.0.0.0:18080 \
+  --public-base-url http://CONTROL_PUBLIC_IP:18080 \
+  --business-sync-token 'change-this-business-sync-token'
+```
+
+Then sync catalog data from the business backend:
+
+```bash
+curl -fsSL -X POST http://127.0.0.1:18080/api/business/v1/sync-catalog \
+  -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "source":"business-admin",
+    "revision":"2026-06-01T10:00:00Z",
+    "games":[{"game_id":8888,"name":"Local Echo Test","platform":"pc","status":"enabled"}],
+    "regions":[{"game_id":8888,"region_id":1,"name":"Default Region","area":"UNKNOWN","status":"enabled"}],
+    "route_rules":[{"external_id":"route-8888-default","game_id":8888,"game_name":"Local Echo Test","region_id":1,"region_name":"Default Region","node_id":1,"target_addr":"127.0.0.1:7777","protocol":"udp","priority":10,"status":"enabled"}]
+  }'
+```
+
+`external_id` should be provided by the business backend when possible. If it is
+omitted, the control API derives a stable id from the route fields so repeated
+catalog syncs update the same execution route instead of creating duplicates.
+
 ## Current Limits
 
-- User entitlement is not checked yet.
+- User entitlement is still owned by the business backend and is not checked by
+  the control plane yet.
 - Scheduling picks one online node by route priority and bandwidth quality.
 - Node secrets are stored as plaintext for MVP testing. Production should
   encrypt them or fetch them from a secret manager.

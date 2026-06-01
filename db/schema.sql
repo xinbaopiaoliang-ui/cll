@@ -62,10 +62,27 @@ CREATE TABLE accel_games (
   INDEX idx_category (category)
 );
 
+CREATE TABLE accel_game_regions (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  game_id BIGINT UNSIGNED NOT NULL,
+  region_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  area VARCHAR(32) NULL,
+  status ENUM('enabled', 'disabled') NOT NULL DEFAULT 'enabled',
+  remark VARCHAR(512) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_game_region (game_id, region_id),
+  INDEX idx_game_status (game_id, status),
+  INDEX idx_area (area)
+);
+
 CREATE TABLE game_route_rules (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   game_id BIGINT UNSIGNED NOT NULL,
   game_name VARCHAR(128) NOT NULL DEFAULT '',
+  region_id BIGINT UNSIGNED NULL,
+  region_name VARCHAR(128) NULL,
   node_id BIGINT UNSIGNED NOT NULL,
   target_addr VARCHAR(255) NOT NULL,
   protocol ENUM('udp') NOT NULL DEFAULT 'udp',
@@ -73,11 +90,15 @@ CREATE TABLE game_route_rules (
   tag VARCHAR(64) NULL,
   priority INT UNSIGNED NOT NULL DEFAULT 100,
   status ENUM('enabled', 'disabled') NOT NULL DEFAULT 'enabled',
+  sync_source VARCHAR(32) NULL,
+  external_id VARCHAR(128) NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_game_status_priority (game_id, status, priority),
+  INDEX idx_game_region_status_priority (game_id, region_id, status, priority),
+  INDEX idx_game_node_region_target (game_id, region_id, node_id, target_addr, protocol),
   INDEX idx_node_id (node_id),
-  UNIQUE KEY uniq_game_node_target (game_id, node_id, target_addr, protocol),
+  UNIQUE KEY idx_route_external (sync_source, external_id),
   CONSTRAINT fk_route_node
     FOREIGN KEY (node_id) REFERENCES accel_nodes(id)
     ON DELETE CASCADE
@@ -89,6 +110,7 @@ CREATE TABLE connect_intents (
   user_id BIGINT UNSIGNED NOT NULL,
   device_id VARCHAR(128) NOT NULL,
   game_id BIGINT UNSIGNED NOT NULL,
+  region_id BIGINT UNSIGNED NULL,
   node_id BIGINT UNSIGNED NOT NULL,
   target_addr VARCHAR(255) NOT NULL,
   protocol ENUM('udp') NOT NULL DEFAULT 'udp',
@@ -103,6 +125,7 @@ CREATE TABLE connect_intents (
   INDEX idx_user_created (user_id, created_at),
   INDEX idx_device_created (device_id, created_at),
   INDEX idx_game_created (game_id, created_at),
+  INDEX idx_game_region_created (game_id, region_id, created_at),
   INDEX idx_node_created (node_id, created_at),
   INDEX idx_expires_at (expires_at),
   CONSTRAINT fk_intent_node

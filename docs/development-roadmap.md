@@ -298,6 +298,14 @@ Done in `v0.29.0`:
 - Add token-protected admin APIs for `accel_games` and MySQL schema migration
   that seeds the game catalog from existing route rules.
 
+Done in `v0.30.0`:
+
+- Add a business-backend sync API so the business management system can push
+  games, game regions, and route rules into the control plane execution copy.
+- Add `region_id` support in connect-intent scheduling and `xaccel-client-probe`
+  so clients can request region-specific acceleration while still falling back
+  to global game routes.
+
 Goals:
 
 - Add nonce replay storage for node report requests.

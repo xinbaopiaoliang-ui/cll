@@ -32,6 +32,9 @@ struct Cli {
     #[arg(long, default_value_t = 8888)]
     game_id: u64,
 
+    #[arg(long)]
+    region_id: Option<u64>,
+
     #[arg(long, default_value = "pc")]
     platform: String,
 
@@ -68,6 +71,8 @@ struct ConnectIntentRequest {
     user_id: u64,
     device_id: String,
     game_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    region_id: Option<u64>,
     platform: String,
     client_isp: Option<String>,
     client_ip: Option<String>,
@@ -98,6 +103,10 @@ struct NodeCandidate {
 struct CandidateRoute {
     target_addr: String,
     protocol: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    region_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    region_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -116,6 +125,8 @@ struct ProbeRequest {
     user_id: u64,
     device_id: String,
     game_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    region_id: Option<u64>,
     transport: &'static str,
     token: String,
 }
@@ -298,6 +309,7 @@ async fn main() -> anyhow::Result<()> {
         user_id: cli.user_id,
         device_id: cli.device_id.clone(),
         game_id: cli.game_id,
+        region_id: cli.region_id,
         transport: "udp",
         token: candidate.credential.token.clone(),
     };
@@ -395,6 +407,7 @@ async fn request_connect_intent(
         user_id: cli.user_id,
         device_id: cli.device_id.clone(),
         game_id: cli.game_id,
+        region_id: cli.region_id,
         platform: cli.platform.clone(),
         client_isp: cli.client_isp.clone(),
         client_ip: cli.client_ip.clone(),

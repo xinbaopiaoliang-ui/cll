@@ -12,6 +12,9 @@ browser. The UI is organized as a management console with login, sidebar menus,
 overview, node management, game route management, and operations workspaces.
 Operators can create nodes, change status, generate bootstrap install commands,
 edit config, and manage route rules without direct MySQL edits.
+Business-backend catalog sync is separated from admin operations through
+`XACCEL_BUSINESS_SYNC_TOKEN`; it upserts games, game regions, and route rules
+into the control plane execution copy.
 
 ## Run
 
@@ -21,6 +24,7 @@ Prepare MySQL with `db/schema.sql` and seed a test node with
 ```bash
 export DATABASE_URL='mysql://xaccel:password@127.0.0.1:3306/xaccel'
 export XACCEL_ADMIN_TOKEN='change-this-token'
+export XACCEL_BUSINESS_SYNC_TOKEN='change-this-business-sync-token'
 
 cargo run --manifest-path control-api/Cargo.toml -- \
   --listen 127.0.0.1:18080
@@ -32,6 +36,7 @@ cargo run --manifest-path control-api/Cargo.toml -- \
 GET  /health
 GET  /admin
 POST /api/client/v1/connect-intent
+POST /api/business/v1/sync-catalog
 POST /api/node/v1/report
 POST /api/admin/v1/nodes
 GET  /api/admin/v1/nodes
@@ -51,6 +56,15 @@ Request:
 curl -fsSL http://127.0.0.1:18080/api/client/v1/connect-intent \
   -H 'Content-Type: application/json' \
   -d '{"user_id":1001,"device_id":"pc-001","game_id":8888,"platform":"pc","client_isp":"telecom","client_ip":"127.0.0.1","bandwidth_quality":"fast"}'
+```
+
+`region_id` is optional. When present, scheduling prefers matching
+game-region routes and falls back to global routes for the same game:
+
+```bash
+curl -fsSL http://127.0.0.1:18080/api/client/v1/connect-intent \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":1001,"device_id":"pc-001","game_id":8888,"region_id":1,"platform":"pc","client_isp":"telecom","client_ip":"127.0.0.1","bandwidth_quality":"fast"}'
 ```
 
 `POST /api/node/v1/report` is called by `xaccel-node` when `[control].enabled`
@@ -97,3 +111,16 @@ curl -fsSL -X POST http://127.0.0.1:18080/api/admin/v1/game-route-rules \
   -H 'Content-Type: application/json' \
   -d '{"game_id":8888,"game_name":"Local Echo Test","node_id":1,"target_addr":"127.0.0.1:7777","protocol":"udp","priority":100,"status":"enabled"}'
 ```
+
+Sync catalog data from the business backend:
+
+```bash
+curl -fsSL -X POST http://127.0.0.1:18080/api/business/v1/sync-catalog \
+  -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"business-admin","games":[{"game_id":8888,"name":"Local Echo Test","platform":"pc","status":"enabled"}],"regions":[{"game_id":8888,"region_id":1,"name":"Default Region","area":"UNKNOWN","status":"enabled"}],"route_rules":[{"external_id":"route-8888-default","game_id":8888,"game_name":"Local Echo Test","region_id":1,"region_name":"Default Region","node_id":1,"target_addr":"127.0.0.1:7777","protocol":"udp","priority":10,"status":"enabled"}]}'
+```
+
+`external_id` is recommended for route rules. If it is omitted, the control API
+generates a stable id from game, region, node, target, and protocol so repeated
+syncs remain idempotent.

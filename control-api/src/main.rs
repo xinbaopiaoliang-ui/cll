@@ -72,6 +72,9 @@ struct Cli {
 
     #[arg(long, env = "XACCEL_PUBLIC_BASE_URL")]
     public_base_url: Option<String>,
+
+    #[arg(long, env = "XACCEL_BUSINESS_SYNC_TOKEN")]
+    business_sync_token: Option<String>,
 }
 
 #[derive(Clone)]
@@ -80,6 +83,7 @@ struct AppState {
     token_ttl_sec: u64,
     admin_token: Option<String>,
     public_base_url: Option<String>,
+    business_sync_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,6 +91,7 @@ struct ConnectIntentRequest {
     user_id: u64,
     device_id: String,
     game_id: u64,
+    region_id: Option<u64>,
     platform: Option<String>,
     client_isp: Option<String>,
     client_ip: Option<String>,
@@ -106,6 +111,7 @@ struct AdminConnectivityDiagnosticRequest {
     user_id: u64,
     device_id: String,
     game_id: u64,
+    region_id: Option<u64>,
     platform: Option<String>,
     client_isp: Option<String>,
     client_ip: Option<String>,
@@ -269,6 +275,7 @@ struct ClientContext {
     client_isp: Option<String>,
     client_ip: Option<String>,
     bandwidth_quality: String,
+    region_id: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -306,6 +313,8 @@ struct ClientTokenClaims {
     user_id: u64,
     device_id: String,
     game_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    region_id: Option<u64>,
     intent_id: Option<String>,
     route: Option<ClientRouteClaims>,
     expires_at: u64,
@@ -317,6 +326,10 @@ struct ClientTokenClaims {
 struct ClientRouteClaims {
     target_addr: String,
     protocol: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    region_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    region_name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -520,6 +533,7 @@ type AdminUpdateGameRequest = AdminGameRequest;
 #[derive(Debug, Deserialize)]
 struct AdminListRouteRulesQuery {
     game_id: Option<u64>,
+    region_id: Option<u64>,
     node_id: Option<u64>,
     status: Option<String>,
     limit: Option<u32>,
@@ -529,6 +543,8 @@ struct AdminListRouteRulesQuery {
 struct AdminRouteRuleRequest {
     game_id: u64,
     game_name: String,
+    region_id: Option<u64>,
+    region_name: Option<String>,
     node_id: u64,
     target_addr: String,
     protocol: Option<String>,
@@ -539,6 +555,55 @@ struct AdminRouteRuleRequest {
 }
 
 type AdminUpdateRouteRuleRequest = AdminRouteRuleRequest;
+
+#[derive(Debug, Deserialize)]
+struct BusinessSyncCatalogRequest {
+    source: Option<String>,
+    revision: Option<String>,
+    #[serde(default)]
+    games: Vec<BusinessSyncGame>,
+    #[serde(default)]
+    regions: Vec<BusinessSyncRegion>,
+    #[serde(default, alias = "routes")]
+    route_rules: Vec<BusinessSyncRouteRule>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BusinessSyncGame {
+    game_id: u64,
+    name: String,
+    platform: Option<String>,
+    category: Option<String>,
+    icon_url: Option<String>,
+    status: Option<String>,
+    remark: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BusinessSyncRegion {
+    game_id: u64,
+    region_id: u64,
+    name: String,
+    area: Option<String>,
+    status: Option<String>,
+    remark: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BusinessSyncRouteRule {
+    external_id: Option<String>,
+    game_id: u64,
+    game_name: Option<String>,
+    region_id: Option<u64>,
+    region_name: Option<String>,
+    node_id: u64,
+    target_addr: String,
+    protocol: Option<String>,
+    area: Option<String>,
+    tag: Option<String>,
+    priority: Option<u32>,
+    status: Option<String>,
+}
 
 #[derive(Debug, Serialize)]
 struct AdminListNodesResponse {
@@ -635,6 +700,17 @@ struct AdminDeleteRouteRuleResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct BusinessSyncCatalogResponse {
+    status: &'static str,
+    source: String,
+    revision: Option<String>,
+    games_upserted: usize,
+    regions_upserted: usize,
+    route_rules_upserted: usize,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
 struct AdminNodeSummary {
     id: u64,
     name: String,
@@ -679,6 +755,8 @@ struct AdminRouteRuleSummary {
     id: u64,
     game_id: u64,
     game_name: String,
+    region_id: Option<u64>,
+    region_name: Option<String>,
     node_id: u64,
     node_name: String,
     node_endpoint: String,
@@ -689,6 +767,8 @@ struct AdminRouteRuleSummary {
     tag: Option<String>,
     priority: u32,
     status: String,
+    sync_source: Option<String>,
+    external_id: Option<String>,
     created_at: Option<u64>,
     updated_at: Option<u64>,
 }
@@ -749,6 +829,8 @@ struct CandidateRow {
     node_secret: String,
     target_addr: String,
     protocol: String,
+    region_id: Option<u64>,
+    region_name: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -824,6 +906,8 @@ struct AdminRouteRuleRow {
     id: u64,
     game_id: u64,
     game_name: String,
+    region_id: Option<u64>,
+    region_name: Option<String>,
     node_id: u64,
     node_name: String,
     node_server_ip: String,
@@ -835,6 +919,8 @@ struct AdminRouteRuleRow {
     tag: Option<String>,
     priority: u32,
     status: String,
+    sync_source: Option<String>,
+    external_id: Option<String>,
     created_at: Option<u64>,
     updated_at: Option<u64>,
 }
@@ -868,9 +954,21 @@ struct NormalizedGame {
 }
 
 #[derive(Debug)]
+struct NormalizedGameRegion {
+    game_id: u64,
+    region_id: u64,
+    name: String,
+    area: Option<String>,
+    status: String,
+    remark: Option<String>,
+}
+
+#[derive(Debug)]
 struct NormalizedRouteRule {
     game_id: u64,
     game_name: String,
+    region_id: Option<u64>,
+    region_name: Option<String>,
     node_id: u64,
     target_addr: String,
     protocol: String,
@@ -878,6 +976,17 @@ struct NormalizedRouteRule {
     tag: Option<String>,
     priority: u32,
     status: String,
+    sync_source: Option<String>,
+    external_id: Option<String>,
+}
+
+#[derive(Debug)]
+struct BusinessSyncCatalog {
+    source: String,
+    revision: Option<String>,
+    games: Vec<NormalizedGame>,
+    regions: Vec<NormalizedGameRegion>,
+    route_rules: Vec<NormalizedRouteRule>,
 }
 
 #[derive(Debug, FromRow)]
@@ -983,11 +1092,18 @@ async fn main() -> anyhow::Result<()> {
             .map(str::trim)
             .filter(|url| !url.is_empty())
             .map(trim_trailing_slash),
+        business_sync_token: cli
+            .business_sync_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .map(ToOwned::to_owned),
     };
     let app = Router::new()
         .route("/admin", get(admin_dashboard))
         .route("/health", get(health))
         .route("/api/client/v1/connect-intent", post(connect_intent))
+        .route("/api/business/v1/sync-catalog", post(business_sync_catalog))
         .route(NODE_BOOTSTRAP_PATH, post(node_bootstrap))
         .route(NODE_HANDSHAKE_PATH, post(node_handshake))
         .route(NODE_CONFIG_PATH, get(node_config))
@@ -1049,26 +1165,19 @@ async fn admin_dashboard() -> Html<&'static str> {
 async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
     ensure_game_route_game_name_column(pool).await?;
     ensure_game_catalog_table(pool).await?;
+    ensure_game_region_table(pool).await?;
+    ensure_game_route_business_columns(pool).await?;
+    ensure_game_route_region_indexes(pool).await?;
+    ensure_connect_intent_region_column(pool).await?;
     seed_game_catalog_from_routes(pool).await?;
     Ok(())
 }
 
 async fn ensure_game_route_game_name_column(pool: &MySqlPool) -> anyhow::Result<()> {
-    let exists = sqlx::query_scalar::<_, String>(
-        r#"
-SELECT COLUMN_NAME
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'game_route_rules'
-  AND COLUMN_NAME = 'game_name'
-LIMIT 1
-"#,
-    )
-    .fetch_optional(pool)
-    .await
-    .context("failed to inspect game_route_rules.game_name")?;
-
-    if exists.is_none() {
+    if !mysql_column_exists(pool, "game_route_rules", "game_name")
+        .await
+        .context("failed to inspect game_route_rules.game_name")?
+    {
         sqlx::query(
             r#"
 ALTER TABLE game_route_rules
@@ -1081,6 +1190,210 @@ ADD COLUMN game_name VARCHAR(128) NOT NULL DEFAULT '' AFTER game_id
     }
 
     Ok(())
+}
+
+async fn ensure_game_region_table(pool: &MySqlPool) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+CREATE TABLE IF NOT EXISTS accel_game_regions (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  game_id BIGINT UNSIGNED NOT NULL,
+  region_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  area VARCHAR(32) NULL,
+  status ENUM('enabled', 'disabled') NOT NULL DEFAULT 'enabled',
+  remark VARCHAR(512) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_game_region (game_id, region_id),
+  INDEX idx_game_status (game_id, status),
+  INDEX idx_area (area)
+)
+"#,
+    )
+    .execute(pool)
+    .await
+    .context("failed to create accel_game_regions")?;
+    Ok(())
+}
+
+async fn ensure_game_route_business_columns(pool: &MySqlPool) -> anyhow::Result<()> {
+    ensure_column(
+        pool,
+        "game_route_rules",
+        "region_id",
+        "ALTER TABLE game_route_rules ADD COLUMN region_id BIGINT UNSIGNED NULL AFTER game_name",
+    )
+    .await?;
+    ensure_column(
+        pool,
+        "game_route_rules",
+        "region_name",
+        "ALTER TABLE game_route_rules ADD COLUMN region_name VARCHAR(128) NULL AFTER region_id",
+    )
+    .await?;
+    ensure_column(
+        pool,
+        "game_route_rules",
+        "sync_source",
+        "ALTER TABLE game_route_rules ADD COLUMN sync_source VARCHAR(32) NULL AFTER status",
+    )
+    .await?;
+    ensure_column(
+        pool,
+        "game_route_rules",
+        "external_id",
+        "ALTER TABLE game_route_rules ADD COLUMN external_id VARCHAR(128) NULL AFTER sync_source",
+    )
+    .await?;
+    ensure_index(
+        pool,
+        "game_route_rules",
+        "idx_game_region_status_priority",
+        "ALTER TABLE game_route_rules ADD INDEX idx_game_region_status_priority (game_id, region_id, status, priority)",
+    )
+    .await?;
+    ensure_index(
+        pool,
+        "game_route_rules",
+        "idx_route_external",
+        "ALTER TABLE game_route_rules ADD UNIQUE KEY idx_route_external (sync_source, external_id)",
+    )
+    .await?;
+    Ok(())
+}
+
+async fn ensure_game_route_region_indexes(pool: &MySqlPool) -> anyhow::Result<()> {
+    drop_index_if_exists(pool, "game_route_rules", "uniq_game_node_target").await?;
+    ensure_index(
+        pool,
+        "game_route_rules",
+        "idx_game_node_region_target",
+        "ALTER TABLE game_route_rules ADD INDEX idx_game_node_region_target (game_id, region_id, node_id, target_addr, protocol)",
+    )
+    .await?;
+    Ok(())
+}
+
+async fn ensure_connect_intent_region_column(pool: &MySqlPool) -> anyhow::Result<()> {
+    ensure_column(
+        pool,
+        "connect_intents",
+        "region_id",
+        "ALTER TABLE connect_intents ADD COLUMN region_id BIGINT UNSIGNED NULL AFTER game_id",
+    )
+    .await?;
+    ensure_index(
+        pool,
+        "connect_intents",
+        "idx_game_region_created",
+        "ALTER TABLE connect_intents ADD INDEX idx_game_region_created (game_id, region_id, created_at)",
+    )
+    .await?;
+    Ok(())
+}
+
+async fn ensure_column(
+    pool: &MySqlPool,
+    table: &'static str,
+    column: &'static str,
+    alter_sql: &'static str,
+) -> anyhow::Result<()> {
+    if !mysql_column_exists(pool, table, column)
+        .await
+        .with_context(|| format!("failed to inspect {table}.{column}"))?
+    {
+        sqlx::query(alter_sql)
+            .execute(pool)
+            .await
+            .with_context(|| format!("failed to add {table}.{column}"))?;
+    }
+    Ok(())
+}
+
+async fn ensure_index(
+    pool: &MySqlPool,
+    table: &'static str,
+    index_name: &'static str,
+    alter_sql: &'static str,
+) -> anyhow::Result<()> {
+    let exists = sqlx::query_scalar::<_, String>(
+        r#"
+SELECT INDEX_NAME
+FROM information_schema.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = ?
+  AND INDEX_NAME = ?
+LIMIT 1
+"#,
+    )
+    .bind(table)
+    .bind(index_name)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("failed to inspect index {table}.{index_name}"))?;
+
+    if exists.is_none() {
+        sqlx::query(alter_sql)
+            .execute(pool)
+            .await
+            .with_context(|| format!("failed to add index {table}.{index_name}"))?;
+    }
+    Ok(())
+}
+
+async fn drop_index_if_exists(
+    pool: &MySqlPool,
+    table: &'static str,
+    index_name: &'static str,
+) -> anyhow::Result<()> {
+    let exists = sqlx::query_scalar::<_, String>(
+        r#"
+SELECT INDEX_NAME
+FROM information_schema.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = ?
+  AND INDEX_NAME = ?
+LIMIT 1
+"#,
+    )
+    .bind(table)
+    .bind(index_name)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("failed to inspect index {table}.{index_name}"))?;
+
+    if exists.is_some() {
+        let sql = format!("ALTER TABLE {table} DROP INDEX {index_name}");
+        sqlx::query(&sql)
+            .execute(pool)
+            .await
+            .with_context(|| format!("failed to drop index {table}.{index_name}"))?;
+    }
+    Ok(())
+}
+
+async fn mysql_column_exists(
+    pool: &MySqlPool,
+    table: &'static str,
+    column: &'static str,
+) -> anyhow::Result<bool> {
+    let exists = sqlx::query_scalar::<_, String>(
+        r#"
+SELECT COLUMN_NAME
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = ?
+  AND COLUMN_NAME = ?
+LIMIT 1
+"#,
+    )
+    .bind(table)
+    .bind(column)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(exists.is_some())
 }
 
 async fn ensure_game_catalog_table(pool: &MySqlPool) -> anyhow::Result<()> {
@@ -1167,6 +1480,13 @@ fn validate_cli(cli: &Cli) -> anyhow::Result<()> {
             bail!("--public-base-url must start with http:// or https://");
         }
     }
+    if cli
+        .business_sync_token
+        .as_deref()
+        .is_some_and(|token| token.trim().is_empty())
+    {
+        bail!("--business-sync-token must not be empty when provided");
+    }
     Ok(())
 }
 
@@ -1203,6 +1523,17 @@ async fn connect_intent(
 ) -> Result<Json<ConnectIntentResponse>, AppError> {
     validate_connect_intent_request(&request)?;
     let response = issue_connect_intent(&state.pool, state.token_ttl_sec, request).await?;
+    Ok(Json(response))
+}
+
+async fn business_sync_catalog(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<BusinessSyncCatalogRequest>,
+) -> Result<Json<BusinessSyncCatalogResponse>, AppError> {
+    require_business_sync(&state, &headers)?;
+    let catalog = normalize_business_sync_catalog(request)?;
+    let response = sync_business_catalog(&state.pool, catalog).await?;
     Ok(Json(response))
 }
 
@@ -1697,6 +2028,7 @@ async fn run_connectivity_diagnostic(
         user_id: request.user_id,
         device_id: request.device_id.clone(),
         game_id: request.game_id,
+        region_id: request.region_id,
         platform: request.platform.clone(),
         client_isp: request.client_isp.clone(),
         client_ip: request.client_ip.clone(),
@@ -2105,12 +2437,15 @@ async fn issue_connect_intent(
     let route = ClientRouteClaims {
         target_addr: row.target_addr.clone(),
         protocol: row.protocol.clone(),
+        region_id: row.region_id,
+        region_name: row.region_name.clone(),
     };
     let claims = ClientTokenClaims {
         node_id: row.node_id,
         user_id: request.user_id,
         device_id: request.device_id.clone(),
         game_id: request.game_id,
+        region_id: request.region_id,
         intent_id: Some(intent_id.clone()),
         route: Some(route.clone()),
         expires_at,
@@ -2129,6 +2464,7 @@ async fn issue_connect_intent(
         client_isp: request.client_isp,
         client_ip: request.client_ip,
         bandwidth_quality: requested_quality,
+        region_id: request.region_id,
     };
 
     Ok(ConnectIntentResponse {
@@ -2170,7 +2506,7 @@ async fn select_candidate(
     request: &ConnectIntentRequest,
     requested_quality: &str,
 ) -> Result<Option<CandidateRow>, AppError> {
-    sqlx::query_as::<_, CandidateRow>(
+    let mut builder = QueryBuilder::<MySql>::new(
         r#"
 SELECT
   n.id AS node_id,
@@ -2181,29 +2517,63 @@ SELECT
   n.bandwidth_quality,
   n.node_secret,
   r.target_addr,
-  r.protocol
+  r.protocol,
+  r.region_id,
+  r.region_name
 FROM game_route_rules r
 JOIN accel_nodes n ON n.id = r.node_id
-WHERE r.game_id = ?
+WHERE r.game_id =
+"#,
+    );
+    builder.push_bind(request.game_id);
+    builder.push(
+        r#"
   AND r.status = 'enabled'
   AND r.protocol = 'udp'
   AND n.status = 'online'
   AND n.disable_quic = 0
   AND n.node_secret IS NOT NULL
   AND n.node_secret <> ''
+"#,
+    );
+    if let Some(region_id) = request.region_id {
+        builder.push(" AND (r.region_id = ");
+        builder.push_bind(region_id);
+        builder.push(" OR r.region_id IS NULL)");
+    } else {
+        builder.push(" AND r.region_id IS NULL");
+    }
+    builder.push(
+        r#"
 ORDER BY
-  CASE WHEN n.bandwidth_quality = ? THEN 0 ELSE 1 END,
+"#,
+    );
+    if let Some(region_id) = request.region_id {
+        builder.push("  CASE WHEN r.region_id = ");
+        builder.push_bind(region_id);
+        builder.push(" THEN 0 WHEN r.region_id IS NULL THEN 1 ELSE 2 END,");
+    }
+    builder.push(
+        r#"
+  CASE WHEN n.bandwidth_quality =
+"#,
+    );
+    builder.push_bind(requested_quality);
+    builder.push(
+        r#"
+  THEN 0 ELSE 1 END,
   r.priority ASC,
   n.last_seen_at DESC,
   n.id ASC
 LIMIT 1
 "#,
-    )
-    .bind(request.game_id)
-    .bind(requested_quality)
-    .fetch_optional(pool)
-    .await
-    .map_err(AppError::database)
+    );
+
+    builder
+        .build_query_as::<CandidateRow>()
+        .fetch_optional(pool)
+        .await
+        .map_err(AppError::database)
 }
 
 async fn insert_connect_intent(
@@ -2220,6 +2590,7 @@ INSERT INTO connect_intents (
   user_id,
   device_id,
   game_id,
+  region_id,
   node_id,
   target_addr,
   protocol,
@@ -2229,13 +2600,14 @@ INSERT INTO connect_intents (
   bandwidth_quality,
   expires_at,
   created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), CURRENT_TIMESTAMP)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), CURRENT_TIMESTAMP)
 "#,
     )
     .bind(intent_id)
     .bind(request.user_id)
     .bind(&request.device_id)
     .bind(request.game_id)
+    .bind(request.region_id)
     .bind(row.node_id)
     .bind(&row.target_addr)
     .bind(&row.protocol)
@@ -2715,6 +3087,8 @@ SELECT
   r.id,
   r.game_id,
   COALESCE(NULLIF(r.game_name, ''), CONCAT('游戏 ', r.game_id)) AS game_name,
+  r.region_id,
+  r.region_name,
   r.node_id,
   n.name AS node_name,
   n.server_ip AS node_server_ip,
@@ -2726,6 +3100,8 @@ SELECT
   r.tag,
   r.priority,
   r.status,
+  r.sync_source,
+  r.external_id,
   CAST(UNIX_TIMESTAMP(r.created_at) AS UNSIGNED) AS created_at,
   CAST(UNIX_TIMESTAMP(r.updated_at) AS UNSIGNED) AS updated_at
 FROM game_route_rules r
@@ -2737,6 +3113,10 @@ WHERE 1 = 1
     if let Some(game_id) = query.game_id {
         builder.push(" AND r.game_id = ");
         builder.push_bind(game_id);
+    }
+    if let Some(region_id) = query.region_id {
+        builder.push(" AND r.region_id = ");
+        builder.push_bind(region_id);
     }
     if let Some(node_id) = query.node_id {
         builder.push(" AND r.node_id = ");
@@ -2754,7 +3134,7 @@ WHERE 1 = 1
 
     builder.push(
         r#"
-ORDER BY r.game_id ASC, r.priority ASC, r.id ASC
+ORDER BY r.game_id ASC, r.region_id ASC, r.priority ASC, r.id ASC
 LIMIT
 "#,
     );
@@ -2777,6 +3157,8 @@ SELECT
   r.id,
   r.game_id,
   COALESCE(NULLIF(r.game_name, ''), CONCAT('游戏 ', r.game_id)) AS game_name,
+  r.region_id,
+  r.region_name,
   r.node_id,
   n.name AS node_name,
   n.server_ip AS node_server_ip,
@@ -2788,6 +3170,8 @@ SELECT
   r.tag,
   r.priority,
   r.status,
+  r.sync_source,
+  r.external_id,
   CAST(UNIX_TIMESTAMP(r.created_at) AS UNSIGNED) AS created_at,
   CAST(UNIX_TIMESTAMP(r.updated_at) AS UNSIGNED) AS updated_at
 FROM game_route_rules r
@@ -2908,6 +3292,8 @@ async fn insert_admin_route_rule(
 INSERT INTO game_route_rules (
   game_id,
   game_name,
+  region_id,
+  region_name,
   node_id,
   target_addr,
   protocol,
@@ -2917,11 +3303,13 @@ INSERT INTO game_route_rules (
   status,
   created_at,
   updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 "#,
     )
     .bind(rule.game_id)
     .bind(&rule.game_name)
+    .bind(rule.region_id)
+    .bind(&rule.region_name)
     .bind(rule.node_id)
     .bind(&rule.target_addr)
     .bind(&rule.protocol)
@@ -2955,6 +3343,8 @@ UPDATE game_route_rules
 SET
   game_id = ?,
   game_name = ?,
+  region_id = ?,
+  region_name = ?,
   node_id = ?,
   target_addr = ?,
   protocol = ?,
@@ -2968,6 +3358,8 @@ WHERE id = ?
     )
     .bind(rule.game_id)
     .bind(&rule.game_name)
+    .bind(rule.region_id)
+    .bind(&rule.region_name)
     .bind(rule.node_id)
     .bind(&rule.target_addr)
     .bind(&rule.protocol)
@@ -3002,6 +3394,173 @@ WHERE id = ?
     .map_err(AppError::database)?;
 
     Ok(result.rows_affected() > 0)
+}
+
+async fn sync_business_catalog(
+    pool: &MySqlPool,
+    catalog: BusinessSyncCatalog,
+) -> Result<BusinessSyncCatalogResponse, AppError> {
+    let games_upserted = catalog.games.len();
+    let regions_upserted = catalog.regions.len();
+    let route_rules_upserted = catalog.route_rules.len();
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
+
+    for game in &catalog.games {
+        upsert_business_game(&mut tx, game).await?;
+    }
+    for region in &catalog.regions {
+        upsert_business_region(&mut tx, region).await?;
+    }
+    for rule in &catalog.route_rules {
+        upsert_business_route_rule(&mut tx, rule).await?;
+    }
+
+    tx.commit().await.map_err(AppError::database)?;
+
+    Ok(BusinessSyncCatalogResponse {
+        status: "ok",
+        source: catalog.source,
+        revision: catalog.revision,
+        games_upserted,
+        regions_upserted,
+        route_rules_upserted,
+        server_time: now_unix(),
+    })
+}
+
+async fn upsert_business_game(
+    tx: &mut sqlx::Transaction<'_, MySql>,
+    game: &NormalizedGame,
+) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+INSERT INTO accel_games (
+  game_id,
+  name,
+  platform,
+  category,
+  icon_url,
+  status,
+  remark,
+  created_at,
+  updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  name = VALUES(name),
+  platform = VALUES(platform),
+  category = VALUES(category),
+  icon_url = VALUES(icon_url),
+  status = VALUES(status),
+  remark = VALUES(remark),
+  updated_at = CURRENT_TIMESTAMP
+"#,
+    )
+    .bind(game.game_id)
+    .bind(&game.name)
+    .bind(&game.platform)
+    .bind(&game.category)
+    .bind(&game.icon_url)
+    .bind(&game.status)
+    .bind(&game.remark)
+    .execute(&mut **tx)
+    .await
+    .map_err(map_game_write_error)?;
+    Ok(())
+}
+
+async fn upsert_business_region(
+    tx: &mut sqlx::Transaction<'_, MySql>,
+    region: &NormalizedGameRegion,
+) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+INSERT INTO accel_game_regions (
+  game_id,
+  region_id,
+  name,
+  area,
+  status,
+  remark,
+  created_at,
+  updated_at
+) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  name = VALUES(name),
+  area = VALUES(area),
+  status = VALUES(status),
+  remark = VALUES(remark),
+  updated_at = CURRENT_TIMESTAMP
+"#,
+    )
+    .bind(region.game_id)
+    .bind(region.region_id)
+    .bind(&region.name)
+    .bind(&region.area)
+    .bind(&region.status)
+    .bind(&region.remark)
+    .execute(&mut **tx)
+    .await
+    .map_err(AppError::database)?;
+    Ok(())
+}
+
+async fn upsert_business_route_rule(
+    tx: &mut sqlx::Transaction<'_, MySql>,
+    rule: &NormalizedRouteRule,
+) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+INSERT INTO game_route_rules (
+  game_id,
+  game_name,
+  region_id,
+  region_name,
+  node_id,
+  target_addr,
+  protocol,
+  area,
+  tag,
+  priority,
+  status,
+  sync_source,
+  external_id,
+  created_at,
+  updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  game_id = VALUES(game_id),
+  game_name = VALUES(game_name),
+  region_id = VALUES(region_id),
+  region_name = VALUES(region_name),
+  node_id = VALUES(node_id),
+  target_addr = VALUES(target_addr),
+  protocol = VALUES(protocol),
+  area = VALUES(area),
+  tag = VALUES(tag),
+  priority = VALUES(priority),
+  status = VALUES(status),
+  sync_source = VALUES(sync_source),
+  external_id = VALUES(external_id),
+  updated_at = CURRENT_TIMESTAMP
+"#,
+    )
+    .bind(rule.game_id)
+    .bind(&rule.game_name)
+    .bind(rule.region_id)
+    .bind(&rule.region_name)
+    .bind(rule.node_id)
+    .bind(&rule.target_addr)
+    .bind(&rule.protocol)
+    .bind(&rule.area)
+    .bind(&rule.tag)
+    .bind(rule.priority)
+    .bind(&rule.status)
+    .bind(&rule.sync_source)
+    .bind(&rule.external_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(map_route_rule_write_error)?;
+    Ok(())
 }
 
 async fn ensure_admin_node_exists(pool: &MySqlPool, node_id: u64) -> Result<(), AppError> {
@@ -3444,6 +4003,12 @@ fn validate_connect_intent_request(request: &ConnectIntentRequest) -> Result<(),
             "game_id must be positive",
         ));
     }
+    if request.region_id == Some(0) {
+        return Err(AppError::bad_request(
+            "invalid_region",
+            "region_id must be positive",
+        ));
+    }
     if let Some(quality) = request.bandwidth_quality.as_deref() {
         if !matches!(quality, "fast" | "normal" | "slow") {
             return Err(AppError::bad_request(
@@ -3462,6 +4027,7 @@ fn validate_connectivity_diagnostic_request(
         user_id: request.user_id,
         device_id: request.device_id.clone(),
         game_id: request.game_id,
+        region_id: request.region_id,
         platform: request.platform.clone(),
         client_isp: request.client_isp.clone(),
         client_ip: request.client_ip.clone(),
@@ -3658,6 +4224,171 @@ fn normalize_game_request(request: &AdminGameRequest) -> Result<NormalizedGame, 
     })
 }
 
+fn normalize_business_sync_catalog(
+    request: BusinessSyncCatalogRequest,
+) -> Result<BusinessSyncCatalog, AppError> {
+    if request.games.is_empty() && request.regions.is_empty() && request.route_rules.is_empty() {
+        return Err(AppError::bad_request(
+            "empty_sync_catalog",
+            "at least one game, region, or route_rule is required",
+        ));
+    }
+    let source = normalize_optional_text(request.source.as_deref(), 32)?
+        .unwrap_or_else(|| "business".to_string());
+    let revision = normalize_optional_text(request.revision.as_deref(), 128)?;
+    let games = request
+        .games
+        .iter()
+        .map(normalize_business_game)
+        .collect::<Result<Vec<_>, _>>()?;
+    let regions = request
+        .regions
+        .iter()
+        .map(normalize_business_region)
+        .collect::<Result<Vec<_>, _>>()?;
+    let route_rules = request
+        .route_rules
+        .iter()
+        .map(|rule| normalize_business_route_rule(rule, &source))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(BusinessSyncCatalog {
+        source,
+        revision,
+        games,
+        regions,
+        route_rules,
+    })
+}
+
+fn normalize_business_game(request: &BusinessSyncGame) -> Result<NormalizedGame, AppError> {
+    normalize_game_request(&AdminGameRequest {
+        game_id: request.game_id,
+        name: request.name.clone(),
+        platform: request.platform.clone(),
+        category: request.category.clone(),
+        icon_url: request.icon_url.clone(),
+        status: request.status.clone(),
+        remark: request.remark.clone(),
+    })
+}
+
+fn normalize_business_region(
+    request: &BusinessSyncRegion,
+) -> Result<NormalizedGameRegion, AppError> {
+    if request.game_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_game",
+            "game_id must be positive",
+        ));
+    }
+    if request.region_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_region",
+            "region_id must be positive",
+        ));
+    }
+
+    Ok(NormalizedGameRegion {
+        game_id: request.game_id,
+        region_id: request.region_id,
+        name: normalize_required_text(&request.name, "name", 128)?,
+        area: normalize_optional_text(request.area.as_deref(), 32)?,
+        status: validate_game_status(request.status.as_deref().unwrap_or("enabled"))?.to_string(),
+        remark: normalize_optional_text(request.remark.as_deref(), 512)?,
+    })
+}
+
+fn normalize_business_route_rule(
+    request: &BusinessSyncRouteRule,
+    source: &str,
+) -> Result<NormalizedRouteRule, AppError> {
+    if request.game_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_game",
+            "game_id must be positive",
+        ));
+    }
+    if request.node_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_node",
+            "node_id must be positive",
+        ));
+    }
+    if request.region_id == Some(0) {
+        return Err(AppError::bad_request(
+            "invalid_region",
+            "region_id must be positive",
+        ));
+    }
+
+    let protocol = request
+        .protocol
+        .as_deref()
+        .map(str::trim)
+        .filter(|protocol| !protocol.is_empty())
+        .unwrap_or("udp");
+    if protocol != "udp" {
+        return Err(AppError::bad_request(
+            "invalid_route_protocol",
+            "protocol must be udp",
+        ));
+    }
+
+    let target_addr = validate_target_addr(&request.target_addr)?;
+    let game_name = normalize_optional_text(request.game_name.as_deref(), 128)?
+        .unwrap_or_else(|| format!("Game {}", request.game_id));
+    let external_id = normalize_optional_text(request.external_id.as_deref(), 128)?.or_else(|| {
+        Some(default_business_route_external_id(
+            request.game_id,
+            request.region_id,
+            request.node_id,
+            &target_addr,
+            protocol,
+        ))
+    });
+
+    Ok(NormalizedRouteRule {
+        game_id: request.game_id,
+        game_name,
+        region_id: request.region_id,
+        region_name: normalize_optional_text(request.region_name.as_deref(), 128)?,
+        node_id: request.node_id,
+        target_addr,
+        protocol: protocol.to_string(),
+        area: normalize_optional_text(request.area.as_deref(), 32)?,
+        tag: normalize_optional_text(request.tag.as_deref(), 64)?,
+        priority: request.priority.unwrap_or(100),
+        status: validate_route_rule_status(request.status.as_deref().unwrap_or("enabled"))?
+            .to_string(),
+        sync_source: Some(source.to_string()),
+        external_id,
+    })
+}
+
+fn default_business_route_external_id(
+    game_id: u64,
+    region_id: Option<u64>,
+    node_id: u64,
+    target_addr: &str,
+    protocol: &str,
+) -> String {
+    let seed = format!(
+        "{game_id}:{}:{node_id}:{target_addr}:{protocol}",
+        region_id
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "global".to_string())
+    );
+    let digest = Sha256::digest(seed.as_bytes());
+    let short_hash = URL_SAFE_NO_PAD.encode(&digest[..9]);
+    format!(
+        "route-{game_id}-{}-{short_hash}",
+        region_id
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "global".to_string())
+    )
+}
+
 fn validate_game_platform(platform: &str) -> Result<&'static str, AppError> {
     match platform.trim() {
         "" | "pc" => Ok("pc"),
@@ -3689,6 +4420,12 @@ fn validate_route_rule_query(query: &AdminListRouteRulesQuery) -> Result<(), App
             "game_id must be positive",
         ));
     }
+    if query.region_id == Some(0) {
+        return Err(AppError::bad_request(
+            "invalid_region",
+            "region_id must be positive",
+        ));
+    }
     if query.node_id == Some(0) {
         return Err(AppError::bad_request(
             "invalid_node",
@@ -3716,6 +4453,12 @@ fn normalize_route_rule_request(
             "node_id must be positive",
         ));
     }
+    if request.region_id == Some(0) {
+        return Err(AppError::bad_request(
+            "invalid_region",
+            "region_id must be positive",
+        ));
+    }
 
     let protocol = request
         .protocol
@@ -3733,6 +4476,8 @@ fn normalize_route_rule_request(
     Ok(NormalizedRouteRule {
         game_id: request.game_id,
         game_name: normalize_required_text(&request.game_name, "game_name", 128)?,
+        region_id: request.region_id,
+        region_name: normalize_optional_text(request.region_name.as_deref(), 128)?,
         node_id: request.node_id,
         target_addr: validate_target_addr(&request.target_addr)?,
         protocol: protocol.to_string(),
@@ -3741,6 +4486,8 @@ fn normalize_route_rule_request(
         priority: request.priority.unwrap_or(100),
         status: validate_route_rule_status(request.status.as_deref().unwrap_or("enabled"))?
             .to_string(),
+        sync_source: None,
+        external_id: None,
     })
 }
 
@@ -4090,6 +4837,30 @@ fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> 
     }
 }
 
+fn require_business_sync(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+    let configured = state.business_sync_token.as_deref().ok_or_else(|| {
+        AppError::service_unavailable(
+            "business_sync_disabled",
+            "business sync API is disabled because XACCEL_BUSINESS_SYNC_TOKEN is not configured",
+        )
+    })?;
+    let provided = business_sync_token_from_headers(headers).ok_or_else(|| {
+        AppError::unauthorized(
+            "business_sync_auth_required",
+            "business sync token is required",
+        )
+    })?;
+
+    if constant_time_eq(configured.as_bytes(), provided.as_bytes()) {
+        Ok(())
+    } else {
+        Err(AppError::unauthorized(
+            "business_sync_auth_failed",
+            "business sync token is invalid",
+        ))
+    }
+}
+
 fn admin_token_from_headers(headers: &HeaderMap) -> Option<&str> {
     if let Some(value) = headers
         .get("authorization")
@@ -4102,6 +4873,22 @@ fn admin_token_from_headers(headers: &HeaderMap) -> Option<&str> {
 
     headers
         .get("X-Admin-Token")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+}
+
+fn business_sync_token_from_headers(headers: &HeaderMap) -> Option<&str> {
+    if let Some(value) = headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+    {
+        if let Some(token) = value.strip_prefix("Bearer ") {
+            return Some(token.trim());
+        }
+    }
+
+    headers
+        .get("X-Business-Sync-Token")
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
 }
@@ -4385,6 +5172,8 @@ impl AdminRouteRuleSummary {
             id: row.id,
             game_id: row.game_id,
             game_name: row.game_name,
+            region_id: row.region_id,
+            region_name: row.region_name,
             node_id: row.node_id,
             node_name: row.node_name,
             node_endpoint: format!("{}:{}", row.node_server_ip, row.node_server_port),
@@ -4395,6 +5184,8 @@ impl AdminRouteRuleSummary {
             tag: row.tag,
             priority: row.priority,
             status: row.status,
+            sync_source: row.sync_source,
+            external_id: row.external_id,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }
@@ -4505,6 +5296,7 @@ mod tests {
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
+            region_id: None,
             platform: Some("pc".to_string()),
             client_isp: Some("telecom".to_string()),
             client_ip: Some("127.0.0.1".to_string()),
@@ -4534,6 +5326,8 @@ mod tests {
         AdminRouteRuleRequest {
             game_id: 8888,
             game_name: "Local Echo Test".to_string(),
+            region_id: None,
+            region_name: None,
             node_id: 1,
             target_addr: "127.0.0.1:7777".to_string(),
             protocol: Some("udp".to_string()),
@@ -4567,6 +5361,7 @@ mod tests {
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
+            region_id: None,
             platform: Some("pc".to_string()),
             client_isp: Some("telecom".to_string()),
             client_ip: Some("127.0.0.1".to_string()),
@@ -4598,16 +5393,29 @@ mod tests {
     }
 
     #[test]
+    fn rejects_zero_region_connect_intent() {
+        let mut request = valid_request();
+        request.region_id = Some(0);
+
+        let error = validate_connect_intent_request(&request).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_region");
+    }
+
+    #[test]
     fn signs_xat_v1_token() {
         let claims = ClientTokenClaims {
             node_id: 1,
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
+            region_id: None,
             intent_id: Some("intent-test".to_string()),
             route: Some(ClientRouteClaims {
                 target_addr: "127.0.0.1:7777".to_string(),
                 protocol: "udp".to_string(),
+                region_id: None,
+                region_name: None,
             }),
             expires_at: now_unix() + 120,
             issued_at: Some(now_unix()),
@@ -4797,6 +5605,98 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", "Bearer secret".parse().unwrap());
         assert_eq!(admin_token_from_headers(&headers), Some("secret"));
+    }
+
+    #[test]
+    fn reads_business_sync_token_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Business-Sync-Token", "sync-secret".parse().unwrap());
+        assert_eq!(
+            business_sync_token_from_headers(&headers),
+            Some("sync-secret")
+        );
+    }
+
+    #[test]
+    fn normalizes_business_sync_catalog() {
+        let request = BusinessSyncCatalogRequest {
+            source: Some("billing".to_string()),
+            revision: Some("rev-1".to_string()),
+            games: vec![BusinessSyncGame {
+                game_id: 8888,
+                name: "Local Echo Test".to_string(),
+                platform: Some("pc".to_string()),
+                category: Some("test".to_string()),
+                icon_url: None,
+                status: Some("enabled".to_string()),
+                remark: None,
+            }],
+            regions: vec![BusinessSyncRegion {
+                game_id: 8888,
+                region_id: 1,
+                name: "Default Region".to_string(),
+                area: Some("UNKNOWN".to_string()),
+                status: Some("enabled".to_string()),
+                remark: None,
+            }],
+            route_rules: vec![BusinessSyncRouteRule {
+                external_id: Some("route-8888-default".to_string()),
+                game_id: 8888,
+                game_name: Some("Local Echo Test".to_string()),
+                region_id: Some(1),
+                region_name: Some("Default Region".to_string()),
+                node_id: 1,
+                target_addr: "127.0.0.1:7777".to_string(),
+                protocol: Some("udp".to_string()),
+                area: Some("UNKNOWN".to_string()),
+                tag: Some("standalone".to_string()),
+                priority: Some(10),
+                status: Some("enabled".to_string()),
+            }],
+        };
+
+        let catalog = normalize_business_sync_catalog(request).expect("catalog");
+        assert_eq!(catalog.source, "billing");
+        assert_eq!(catalog.revision.as_deref(), Some("rev-1"));
+        assert_eq!(catalog.games[0].name, "Local Echo Test");
+        assert_eq!(catalog.regions[0].region_id, 1);
+        assert_eq!(catalog.route_rules[0].region_id, Some(1));
+        assert_eq!(
+            catalog.route_rules[0].sync_source.as_deref(),
+            Some("billing")
+        );
+        assert_eq!(
+            catalog.route_rules[0].external_id.as_deref(),
+            Some("route-8888-default")
+        );
+    }
+
+    #[test]
+    fn generates_business_route_external_id_when_missing() {
+        let request = BusinessSyncRouteRule {
+            external_id: None,
+            game_id: 8888,
+            game_name: Some("Local Echo Test".to_string()),
+            region_id: Some(1),
+            region_name: Some("Default Region".to_string()),
+            node_id: 2,
+            target_addr: "127.0.0.1:7777".to_string(),
+            protocol: Some("udp".to_string()),
+            area: None,
+            tag: None,
+            priority: None,
+            status: None,
+        };
+
+        let first = normalize_business_route_rule(&request, "billing").expect("route is valid");
+        let second = normalize_business_route_rule(&request, "billing").expect("route is valid");
+
+        assert_eq!(first.external_id, second.external_id);
+        assert!(first
+            .external_id
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("route-8888-1-"));
     }
 
     #[test]

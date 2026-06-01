@@ -27,7 +27,7 @@ INSERT INTO accel_nodes (
   'online',
   'PASTE_NODE_SECRET',
   CURRENT_TIMESTAMP,
-  '0.29.0',
+  '0.30.0',
   1
 ) ON DUPLICATE KEY UPDATE
   server_ip = VALUES(server_ip),
@@ -60,28 +60,60 @@ INSERT INTO accel_games (
   status = VALUES(status),
   remark = VALUES(remark);
 
+INSERT INTO accel_game_regions (
+  game_id,
+  region_id,
+  name,
+  area,
+  status,
+  remark
+) VALUES (
+  8888,
+  1,
+  'Default Region',
+  'UNKNOWN',
+  'enabled',
+  'Default test region for local UDP echo validation'
+) ON DUPLICATE KEY UPDATE
+  name = VALUES(name),
+  area = VALUES(area),
+  status = VALUES(status),
+  remark = VALUES(remark);
+
 INSERT INTO game_route_rules (
   game_id,
   game_name,
+  region_id,
+  region_name,
   node_id,
   target_addr,
   protocol,
   area,
   tag,
   priority,
-  status
+  status,
+  sync_source,
+  external_id
 ) VALUES (
   8888,
   'Local Echo Test',
+  NULL,
+  NULL,
   1,
   '127.0.0.1:7777',
   'udp',
   'UNKNOWN',
   'standalone',
   10,
-  'enabled'
+  'enabled',
+  'seed',
+  'local-echo-default'
 ) ON DUPLICATE KEY UPDATE
   game_name = VALUES(game_name),
+  region_id = VALUES(region_id),
+  region_name = VALUES(region_name),
   target_addr = VALUES(target_addr),
   priority = VALUES(priority),
-  status = VALUES(status);
+  status = VALUES(status),
+  sync_source = VALUES(sync_source),
+  external_id = VALUES(external_id);

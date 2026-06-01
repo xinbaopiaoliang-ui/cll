@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.29.0"
+INSTALLER_VERSION="0.30.0"
 SERVICE_NAME="xaccel-control-api"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-control-api"
@@ -17,6 +17,7 @@ TOKEN_TTL_SEC="120"
 MAX_DB_CONNECTIONS="8"
 ADMIN_TOKEN=""
 PUBLIC_BASE_URL=""
+BUSINESS_SYNC_TOKEN=""
 ARTIFACT_URL=""
 SHA256_URL=""
 DRY_RUN="0"
@@ -33,6 +34,8 @@ Options:
   --max-db-connections N  MySQL connection pool size. Default: 8.
   --admin-token TOKEN     Admin API bearer token. Generated automatically when omitted.
   --public-base-url URL   Optional public base URL for node bootstrap responses.
+  --business-sync-token TOKEN
+                         Optional bearer token for business backend catalog sync API.
   --artifact-url URL      Override xaccel-control-api tar.gz download URL.
   --sha256-url URL        Override xaccel-control-api sha256 download URL.
   --dry-run               Run preflight only and print planned actions.
@@ -73,6 +76,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --public-base-url)
       PUBLIC_BASE_URL="${2:-}"
+      shift 2
+      ;;
+    --business-sync-token)
+      BUSINESS_SYNC_TOKEN="${2:-}"
       shift 2
       ;;
     --artifact-url)
@@ -145,6 +152,21 @@ generate_admin_token_if_needed() {
   fi
 }
 
+load_existing_business_sync_token_if_needed() {
+  if [[ -n "$BUSINESS_SYNC_TOKEN" ]]; then
+    return 0
+  fi
+
+  if [[ -f "$ENV_FILE" ]]; then
+    local existing_token
+    existing_token="$(sed -n "s/^XACCEL_BUSINESS_SYNC_TOKEN='\(.*\)'$/\1/p" "$ENV_FILE" | tail -n 1 || true)"
+    if [[ -n "$existing_token" ]]; then
+      BUSINESS_SYNC_TOKEN="$existing_token"
+      log "reuse existing business sync token from ${ENV_FILE}"
+    fi
+  fi
+}
+
 env_escape() {
   printf '%s' "$1" | sed "s/'/'\\\\''/g"
 }
@@ -205,6 +227,9 @@ RUST_LOG='xaccel_control_api=info'
 EOF
   if [[ -n "$PUBLIC_BASE_URL" ]]; then
     printf "XACCEL_PUBLIC_BASE_URL='%s'\n" "$(env_escape "$PUBLIC_BASE_URL")" >> "$ENV_FILE"
+  fi
+  if [[ -n "$BUSINESS_SYNC_TOKEN" ]]; then
+    printf "XACCEL_BUSINESS_SYNC_TOKEN='%s'\n" "$(env_escape "$BUSINESS_SYNC_TOKEN")" >> "$ENV_FILE"
   fi
   chmod 0600 "$ENV_FILE"
 }
@@ -270,6 +295,7 @@ main() {
 
   install_binary_release
   generate_admin_token_if_needed
+  load_existing_business_sync_token_if_needed
   write_env
   write_systemd_unit
   enable_service

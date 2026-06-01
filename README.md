@@ -61,8 +61,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.29.0
-git push origin v0.29.0
+git tag v0.30.0
+git push origin v0.30.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -80,7 +80,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.29.0` keeps the legacy TCP/UDP `ping` probe, supports
+next stage. Version `0.30.0` keeps the legacy TCP/UDP `ping` probe, supports
 JSON `xaccel/1` client probe responses, verifies optional `xat.v1` HMAC client
 tokens, keeps a short-lived UDP session table, echoes `session.data` packets for
 client integration testing, binds backend-style connect-intent routes from
@@ -104,10 +104,15 @@ supports cloud servers whose public IP is NATed. Pulled configs are written back
 to the local node TOML so endpoint changes can take effect after a service
 restart. Nodes also perform a signed startup handshake with the control plane so
 the backend can immediately record node version, boot instance, last_seen, and
-current config revision before the first periodic report. The dashboard includes
+current config revision before the first periodic report. Version `0.30.0`
+adds a business-backend sync boundary: `xaccel-control-api` can accept
+token-protected catalog syncs at `/api/business/v1/sync-catalog`, upsert games,
+game regions, and route rules, and schedule connect-intents by optional
+`region_id`. The dashboard remains focused on node operations and emergency
+route visibility rather than becoming the source of business data. The dashboard includes
 CRUD for `game_route_rules`, letting operators create, edit, disable, and delete
 game-to-node target mappings without direct MySQL access. Version `0.29.0`
-adds a game catalog with token-protected admin APIs and a `/admin` game
+added a game catalog with token-protected admin APIs and a `/admin` game
 management page for creating, editing, filtering, enabling, disabling, and
 deleting games; route-rule forms can now pick a game from the catalog and
 auto-fill game ID and name. Version `0.28.0`

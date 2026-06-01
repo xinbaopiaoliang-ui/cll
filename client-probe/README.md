@@ -16,6 +16,7 @@ xaccel-client-probe \
   --user-id 1001 \
   --device-id pc-001 \
   --game-id 8888 \
+  --region-id 1 \
   --client-isp telecom \
   --client-ip 127.0.0.1 \
   --bandwidth-quality fast \
@@ -39,5 +40,7 @@ Expected result:
 }
 ```
 
-Use `--skip-session-data` when you only want to validate token issuance and node
-authentication. Use `--compact` when scripts need a single-line JSON result.
+Use `--region-id` to verify a region-specific route selected by
+`connect-intent`. Use `--skip-session-data` when you only want to validate token
+issuance and node authentication. Use `--compact` when scripts need a
+single-line JSON result.
