@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: XAccel Node Control API
-  version: 0.29.0
+  version: 0.31.0
   description: Backend APIs used by the Linux acceleration node installer and daemon.
 servers:
   - url: https://api.example.com
@@ -374,6 +374,10 @@ components:
         game_id:
           type: integer
           minimum: 1
+        region_id:
+          type: integer
+          minimum: 1
+          nullable: true
         platform:
           type: string
           nullable: true
@@ -416,6 +420,9 @@ components:
               nullable: true
             bandwidth_quality:
               type: string
+            region_id:
+              type: integer
+              nullable: true
         candidates:
           type: array
           items:
@@ -433,6 +440,7 @@ components:
         - probe
         - route
         - credential
+        - scheduler
       properties:
         node_id:
           type: integer
@@ -459,6 +467,8 @@ components:
           $ref: '#/components/schemas/ClientRoute'
         credential:
           $ref: '#/components/schemas/CredentialInfo'
+        scheduler:
+          $ref: '#/components/schemas/CandidateSchedulerInfo'
     ProbeInfo:
       type: object
       properties:
@@ -481,6 +491,41 @@ components:
         protocol:
           type: string
           enum: [udp]
+        region_id:
+          type: integer
+          nullable: true
+        region_name:
+          type: string
+          nullable: true
+    CandidateSchedulerInfo:
+      type: object
+      required:
+        - route_priority
+        - latest_active_sessions
+        - latest_udp_sessions
+        - latest_tcp_sessions
+        - report_fresh
+      properties:
+        route_priority:
+          type: integer
+          description: Lower route priority values are preferred.
+        latest_active_sessions:
+          type: integer
+          description: Active UDP plus TCP sessions from the latest node report.
+        latest_udp_sessions:
+          type: integer
+        latest_tcp_sessions:
+          type: integer
+        latest_reported_at:
+          type: integer
+          nullable: true
+          description: Unix timestamp of the latest runtime report used for scheduling.
+        latest_report_age_sec:
+          type: integer
+          nullable: true
+        report_fresh:
+          type: boolean
+          description: True when the latest report is no older than 90 seconds.
     CredentialInfo:
       type: object
       required:

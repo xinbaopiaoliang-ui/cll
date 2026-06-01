@@ -29,7 +29,12 @@ Expected result:
 {
   "status": "ok",
   "node": {
-    "address": "103.201.131.99:666"
+    "address": "103.201.131.99:666",
+    "scheduler": {
+      "route_priority": 10,
+      "latest_active_sessions": 0,
+      "report_fresh": true
+    }
   },
   "probe": {
     "credential_valid": true
@@ -41,6 +46,8 @@ Expected result:
 ```
 
 Use `--region-id` to verify a region-specific route selected by
-`connect-intent`. Use `--skip-session-data` when you only want to validate token
-issuance and node authentication. Use `--compact` when scripts need a
-single-line JSON result.
+`connect-intent`. The `node.scheduler` block explains the selected route
+priority, latest report freshness, and current session load used by the control
+plane. Use `--skip-session-data` when you only want to validate token issuance
+and node authentication. Use `--compact` when scripts need a single-line JSON
+result.

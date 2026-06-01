@@ -306,6 +306,14 @@ Done in `v0.30.0`:
   so clients can request region-specific acceleration while still falling back
   to global game routes.
 
+Done in `v0.31.0`:
+
+- Add load-aware connect-intent scheduling metadata. The control plane now
+  prefers fresh node reports and lower active session counts when region,
+  bandwidth quality, and route priority are otherwise equivalent.
+- Include scheduler details in connect-intent and `xaccel-client-probe` output
+  so operators can see route priority, latest report age, and session counts.
+
 Goals:
 
 - Add nonce replay storage for node report requests.

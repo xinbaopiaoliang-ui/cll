@@ -142,7 +142,9 @@ catalog syncs update the same execution route instead of creating duplicates.
 
 - User entitlement is still owned by the business backend and is not checked by
   the control plane yet.
-- Scheduling picks one online node by route priority and bandwidth quality.
+- Scheduling picks one online node by route priority, bandwidth quality, latest
+  report freshness, and active session counts. It does not yet use geographic
+  latency probes or ISP-specific historical quality.
 - Node secrets are stored as plaintext for MVP testing. Production should
   encrypt them or fetch them from a secret manager.
 - Billing and traffic aggregation are still pending.

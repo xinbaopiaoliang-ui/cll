@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.30.0`.
+Current version: `v0.31.0`.
 
 The node can:
 
@@ -36,6 +36,8 @@ The node can:
 - receive token-protected business backend catalog syncs for games, regions,
   and route rules;
 - schedule connect-intents by optional `region_id`;
+- prefer fresh node runtime reports and lower active session counts when
+  selecting between otherwise equivalent candidate nodes;
 - validate the full flow with the packaged `xaccel-client-probe` binary.
 
 The business backend remains the source of user entitlement, orders, game
@@ -47,8 +49,8 @@ node scheduling and operational visibility.
 From the local repository:
 
 ```bash
-git tag v0.30.0
-git push origin v0.30.0
+git tag v0.31.0
+git push origin v0.31.0
 ```
 
 GitHub Actions will publish:

@@ -97,6 +97,7 @@ struct NodeCandidate {
     bandwidth_quality: String,
     route: CandidateRoute,
     credential: CandidateCredential,
+    scheduler: Option<CandidateScheduler>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -114,6 +115,17 @@ struct CandidateCredential {
     token: String,
     expires_at: u64,
     intent_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct CandidateScheduler {
+    route_priority: u32,
+    latest_active_sessions: u32,
+    latest_udp_sessions: u32,
+    latest_tcp_sessions: u32,
+    latest_reported_at: Option<u64>,
+    latest_report_age_sec: Option<u64>,
+    report_fresh: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -228,6 +240,7 @@ struct NodeSummary {
     transports: Vec<String>,
     bandwidth_quality: String,
     route: CandidateRoute,
+    scheduler: Option<CandidateScheduler>,
 }
 
 #[derive(Debug, Serialize)]
@@ -361,6 +374,7 @@ async fn main() -> anyhow::Result<()> {
             transports: candidate.transports,
             bandwidth_quality: candidate.bandwidth_quality,
             route: candidate.route,
+            scheduler: candidate.scheduler,
         },
         probe: ProbeStepSummary {
             latency_ms: probe_latency_ms,

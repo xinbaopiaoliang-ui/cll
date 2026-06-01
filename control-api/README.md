@@ -5,7 +5,9 @@ Production-shaped Rust control-plane API for XAccel.
 This service owns client `connect-intent` scheduling. It reads MySQL node and
 route tables through SQLx, selects an online node, signs a short-lived `xat.v1`
 credential, stores the intent, and returns the node candidate to the client.
-It also receives HMAC-signed node runtime reports and stores them in MySQL.
+It uses route priority, bandwidth quality, recent node report freshness, and
+active session counts when selecting between candidate nodes. It also receives
+HMAC-signed node runtime reports and stores them in MySQL.
 Admin node management APIs are protected by an admin bearer token. The embedded
 dashboard is available at `/admin` and uses the same bearer token in the
 browser. The UI is organized as a management console with login, sidebar menus,
@@ -66,6 +68,10 @@ curl -fsSL http://127.0.0.1:18080/api/client/v1/connect-intent \
   -H 'Content-Type: application/json' \
   -d '{"user_id":1001,"device_id":"pc-001","game_id":8888,"region_id":1,"platform":"pc","client_isp":"telecom","client_ip":"127.0.0.1","bandwidth_quality":"fast"}'
 ```
+
+The response candidate includes a `scheduler` object with `route_priority`,
+latest report age, report freshness, and active session counters. Operators can
+use that block to explain why a node was selected during diagnostics.
 
 `POST /api/node/v1/report` is called by `xaccel-node` when `[control].enabled`
 is true. The request uses `X-Node-Id`, `X-Node-Timestamp`, `X-Node-Nonce`,

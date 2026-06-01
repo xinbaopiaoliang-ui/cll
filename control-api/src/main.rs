@@ -146,6 +146,7 @@ struct DiagnosticNodeSummary {
     transports: Vec<String>,
     bandwidth_quality: String,
     route: ClientRouteClaims,
+    scheduler: CandidateSchedulerInfo,
 }
 
 #[derive(Debug, Serialize)]
@@ -290,6 +291,18 @@ struct NodeCandidate {
     probe: ProbeInfo,
     route: ClientRouteClaims,
     credential: CredentialInfo,
+    scheduler: CandidateSchedulerInfo,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CandidateSchedulerInfo {
+    route_priority: u32,
+    latest_active_sessions: u32,
+    latest_udp_sessions: u32,
+    latest_tcp_sessions: u32,
+    latest_reported_at: Option<u64>,
+    latest_report_age_sec: Option<u64>,
+    report_fresh: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -831,6 +844,11 @@ struct CandidateRow {
     protocol: String,
     region_id: Option<u64>,
     region_name: Option<String>,
+    route_priority: u32,
+    latest_active_sessions: Option<u32>,
+    latest_udp_sessions: Option<u32>,
+    latest_tcp_sessions: Option<u32>,
+    latest_reported_at: Option<u64>,
 }
 
 #[derive(Debug, FromRow)]
@@ -2059,6 +2077,7 @@ async fn run_connectivity_diagnostic(
             .collect(),
         bandwidth_quality: candidate.bandwidth_quality.clone(),
         route: candidate.route.clone(),
+        scheduler: candidate.scheduler.clone(),
     };
     let node_addr = match node.address.parse::<SocketAddr>() {
         Ok(addr) => addr,
@@ -2430,6 +2449,7 @@ async fn issue_connect_intent(
 
     let issued_at = now_unix();
     let expires_at = issued_at + ttl_sec;
+    let scheduler = CandidateSchedulerInfo::from_candidate_row(&row, issued_at);
     let intent_id = format!(
         "intent-{}-{}-{}-{}",
         request.user_id, request.game_id, issued_at, row.node_id
@@ -2497,6 +2517,7 @@ async fn issue_connect_intent(
                 intent_id,
                 route,
             },
+            scheduler,
         }],
     })
 }
@@ -2519,9 +2540,22 @@ SELECT
   r.target_addr,
   r.protocol,
   r.region_id,
-  r.region_name
+  r.region_name,
+  r.priority AS route_priority,
+  lr.active_sessions AS latest_active_sessions,
+  lr.udp_sessions AS latest_udp_sessions,
+  lr.tcp_sessions AS latest_tcp_sessions,
+  CAST(UNIX_TIMESTAMP(lr.reported_at) AS UNSIGNED) AS latest_reported_at
 FROM game_route_rules r
 JOIN accel_nodes n ON n.id = r.node_id
+LEFT JOIN node_runtime_reports lr
+  ON lr.id = (
+    SELECT nr.id
+    FROM node_runtime_reports nr
+    WHERE nr.node_id = n.id
+    ORDER BY nr.reported_at DESC, nr.id DESC
+    LIMIT 1
+  )
 WHERE r.game_id =
 "#,
     );
@@ -2562,7 +2596,14 @@ ORDER BY
     builder.push(
         r#"
   THEN 0 ELSE 1 END,
+  CASE
+    WHEN lr.reported_at IS NULL THEN 1
+    WHEN TIMESTAMPDIFF(SECOND, lr.reported_at, CURRENT_TIMESTAMP) > 90 THEN 1
+    ELSE 0
+  END ASC,
   r.priority ASC,
+  COALESCE(lr.active_sessions, 0) ASC,
+  COALESCE(lr.udp_sessions, 0) ASC,
   n.last_seen_at DESC,
   n.id ASC
 LIMIT 1
@@ -5055,7 +5096,7 @@ fn map_route_rule_write_error(error: sqlx::Error) -> AppError {
         sqlx::Error::Database(error) if error.code().as_deref() == Some("1062") => {
             AppError::conflict(
                 "route_rule_exists",
-                "a route rule with the same game, node, target, and protocol already exists",
+                "a route rule with the same business sync source and external_id already exists",
             )
         }
         sqlx::Error::Database(error) if error.code().as_deref() == Some("1452") => {
@@ -5188,6 +5229,23 @@ impl AdminRouteRuleSummary {
             external_id: row.external_id,
             created_at: row.created_at,
             updated_at: row.updated_at,
+        }
+    }
+}
+
+impl CandidateSchedulerInfo {
+    fn from_candidate_row(row: &CandidateRow, now: u64) -> Self {
+        let latest_report_age_sec = row
+            .latest_reported_at
+            .map(|reported_at| now.saturating_sub(reported_at));
+        Self {
+            route_priority: row.route_priority,
+            latest_active_sessions: row.latest_active_sessions.unwrap_or_default(),
+            latest_udp_sessions: row.latest_udp_sessions.unwrap_or_default(),
+            latest_tcp_sessions: row.latest_tcp_sessions.unwrap_or_default(),
+            latest_reported_at: row.latest_reported_at,
+            latest_report_age_sec,
+            report_fresh: latest_report_age_sec.is_some_and(|age| age <= 90),
         }
     }
 }
@@ -5669,6 +5727,35 @@ mod tests {
             catalog.route_rules[0].external_id.as_deref(),
             Some("route-8888-default")
         );
+    }
+
+    #[test]
+    fn builds_candidate_scheduler_info() {
+        let row = CandidateRow {
+            node_id: 1,
+            server_ip: "103.201.131.99".to_string(),
+            server_port: 666,
+            area: "UNKNOWN".to_string(),
+            tag: Some("standalone".to_string()),
+            bandwidth_quality: "fast".to_string(),
+            node_secret: "secret".to_string(),
+            target_addr: "127.0.0.1:7777".to_string(),
+            protocol: "udp".to_string(),
+            region_id: Some(1),
+            region_name: Some("Default Region".to_string()),
+            route_priority: 10,
+            latest_active_sessions: Some(5),
+            latest_udp_sessions: Some(4),
+            latest_tcp_sessions: Some(1),
+            latest_reported_at: Some(1_000),
+        };
+
+        let scheduler = CandidateSchedulerInfo::from_candidate_row(&row, 1_030);
+
+        assert_eq!(scheduler.route_priority, 10);
+        assert_eq!(scheduler.latest_active_sessions, 5);
+        assert_eq!(scheduler.latest_report_age_sec, Some(30));
+        assert!(scheduler.report_fresh);
     }
 
     #[test]
