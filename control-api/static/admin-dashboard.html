@@ -477,55 +477,56 @@
       }
 
       .taxonomy-cell {
-        display: grid;
-        gap: 6px;
-        min-width: 130px;
-      }
-
-      button.taxonomy-edit {
         display: flex;
-        width: 100%;
-        min-height: 28px;
-        justify-content: flex-start;
-        padding: 0 8px;
-        border-color: transparent;
-        background: transparent;
-        box-shadow: none;
-      }
-
-      button.taxonomy-edit:hover {
-        border-color: var(--line-strong);
-        background: rgba(255, 255, 255, 0.72);
-        box-shadow: none;
-      }
-
-      .taxonomy-line {
-        display: grid;
-        grid-template-columns: 34px minmax(0, 1fr);
+        flex-wrap: wrap;
         gap: 6px;
-        align-items: center;
-        width: 100%;
+        min-width: 0;
+        max-width: 230px;
       }
 
-      .taxonomy-label {
+      button.taxonomy-chip {
+        min-height: 24px;
+        padding: 0 8px;
+        gap: 5px;
+        border-color: var(--line);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.7);
+        box-shadow: none;
+      }
+
+      button.taxonomy-chip:hover {
+        border-color: var(--line-strong);
+        background: var(--surface);
+        box-shadow: none;
+      }
+
+      .taxonomy-prefix,
+      .taxonomy-text {
+        min-width: 0;
+        line-height: 1;
+      }
+
+      .taxonomy-prefix {
         color: var(--muted);
         font-size: 11px;
-        font-weight: 760;
+        font-weight: 780;
       }
 
-      .taxonomy-value {
+      .taxonomy-text {
+        max-width: 120px;
         overflow: hidden;
         color: var(--ink);
         font-family: var(--mono);
+        font-size: 12px;
         font-weight: 760;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
 
-      .taxonomy-value.empty {
+      .taxonomy-chip.empty .taxonomy-text {
         color: var(--faint);
         font-family: var(--font);
-        font-weight: 650;
+        font-weight: 680;
       }
 
       .view {
@@ -1514,7 +1515,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.31.2</span>
+          <span class="mono">v0.31.3</span>
         </div>
       </aside>
 
@@ -2479,17 +2480,13 @@
         const tag = nodeTagValue(node);
         return `
           <div class="taxonomy-cell">
-            <button class="taxonomy-edit" type="button" data-node-action="edit-area" data-node-id="${node.id}" title="修改区域">
-              <span class="taxonomy-line">
-                <span class="taxonomy-label">区域</span>
-                <span class="taxonomy-value ${area ? "" : "empty"}">${escapeHtml(area || "未分区")}</span>
-              </span>
+            <button class="taxonomy-chip ${area ? "" : "empty"}" type="button" data-node-action="edit-area" data-node-id="${node.id}" title="修改区域">
+              <span class="taxonomy-prefix">区域</span>
+              <span class="taxonomy-text">${escapeHtml(area || "未分区")}</span>
             </button>
-            <button class="taxonomy-edit" type="button" data-node-action="edit-tag" data-node-id="${node.id}" title="修改标签">
-              <span class="taxonomy-line">
-                <span class="taxonomy-label">标签</span>
-                <span class="taxonomy-value ${tag ? "" : "empty"}">${escapeHtml(tag || "未设置")}</span>
-              </span>
+            <button class="taxonomy-chip ${tag ? "" : "empty"}" type="button" data-node-action="edit-tag" data-node-id="${node.id}" title="修改标签">
+              <span class="taxonomy-prefix">标签</span>
+              <span class="taxonomy-text">${escapeHtml(tag || "未设置")}</span>
             </button>
           </div>
         `;
