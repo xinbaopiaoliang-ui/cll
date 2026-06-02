@@ -5852,6 +5852,10 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"edit-tag\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"delete\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-resume-node"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("createNodeMeta"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("submitCreateNode"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("openEditNodeModal"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("saveNode"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/games"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/game-route-rules"));

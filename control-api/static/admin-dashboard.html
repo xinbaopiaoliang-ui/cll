@@ -1515,7 +1515,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.31.3</span>
+          <span class="mono">v0.31.4</span>
         </div>
       </aside>
 
@@ -1914,11 +1914,12 @@
         <div class="modal-head">
           <div>
             <div class="panel-title" id="createNodeTitle">新增节点</div>
-            <div class="panel-meta">创建节点记录后，再生成一键安装命令部署到 Linux 服务器。</div>
+            <div class="panel-meta" id="createNodeMeta">创建节点记录后，再生成一键安装命令部署到 Linux 服务器。</div>
           </div>
           <button id="closeCreateNode" type="button">关闭</button>
         </div>
         <form class="modal-body" id="createNodeForm">
+          <input name="node_id" type="hidden" />
           <div class="form-grid">
             <div class="field">
               <label for="nodeName">节点名称</label>
@@ -1980,7 +1981,7 @@
           <div class="message error-text hidden" id="createNodeError"></div>
           <div class="form-actions">
             <button id="cancelCreateNode" type="button">取消</button>
-            <button class="primary" type="submit">创建节点</button>
+            <button class="primary" id="submitCreateNode" type="submit">创建节点</button>
           </div>
         </form>
       </div>
@@ -2148,9 +2149,12 @@
         pageTitle: document.getElementById("pageTitle"),
         openCreateNode: document.getElementById("openCreateNode"),
         createNodeModal: document.getElementById("createNodeModal"),
+        createNodeTitle: document.getElementById("createNodeTitle"),
+        createNodeMeta: document.getElementById("createNodeMeta"),
         closeCreateNode: document.getElementById("closeCreateNode"),
         cancelCreateNode: document.getElementById("cancelCreateNode"),
         createNodeForm: document.getElementById("createNodeForm"),
+        submitCreateNode: document.getElementById("submitCreateNode"),
         createNodeError: document.getElementById("createNodeError"),
         openGame: document.getElementById("openGame"),
         gameModal: document.getElementById("gameModal"),
@@ -2224,13 +2228,84 @@
         element.classList.add("hidden");
       }
 
+      function focusNodeModalField(focusField = "name") {
+        const input =
+          els.createNodeForm.elements[focusField] ||
+          els.createNodeForm.elements.name ||
+          els.createNodeForm.querySelector("input, select, textarea");
+        if (!input) return;
+        window.requestAnimationFrame(() => {
+          input.focus();
+          if (typeof input.select === "function") {
+            input.select();
+          }
+        });
+      }
+
+      function setCreateNodeDefaults() {
+        const form = els.createNodeForm.elements;
+        form.node_id.value = "";
+        form.server_port.value = "666";
+        form.bandwidth_quality.value = "normal";
+        form.area.value = "UNKNOWN";
+        form.tag.value = "";
+        form.relay_server_ip.value = "";
+        form.relay_server_port.value = "";
+        form.telecom_ip.value = "";
+        form.mobile_ip.value = "";
+        form.unicom_ip.value = "";
+        form.is_support_ipv6.checked = false;
+        form.disable_quic.checked = false;
+      }
+
+      function fillNodeForm(node) {
+        const form = els.createNodeForm.elements;
+        form.node_id.value = node.id || "";
+        form.name.value = node.name || "";
+        form.server_ip.value = node.server_ip || "";
+        form.server_port.value = node.server_port || "666";
+        form.bandwidth_quality.value = node.bandwidth_quality || "normal";
+        form.area.value = node.area || "UNKNOWN";
+        form.tag.value = node.tag || "";
+        form.relay_server_ip.value = node.relay_server_ip || "";
+        form.relay_server_port.value = node.relay_server_port || "";
+        form.telecom_ip.value = node.telecom_ip || "";
+        form.mobile_ip.value = node.mobile_ip || "";
+        form.unicom_ip.value = node.unicom_ip || "";
+        form.is_support_ipv6.checked = Boolean(node.is_support_ipv6);
+        form.disable_quic.checked = Boolean(node.disable_quic);
+      }
+
       function openCreateNodeModal() {
         clearInlineError(els.createNodeError);
         els.createNodeForm.reset();
-        els.createNodeForm.elements.server_port.value = "666";
-        els.createNodeForm.elements.bandwidth_quality.value = "normal";
+        setCreateNodeDefaults();
+        els.createNodeTitle.textContent = "新增节点";
+        els.createNodeMeta.textContent = "创建节点记录后，再生成一键安装命令部署到 Linux 服务器。";
+        els.submitCreateNode.textContent = "创建节点";
         els.createNodeModal.classList.remove("hidden");
-        els.createNodeForm.elements.name.focus();
+        focusNodeModalField("name");
+      }
+
+      async function openEditNodeModal(nodeId, focusField = "name") {
+        const id = Number(nodeId);
+        if (!id) return;
+        clearInlineError(els.createNodeError);
+        let node = state.nodes.find((item) => Number(item.id) === id);
+        if (!node) {
+          const data = await api(`/api/admin/v1/nodes/${id}`);
+          node = data.node;
+        }
+        if (!node) return;
+        state.selectedId = id;
+        els.createNodeForm.reset();
+        fillNodeForm(node);
+        const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
+        els.createNodeTitle.textContent = "修改节点";
+        els.createNodeMeta.textContent = `${node.name} / ${endpoint} / ID ${id}`;
+        els.submitCreateNode.textContent = "保存修改";
+        els.createNodeModal.classList.remove("hidden");
+        focusNodeModalField(focusField);
       }
 
       function closeCreateNodeModal() {
@@ -3385,11 +3460,12 @@
         els.statusLine.classList.toggle("error-state", data.status !== "ok");
       }
 
-      async function createNode(form) {
+      async function saveNode(form) {
         clearInlineError(els.createNodeError);
+        const nodeId = numberOrNull(form.elements.node_id.value);
         const payload = nodePayloadFromForm(form);
-        const data = await api("/api/admin/v1/nodes", {
-          method: "POST",
+        const data = await api(nodeId ? `/api/admin/v1/nodes/${nodeId}` : "/api/admin/v1/nodes", {
+          method: nodeId ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
@@ -3397,32 +3473,12 @@
         closeCreateNodeModal();
         setActiveView("nodes");
         await loadNodes();
+        els.statusLine.textContent = nodeId ? `已保存节点 ${data.node.id}` : `已创建节点 ${data.node.id}`;
       }
 
       async function openNodeEditor(nodeId, focusField = "name") {
-        const id = Number(nodeId);
-        if (!id) return;
-        state.selectedId = id;
         setActiveView("nodes");
-        await loadDetail(id);
-        const editPanel = els.detailBody.querySelector("details.operation-card");
-        if (editPanel) {
-          editPanel.open = true;
-          editPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-        const focusInput = els.detailBody.querySelector(
-          `form[data-action="edit-node"] [name="${focusField}"]`,
-        );
-        const fallbackInput = els.detailBody.querySelector(
-          'form[data-action="edit-node"] [name="name"]',
-        );
-        const input = focusInput || fallbackInput;
-        if (input) {
-          input.focus();
-          if (typeof input.select === "function") {
-            input.select();
-          }
-        }
+        await openEditNodeModal(nodeId, focusField);
       }
 
       async function deleteNode(nodeId) {
@@ -3671,7 +3727,7 @@
 
       els.createNodeForm.addEventListener("submit", (event) => {
         event.preventDefault();
-        createNode(els.createNodeForm).catch((error) => {
+        saveNode(els.createNodeForm).catch((error) => {
           showInlineError(els.createNodeError, error.message);
         });
       });

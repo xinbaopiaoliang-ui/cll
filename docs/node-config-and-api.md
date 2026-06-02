@@ -111,7 +111,7 @@ POST /api/node/v1/handshake
 ```json
 {
   "node_id": 1,
-  "node_version": "0.31.3",
+  "node_version": "0.31.4",
   "os": "linux",
   "arch": "x86_64",
   "boot_id": "uuid",
