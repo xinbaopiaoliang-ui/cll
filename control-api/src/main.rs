@@ -5848,6 +5848,7 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("调度诊断"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"edit\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"deploy\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"edit-area\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"edit-tag\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"delete\""));
@@ -5856,6 +5857,9 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("submitCreateNode"));
         assert!(ADMIN_DASHBOARD_HTML.contains("openEditNodeModal"));
         assert!(ADMIN_DASHBOARD_HTML.contains("saveNode"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("deployNodeModal"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("openDeployNodeModal"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("controlUpgradeCommand"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/games"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/game-route-rules"));

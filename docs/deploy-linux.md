@@ -2,7 +2,7 @@
 
 This document describes how to deploy the current Linux node.
 
-Current version: `v0.31.4`.
+Current version: `v0.32.0`.
 
 The node can:
 
@@ -49,8 +49,8 @@ node scheduling and operational visibility.
 From the local repository:
 
 ```bash
-git tag v0.31.4
-git push origin v0.31.4
+git tag v0.32.0
+git push origin v0.32.0
 ```
 
 GitHub Actions will publish:

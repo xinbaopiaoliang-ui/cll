@@ -1360,6 +1360,10 @@
         overflow: auto;
       }
 
+      .modal.wide {
+        width: min(1040px, 100%);
+      }
+
       .modal-head {
         display: flex;
         align-items: center;
@@ -1371,6 +1375,96 @@
 
       .modal-body {
         padding: 18px;
+      }
+
+      .deploy-layout {
+        display: grid;
+        grid-template-columns: minmax(260px, 0.85fr) minmax(320px, 1.15fr);
+        gap: 16px;
+        align-items: start;
+      }
+
+      .deploy-rail {
+        display: grid;
+        gap: 12px;
+      }
+
+      .deploy-summary {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: linear-gradient(180deg, rgba(247, 250, 249, 0.92), rgba(255, 255, 255, 0.78));
+      }
+
+      .deploy-summary-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .deploy-status-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .deploy-status-item {
+        min-height: 64px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.74);
+      }
+
+      .deploy-status-label {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 760;
+      }
+
+      .deploy-status-value {
+        margin-top: 6px;
+        font-family: var(--mono);
+        font-size: 13px;
+        font-weight: 780;
+        overflow-wrap: anywhere;
+      }
+
+      .deploy-command-panel {
+        display: grid;
+        gap: 12px;
+      }
+
+      .deploy-command-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(247, 250, 249, 0.78);
+      }
+
+      .deploy-command-title {
+        display: grid;
+        gap: 2px;
+      }
+
+      .deploy-command-title strong {
+        font-size: 13px;
+      }
+
+      .deploy-command-title span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      #deployInstallCommand {
+        min-height: 210px;
       }
 
       @media (max-width: 1120px) {
@@ -1403,6 +1497,7 @@
         .node-detail-panel .detail-ops-grid,
         .node-detail-panel .counter-grid,
         .node-actions-grid,
+        .deploy-layout,
         .topbar {
           grid-template-columns: 1fr;
         }
@@ -1442,8 +1537,14 @@
         .node-detail-panel .detail-grid,
         .node-actions-grid .operation-card:first-child .form-grid,
         .catalog-toolbar,
+        .deploy-status-grid,
         .form-grid {
           grid-template-columns: 1fr;
+        }
+
+        .deploy-command-toolbar {
+          align-items: stretch;
+          flex-direction: column;
         }
 
         .field.span-2 {
@@ -1515,7 +1616,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.31.4</span>
+          <span class="mono">v0.32.0</span>
         </div>
       </aside>
 
@@ -1885,10 +1986,11 @@
                   </div>
                   <div class="operation-card">
                     <div class="operation-title">升级控制面</div>
-                    <textarea readonly>curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \
-  --database-url 'mysql://xaccel:xaccel_password@127.0.0.1:3306/xaccel' \
-  --listen 0.0.0.0:18080 \
-  --public-base-url http://195.245.242.9:18080</textarea>
+                    <div class="message">在控制面板服务器执行，命令会自动使用当前页面访问地址作为 public-base-url。</div>
+                    <textarea id="controlUpgradeCommand" readonly></textarea>
+                    <div class="form-actions">
+                      <button type="button" data-copy-control-upgrade>复制升级命令</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1982,6 +2084,76 @@
           <div class="form-actions">
             <button id="cancelCreateNode" type="button">取消</button>
             <button class="primary" id="submitCreateNode" type="submit">创建节点</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-backdrop hidden" id="deployNodeModal">
+      <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="deployNodeTitle">
+        <div class="modal-head">
+          <div>
+            <div class="panel-title" id="deployNodeTitle">部署节点</div>
+            <div class="panel-meta" id="deployNodeMeta">生成节点一键安装 / 升级命令。</div>
+          </div>
+          <button id="closeDeployNode" type="button">关闭</button>
+        </div>
+        <form class="modal-body" id="deployNodeForm">
+          <input name="node_id" type="hidden" />
+          <div class="deploy-layout">
+            <div class="deploy-rail">
+              <div class="deploy-summary">
+                <div class="deploy-summary-title">
+                  <div>
+                    <div class="strong" id="deployNodeName">--</div>
+                    <div class="cell-note mono" id="deployNodeEndpoint">--</div>
+                  </div>
+                  <span class="status warn" id="deployNodeStatus"><span class="dot"></span>待检查</span>
+                </div>
+                <div class="deploy-status-grid" id="deployStatusGrid"></div>
+              </div>
+              <div class="operation-card">
+                <div class="operation-title">生成参数</div>
+                <div class="form-grid single">
+                  <div class="field">
+                    <label for="deployPublicBaseUrl">控制面公网地址</label>
+                    <input id="deployPublicBaseUrl" name="public_base_url" autocomplete="off" />
+                    <div class="form-help">节点安装后会用这个地址回连控制面上报状态。</div>
+                  </div>
+                  <div class="field">
+                    <label for="deployExpiresInSec">令牌有效期秒数</label>
+                    <input id="deployExpiresInSec" name="expires_in_sec" type="number" min="60" max="86400" value="3600" />
+                  </div>
+                  <div class="field">
+                    <label for="deployChannel">发布通道</label>
+                    <select id="deployChannel" name="channel">
+                      <option value="stable">稳定版</option>
+                      <option value="beta">测试版</option>
+                    </select>
+                  </div>
+                  <label class="checkbox">
+                    <input name="enable_control_plane" type="checkbox" checked />
+                    开启节点上报
+                  </label>
+                </div>
+                <div class="message error-text hidden" id="deployNodeError"></div>
+                <div class="form-actions">
+                  <button id="cancelDeployNode" type="button">取消</button>
+                  <button class="primary" type="submit">生成命令</button>
+                </div>
+              </div>
+            </div>
+            <div class="deploy-command-panel">
+              <div class="deploy-command-toolbar">
+                <div class="deploy-command-title">
+                  <strong>一键安装 / 升级命令</strong>
+                  <span>在目标 Linux 节点服务器执行。已安装节点再次执行可刷新版本和控制面配置。</span>
+                </div>
+                <button type="button" data-copy-deploy-command>复制命令</button>
+              </div>
+              <textarea id="deployInstallCommand" data-install-command readonly placeholder="点击生成命令后，这里会显示可复制的一键部署命令。"></textarea>
+              <div class="message">命令会写入节点身份、下载 release 包、安装 systemd 服务，并启用控制面上报。</div>
+            </div>
           </div>
         </form>
       </div>
@@ -2156,6 +2328,18 @@
         createNodeForm: document.getElementById("createNodeForm"),
         submitCreateNode: document.getElementById("submitCreateNode"),
         createNodeError: document.getElementById("createNodeError"),
+        deployNodeModal: document.getElementById("deployNodeModal"),
+        deployNodeTitle: document.getElementById("deployNodeTitle"),
+        deployNodeMeta: document.getElementById("deployNodeMeta"),
+        closeDeployNode: document.getElementById("closeDeployNode"),
+        cancelDeployNode: document.getElementById("cancelDeployNode"),
+        deployNodeForm: document.getElementById("deployNodeForm"),
+        deployNodeName: document.getElementById("deployNodeName"),
+        deployNodeEndpoint: document.getElementById("deployNodeEndpoint"),
+        deployNodeStatus: document.getElementById("deployNodeStatus"),
+        deployStatusGrid: document.getElementById("deployStatusGrid"),
+        deployInstallCommand: document.getElementById("deployInstallCommand"),
+        deployNodeError: document.getElementById("deployNodeError"),
         openGame: document.getElementById("openGame"),
         gameModal: document.getElementById("gameModal"),
         closeGameModal: document.getElementById("closeGameModal"),
@@ -2198,9 +2382,11 @@
         diagnosticResult: document.getElementById("diagnosticResult"),
         opsMeta: document.getElementById("opsMeta"),
         opsBody: document.getElementById("opsBody"),
+        controlUpgradeCommand: document.getElementById("controlUpgradeCommand"),
       };
 
       els.loginTokenInput.value = state.token;
+      refreshControlUpgradeCommand();
 
       function setLoggedIn(loggedIn) {
         els.loginScreen.classList.toggle("hidden", loggedIn);
@@ -2310,6 +2496,65 @@
 
       function closeCreateNodeModal() {
         els.createNodeModal.classList.add("hidden");
+      }
+
+      function deployStatusItem(label, value) {
+        return `
+          <div class="deploy-status-item">
+            <div class="deploy-status-label">${escapeHtml(label)}</div>
+            <div class="deploy-status-value">${escapeHtml(value)}</div>
+          </div>
+        `;
+      }
+
+      function renderDeployNode(node) {
+        const endpoint = nodeEndpoint(node);
+        const report = node.latest_report || {};
+        els.deployNodeName.textContent = node.name || `节点 ${node.id}`;
+        els.deployNodeEndpoint.textContent = `${endpoint} / ID ${node.id}`;
+        els.deployNodeStatus.className = `status ${statusClass(node)}`;
+        els.deployNodeStatus.innerHTML = `<span class="dot"></span>${escapeHtml(statusText(node))}`;
+        els.deployStatusGrid.innerHTML = [
+          deployStatusItem("公网入口", endpoint),
+          deployStatusItem("当前版本", node.kernel_version || "--"),
+          deployStatusItem("最近上报", ageText(node.last_report_at)),
+          deployStatusItem("配置版本", node.config_revision || "--"),
+          deployStatusItem("区域", node.area && node.area !== "UNKNOWN" ? node.area : "未分区"),
+          deployStatusItem("标签", node.tag || "未设置"),
+          deployStatusItem("活跃会话", report.active_sessions || 0),
+          deployStatusItem("QUIC", node.disable_quic ? "禁用" : "启用"),
+        ].join("");
+      }
+
+      async function openDeployNodeModal(nodeId) {
+        const id = Number(nodeId);
+        if (!id) return;
+        clearInlineError(els.deployNodeError);
+        let node = state.nodes.find((item) => Number(item.id) === id);
+        if (!node) {
+          const data = await api(`/api/admin/v1/nodes/${id}`);
+          node = data.node;
+        }
+        if (!node) return;
+        state.selectedId = id;
+        renderNodes();
+        renderOps();
+        renderDeployNode(node);
+        els.deployNodeForm.reset();
+        els.deployNodeForm.elements.node_id.value = id;
+        els.deployNodeForm.elements.public_base_url.value = defaultPublicBaseUrl();
+        els.deployNodeForm.elements.expires_in_sec.value = "3600";
+        els.deployNodeForm.elements.channel.value = "stable";
+        els.deployNodeForm.elements.enable_control_plane.checked = true;
+        els.deployInstallCommand.value = "";
+        els.deployNodeTitle.textContent = node.status === "pending_install" ? "部署节点" : "升级节点";
+        els.deployNodeMeta.textContent = `${node.name} / ${nodeEndpoint(node)} / ID ${id}`;
+        els.deployNodeModal.classList.remove("hidden");
+        window.requestAnimationFrame(() => els.deployNodeForm.elements.public_base_url.focus());
+      }
+
+      function closeDeployNodeModal() {
+        els.deployNodeModal.classList.add("hidden");
       }
 
       function openGameModal(game = null) {
@@ -2593,6 +2838,53 @@
         return window.location.origin;
       }
 
+      function controlPanelUpgradeCommand() {
+        return `curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \\
+  --database-url 'mysql://xaccel:xaccel_password@127.0.0.1:3306/xaccel' \\
+  --listen 0.0.0.0:18080 \\
+  --public-base-url ${defaultPublicBaseUrl()}`;
+      }
+
+      function refreshControlUpgradeCommand() {
+        if (els.controlUpgradeCommand) {
+          els.controlUpgradeCommand.value = controlPanelUpgradeCommand();
+        }
+      }
+
+      function nodeEndpoint(node) {
+        return node?.endpoint || `${node?.server_ip || "--"}:${node?.server_port || "--"}`;
+      }
+
+      function copyToClipboard(value, button, copiedText = "已复制") {
+        if (!value) return;
+        const originalText = button?.textContent || "";
+        const markCopied = () => {
+          if (!button) return;
+          button.textContent = copiedText;
+          setTimeout(() => {
+            button.textContent = originalText;
+          }, 1400);
+        };
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(value).then(markCopied).catch(() => fallbackCopy(value, markCopied));
+          return;
+        }
+        fallbackCopy(value, markCopied);
+      }
+
+      function fallbackCopy(text, onDone) {
+        const scratch = document.createElement("textarea");
+        scratch.value = text;
+        scratch.setAttribute("readonly", "");
+        scratch.style.position = "fixed";
+        scratch.style.left = "-9999px";
+        document.body.appendChild(scratch);
+        scratch.select();
+        document.execCommand("copy");
+        document.body.removeChild(scratch);
+        onDone();
+      }
+
       function selectedAttr(value, expected) {
         return value === expected ? "selected" : "";
       }
@@ -2775,6 +3067,7 @@
                 <td class="mono">${report.active_sessions || 0}</td>
                 <td>
                   <div class="row-actions">
+                    <button type="button" data-node-action="deploy" data-node-id="${node.id}">部署</button>
                     <button type="button" data-node-action="edit" data-node-id="${node.id}">修改</button>
                     ${
                       resumeEnabled
@@ -3463,6 +3756,7 @@
       async function saveNode(form) {
         clearInlineError(els.createNodeError);
         const nodeId = numberOrNull(form.elements.node_id.value);
+        const isCreate = !nodeId;
         const payload = nodePayloadFromForm(form);
         const data = await api(nodeId ? `/api/admin/v1/nodes/${nodeId}` : "/api/admin/v1/nodes", {
           method: nodeId ? "PATCH" : "POST",
@@ -3474,6 +3768,9 @@
         setActiveView("nodes");
         await loadNodes();
         els.statusLine.textContent = nodeId ? `已保存节点 ${data.node.id}` : `已创建节点 ${data.node.id}`;
+        if (isCreate) {
+          openDeployNodeModal(data.node.id).catch(showError);
+        }
       }
 
       async function openNodeEditor(nodeId, focusField = "name") {
@@ -3648,7 +3945,8 @@
       }
 
       async function createBootstrapCommand(form) {
-        if (!state.selectedId) return;
+        const nodeId = numberOrNull(form.elements.node_id?.value) || state.selectedId;
+        if (!nodeId) return;
         const payload = {
           enable_control_plane: form.elements.enable_control_plane.checked,
         };
@@ -3659,7 +3957,7 @@
         if (ttl) payload.expires_in_sec = ttl;
         if (channel) payload.channel = channel;
 
-        const data = await api(`/api/admin/v1/nodes/${state.selectedId}/bootstrap-token`, {
+        const data = await api(`/api/admin/v1/nodes/${nodeId}/bootstrap-token`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -3705,6 +4003,12 @@
         if (event.target === els.createNodeModal) closeCreateNodeModal();
       });
 
+      els.closeDeployNode.addEventListener("click", closeDeployNodeModal);
+      els.cancelDeployNode.addEventListener("click", closeDeployNodeModal);
+      els.deployNodeModal.addEventListener("click", (event) => {
+        if (event.target === els.deployNodeModal) closeDeployNodeModal();
+      });
+
       els.openGame.addEventListener("click", () => openGameModal());
       document.querySelectorAll("[data-open-game]").forEach((button) => {
         button.addEventListener("click", () => openGameModal());
@@ -3730,6 +4034,23 @@
         saveNode(els.createNodeForm).catch((error) => {
           showInlineError(els.createNodeError, error.message);
         });
+      });
+
+      els.deployNodeForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        clearInlineError(els.deployNodeError);
+        createBootstrapCommand(els.deployNodeForm).catch((error) => {
+          showInlineError(els.deployNodeError, error.message);
+        });
+      });
+
+      document.querySelector("[data-copy-deploy-command]").addEventListener("click", (event) => {
+        copyToClipboard(els.deployInstallCommand.value, event.currentTarget);
+      });
+
+      document.querySelector("[data-copy-control-upgrade]").addEventListener("click", (event) => {
+        refreshControlUpgradeCommand();
+        copyToClipboard(els.controlUpgradeCommand.value, event.currentTarget);
       });
 
       els.gameForm.addEventListener("submit", (event) => {
@@ -3787,6 +4108,9 @@
           event.preventDefault();
           event.stopPropagation();
           const nodeId = actionButton.dataset.nodeId;
+          if (actionButton.dataset.nodeAction === "deploy") {
+            openDeployNodeModal(nodeId).catch(showError);
+          }
           if (actionButton.dataset.nodeAction === "edit") {
             openNodeEditor(nodeId, "name").catch(showError);
           }
@@ -3886,13 +4210,7 @@
         const button = event.target.closest("[data-copy-install]");
         if (!button) return;
         const output = button.closest("form").querySelector("[data-install-command]");
-        if (!output.value) return;
-        navigator.clipboard?.writeText(output.value).then(() => {
-          button.textContent = "已复制";
-          setTimeout(() => {
-            button.textContent = "复制命令";
-          }, 1400);
-        });
+        copyToClipboard(output.value, button);
       });
 
       els.opsBody.addEventListener("click", (event) => {

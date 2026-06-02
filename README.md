@@ -61,8 +61,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.31.4
-git push origin v0.31.4
+git tag v0.32.0
+git push origin v0.32.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -80,7 +80,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.31.4` keeps the legacy TCP/UDP `ping` probe, supports
+next stage. Version `0.32.0` keeps the legacy TCP/UDP `ping` probe, supports
 JSON `xaccel/1` client probe responses, verifies optional `xat.v1` HMAC client
 tokens, keeps a short-lived UDP session table, echoes `session.data` packets for
 client integration testing, binds backend-style connect-intent routes from
@@ -104,7 +104,7 @@ supports cloud servers whose public IP is NATed. Pulled configs are written back
 to the local node TOML so endpoint changes can take effect after a service
 restart. Nodes also perform a signed startup handshake with the control plane so
 the backend can immediately record node version, boot instance, last_seen, and
-current config revision before the first periodic report. Version `0.31.4`
+current config revision before the first periodic report. Version `0.32.0`
 adds load-aware scheduling metadata to connect-intent candidates and prefers
 fresh node reports with lower active session counts when route priority and
 bandwidth quality are otherwise equal. Version `0.30.0`
