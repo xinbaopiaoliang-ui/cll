@@ -476,6 +476,58 @@
         padding: 0 10px;
       }
 
+      .taxonomy-cell {
+        display: grid;
+        gap: 6px;
+        min-width: 130px;
+      }
+
+      button.taxonomy-edit {
+        display: flex;
+        width: 100%;
+        min-height: 28px;
+        justify-content: flex-start;
+        padding: 0 8px;
+        border-color: transparent;
+        background: transparent;
+        box-shadow: none;
+      }
+
+      button.taxonomy-edit:hover {
+        border-color: var(--line-strong);
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: none;
+      }
+
+      .taxonomy-line {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 6px;
+        align-items: center;
+        width: 100%;
+      }
+
+      .taxonomy-label {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 760;
+      }
+
+      .taxonomy-value {
+        overflow: hidden;
+        color: var(--ink);
+        font-family: var(--mono);
+        font-weight: 760;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .taxonomy-value.empty {
+        color: var(--faint);
+        font-family: var(--font);
+        font-weight: 650;
+      }
+
       .view {
         display: grid;
         gap: 18px;
@@ -1462,7 +1514,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.31.1</span>
+          <span class="mono">v0.31.2</span>
         </div>
       </aside>
 
@@ -1600,7 +1652,7 @@
                       <th>状态</th>
                       <th>入口</th>
                       <th>版本</th>
-                      <th>区域</th>
+                      <th>区域 / 标签</th>
                       <th>最近上报</th>
                       <th>会话</th>
                       <th>操作</th>
@@ -2414,6 +2466,35 @@
         return area || node.tag || "未分区";
       }
 
+      function nodeAreaValue(node) {
+        return node.area && node.area !== "UNKNOWN" ? node.area : "";
+      }
+
+      function nodeTagValue(node) {
+        return node.tag || "";
+      }
+
+      function renderTaxonomyCell(node) {
+        const area = nodeAreaValue(node);
+        const tag = nodeTagValue(node);
+        return `
+          <div class="taxonomy-cell">
+            <button class="taxonomy-edit" type="button" data-node-action="edit-area" data-node-id="${node.id}" title="修改区域">
+              <span class="taxonomy-line">
+                <span class="taxonomy-label">区域</span>
+                <span class="taxonomy-value ${area ? "" : "empty"}">${escapeHtml(area || "未分区")}</span>
+              </span>
+            </button>
+            <button class="taxonomy-edit" type="button" data-node-action="edit-tag" data-node-id="${node.id}" title="修改标签">
+              <span class="taxonomy-line">
+                <span class="taxonomy-label">标签</span>
+                <span class="taxonomy-value ${tag ? "" : "empty"}">${escapeHtml(tag || "未设置")}</span>
+              </span>
+            </button>
+          </div>
+        `;
+      }
+
       function gameLabel(rule) {
         return (rule.game_name || "").trim() || `游戏 ${rule.game_id}`;
       }
@@ -2614,7 +2695,7 @@
                 </td>
                 <td class="mono"><span class="endpoint" title="${escapeHtml(endpoint)}">${escapeHtml(endpoint)}</span></td>
                 <td class="mono">${escapeHtml(node.kernel_version || "--")}</td>
-                <td>${escapeHtml(areaText(node))}</td>
+                <td>${renderTaxonomyCell(node)}</td>
                 <td>
                   <div class="mono age ${ageClass(node.last_report_at)}">${escapeHtml(ageText(node.last_report_at))}</div>
                   <div class="cell-note">${escapeHtml(formatTime(node.last_report_at))}</div>
@@ -3321,7 +3402,7 @@
         await loadNodes();
       }
 
-      async function openNodeEditor(nodeId) {
+      async function openNodeEditor(nodeId, focusField = "name") {
         const id = Number(nodeId);
         if (!id) return;
         state.selectedId = id;
@@ -3332,11 +3413,18 @@
           editPanel.open = true;
           editPanel.scrollIntoView({ behavior: "smooth", block: "start" });
         }
-        const nameInput = els.detailBody.querySelector(
-          'form[data-action="edit-node"] input[name="name"]',
+        const focusInput = els.detailBody.querySelector(
+          `form[data-action="edit-node"] [name="${focusField}"]`,
         );
-        if (nameInput) {
-          nameInput.focus();
+        const fallbackInput = els.detailBody.querySelector(
+          'form[data-action="edit-node"] [name="name"]',
+        );
+        const input = focusInput || fallbackInput;
+        if (input) {
+          input.focus();
+          if (typeof input.select === "function") {
+            input.select();
+          }
         }
       }
 
@@ -3647,7 +3735,13 @@
           event.stopPropagation();
           const nodeId = actionButton.dataset.nodeId;
           if (actionButton.dataset.nodeAction === "edit") {
-            openNodeEditor(nodeId).catch(showError);
+            openNodeEditor(nodeId, "name").catch(showError);
+          }
+          if (actionButton.dataset.nodeAction === "edit-area") {
+            openNodeEditor(nodeId, "area").catch(showError);
+          }
+          if (actionButton.dataset.nodeAction === "edit-tag") {
+            openNodeEditor(nodeId, "tag").catch(showError);
           }
           if (actionButton.dataset.nodeAction === "delete") {
             deleteNode(nodeId).catch(showError);

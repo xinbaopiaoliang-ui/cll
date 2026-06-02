@@ -5848,6 +5848,8 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("调度诊断"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"edit\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"edit-area\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"edit-tag\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"delete\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-resume-node"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
