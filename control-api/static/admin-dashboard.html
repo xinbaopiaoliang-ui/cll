@@ -467,6 +467,15 @@
         justify-content: flex-end;
       }
 
+      #nodeRows .row-actions {
+        gap: 8px;
+      }
+
+      #nodeRows .row-actions button {
+        min-height: 32px;
+        padding: 0 10px;
+      }
+
       .view {
         display: grid;
         gap: 18px;
@@ -1453,7 +1462,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.31.0</span>
+          <span class="mono">v0.31.1</span>
         </div>
       </aside>
 
@@ -2612,11 +2621,15 @@
                 </td>
                 <td class="mono">${report.active_sessions || 0}</td>
                 <td>
-                  ${
-                    resumeEnabled
-                      ? `<button type="button" data-resume-node="${node.id}">恢复调度</button>`
-                      : `<span class="muted mono">--</span>`
-                  }
+                  <div class="row-actions">
+                    <button type="button" data-node-action="edit" data-node-id="${node.id}">修改</button>
+                    ${
+                      resumeEnabled
+                        ? `<button type="button" data-resume-node="${node.id}">恢复调度</button>`
+                        : ""
+                    }
+                    <button class="danger" type="button" data-node-action="delete" data-node-id="${node.id}">删除</button>
+                  </div>
                 </td>
               </tr>
             `;
@@ -3024,6 +3037,10 @@
         els.statusLine.classList.remove("error-state");
         if (state.selectedId) {
           await loadDetail(state.selectedId, { silent: true });
+        } else {
+          els.detailTitle.textContent = "节点详情";
+          els.detailMeta.textContent = "未选择";
+          els.detailBody.innerHTML = `<div class="empty">暂无节点</div>`;
         }
       }
 
@@ -3302,6 +3319,45 @@
         closeCreateNodeModal();
         setActiveView("nodes");
         await loadNodes();
+      }
+
+      async function openNodeEditor(nodeId) {
+        const id = Number(nodeId);
+        if (!id) return;
+        state.selectedId = id;
+        setActiveView("nodes");
+        await loadDetail(id);
+        const editPanel = els.detailBody.querySelector("details.operation-card");
+        if (editPanel) {
+          editPanel.open = true;
+          editPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        const nameInput = els.detailBody.querySelector(
+          'form[data-action="edit-node"] input[name="name"]',
+        );
+        if (nameInput) {
+          nameInput.focus();
+        }
+      }
+
+      async function deleteNode(nodeId) {
+        const id = Number(nodeId);
+        if (!id) return;
+        const node = state.nodes.find((item) => Number(item.id) === id);
+        const label = node?.name || `节点 ${id}`;
+        const confirmed = window.confirm(
+          `确定删除 ${label} 吗？该节点的上报记录、安装令牌、配置版本和关联路由规则也会从控制面板移除。`,
+        );
+        if (!confirmed) return;
+
+        await api(`/api/admin/v1/nodes/${id}`, {
+          method: "DELETE",
+        });
+        if (state.selectedId === id) {
+          state.selectedId = null;
+        }
+        await loadNodes();
+        els.statusLine.textContent = `已删除节点 ${id}`;
       }
 
       async function saveGame(form) {
@@ -3585,6 +3641,20 @@
       });
 
       els.nodeRows.addEventListener("click", (event) => {
+        const actionButton = event.target.closest("[data-node-action]");
+        if (actionButton) {
+          event.preventDefault();
+          event.stopPropagation();
+          const nodeId = actionButton.dataset.nodeId;
+          if (actionButton.dataset.nodeAction === "edit") {
+            openNodeEditor(nodeId).catch(showError);
+          }
+          if (actionButton.dataset.nodeAction === "delete") {
+            deleteNode(nodeId).catch(showError);
+          }
+          return;
+        }
+
         const resumeButton = event.target.closest("[data-resume-node]");
         if (resumeButton) {
           event.preventDefault();

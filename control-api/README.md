@@ -43,6 +43,8 @@ POST /api/node/v1/report
 POST /api/admin/v1/nodes
 GET  /api/admin/v1/nodes
 GET  /api/admin/v1/nodes/{node_id}
+PATCH /api/admin/v1/nodes/{node_id}
+DELETE /api/admin/v1/nodes/{node_id}
 PATCH /api/admin/v1/nodes/{node_id}/status
 POST /api/admin/v1/nodes/{node_id}/bootstrap-token
 GET  /api/admin/v1/game-route-rules

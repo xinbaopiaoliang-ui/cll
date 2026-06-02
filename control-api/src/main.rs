@@ -658,6 +658,14 @@ struct AdminUpdateNodeResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct AdminDeleteNodeResponse {
+    status: &'static str,
+    node_id: u64,
+    deleted: bool,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
 struct AdminCreateBootstrapTokenResponse {
     status: &'static str,
     node_id: u64,
@@ -1132,7 +1140,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/api/admin/v1/nodes/:node_id",
-            get(admin_get_node).patch(admin_update_node),
+            get(admin_get_node)
+                .patch(admin_update_node)
+                .delete(admin_delete_node),
         )
         .route(
             "/api/admin/v1/nodes/:node_id/status",
@@ -1786,6 +1796,22 @@ async fn admin_update_node(
     Ok(Json(AdminUpdateNodeResponse {
         status: "ok",
         node: AdminNodeSummary::from_row(node),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_delete_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+) -> Result<Json<AdminDeleteNodeResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let deleted = delete_admin_node(&state.pool, node_id).await?;
+
+    Ok(Json(AdminDeleteNodeResponse {
+        status: "ok",
+        node_id,
+        deleted,
         server_time: now_unix(),
     }))
 }
@@ -3801,6 +3827,28 @@ INSERT INTO node_config_revisions (
     Ok(())
 }
 
+async fn delete_admin_node(pool: &MySqlPool, node_id: u64) -> Result<bool, AppError> {
+    if node_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_node",
+            "node_id must be positive",
+        ));
+    }
+
+    let result = sqlx::query(
+        r#"
+DELETE FROM accel_nodes
+WHERE id = ?
+"#,
+    )
+    .bind(node_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+
+    Ok(result.rows_affected() > 0)
+}
+
 async fn update_admin_node_status(
     pool: &MySqlPool,
     node_id: u64,
@@ -5798,12 +5846,16 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("操作日志"));
         assert!(ADMIN_DASHBOARD_HTML.contains("恢复调度"));
         assert!(ADMIN_DASHBOARD_HTML.contains("调度诊断"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"edit\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"delete\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-resume-node"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/games"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/game-route-rules"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/connectivity-diagnostic"));
         assert!(ADMIN_DASHBOARD_HTML.contains("method: \"PATCH\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("method: \"DELETE\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("bootstrap-token"));
     }
 

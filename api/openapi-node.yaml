@@ -190,6 +190,24 @@ paths:
           description: Node does not exist.
         '409':
           description: Node endpoint already exists.
+    delete:
+      summary: Delete a managed node from the control plane.
+      description: Removes the node row and cascades related runtime reports, bootstrap tokens, config revisions, route rules, and scheduling records in MySQL. It does not stop the Linux service on the remote server.
+      security:
+        - AdminBearer: []
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Delete result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDeleteNodeResponse'
   /api/admin/v1/nodes/{node_id}/status:
     patch:
       summary: Update a managed node status.
@@ -954,6 +972,18 @@ components:
           enum: [ok]
         node:
           $ref: '#/components/schemas/AdminNodeSummary'
+        server_time:
+          type: integer
+    AdminDeleteNodeResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        node_id:
+          type: integer
+        deleted:
+          type: boolean
         server_time:
           type: integer
     AdminUpdateNodeStatusRequest:
