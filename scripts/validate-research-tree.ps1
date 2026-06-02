@@ -26,6 +26,7 @@ $required = @(
     "db\schema.sql",
     "install\install.sh",
     "install\control-api-install.sh",
+    "install\mysql8-install.sh",
     "install\uninstall.sh",
     "install\control-api-uninstall.sh",
     "install\release-manifest.example.json",

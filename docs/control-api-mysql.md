@@ -19,7 +19,32 @@ manual token minting and `backend-mock` for the client `connect-intent` path.
 
 ## Database
 
-Create the database and load schema:
+For a new control-plane server, install MySQL 8 and initialize the `xaccel`
+database with the bundled installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/mysql8-install.sh | sudo bash -s -- \
+  --db-password xaccel_password
+```
+
+If you have a SQL backup from the old control-plane server, copy it to the new
+server first and import it during installation:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/mysql8-install.sh | sudo bash -s -- \
+  --db-password xaccel_password \
+  --import-sql /tmp/xaccel.sql
+```
+
+The installer creates:
+
+- database `xaccel`;
+- user `xaccel` at `127.0.0.1`;
+- schema from `db/schema.sql` when no backup is imported;
+- root credential file at `/root/.xaccel-mysql-root.cnf` when root password
+  auth is used.
+
+Manual equivalent:
 
 ```bash
 mysql -uroot -p -e "CREATE DATABASE xaccel CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
