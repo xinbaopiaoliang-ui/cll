@@ -1630,7 +1630,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.34.0</span>
+          <span class="mono">v0.35.0</span>
         </div>
       </aside>
 
@@ -2783,6 +2783,22 @@
         if (action === "upgrade_node") return "升级节点内核";
         if (action === "reboot_server") return "重启服务器";
         return action || "SSH 操作";
+      }
+
+      function sshVersionCheckLines(check) {
+        if (!check) return [];
+        const changed = check.version_changed ? "是" : "否";
+        const refreshed = check.report_refreshed ? "是" : "否";
+        return [
+          "",
+          "版本检查",
+          `升级前版本：${check.before_version || "--"}`,
+          `升级后版本：${check.after_version || "--"}`,
+          `版本是否变化：${changed}`,
+          `是否看到新上报：${refreshed}`,
+          `等待时间：${check.waited_ms || 0}ms`,
+          check.message || "",
+        ].filter(Boolean);
       }
 
       function canResumeScheduling(node) {
@@ -4174,6 +4190,8 @@
         });
         const resultText = [
           `${data.command_label} / exit ${data.exit_code ?? "--"} / ${data.duration_ms}ms`,
+          ...sshVersionCheckLines(data.version_check),
+          "",
           data.output || "命令已执行，没有输出。",
         ].join("\n");
         await loadNodes();

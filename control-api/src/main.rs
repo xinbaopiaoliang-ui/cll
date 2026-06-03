@@ -34,7 +34,7 @@ use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, UdpSocket},
     process::Command,
-    time::timeout,
+    time::{sleep, timeout},
 };
 use tracing::{error, info};
 
@@ -63,6 +63,8 @@ const DEFAULT_DIAGNOSTIC_RESPONSE_TIMEOUT_MS: u64 = 500;
 const SSH_KNOWN_HOSTS_FILE: &str = "/var/lib/xaccel-control-api/known_hosts";
 const SSH_ACTION_TIMEOUT_SEC: u64 = 120;
 const SSH_BOOTSTRAP_TTL_SEC: u64 = 3600;
+const SSH_UPGRADE_REPORT_WAIT_SEC: u64 = 45;
+const SSH_UPGRADE_REPORT_POLL_SEC: u64 = 3;
 
 #[derive(Debug, Parser)]
 #[command(name = "xaccel-control-api")]
@@ -620,7 +622,21 @@ struct AdminSshActionResponse {
     exit_code: Option<i32>,
     output: String,
     duration_ms: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version_check: Option<AdminSshActionVersionCheck>,
     server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminSshActionVersionCheck {
+    before_version: Option<String>,
+    after_version: Option<String>,
+    version_changed: bool,
+    report_refreshed: bool,
+    before_report_at: Option<u64>,
+    after_report_at: Option<u64>,
+    waited_ms: u128,
+    message: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2297,6 +2313,9 @@ async fn admin_run_ssh_action(
 ) -> Result<Json<AdminSshActionResponse>, AppError> {
     require_admin(&state, &headers)?;
     let action = validate_ssh_action(&request.action)?;
+    let before_node = select_admin_node(&state.pool, node_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("node_not_found", "node does not exist"))?;
     let credential = select_ssh_credential(&state.pool, node_id)
         .await?
         .ok_or_else(|| {
@@ -2330,6 +2349,11 @@ async fn admin_run_ssh_action(
 
     match result {
         Ok(output) => {
+            let version_check = if action == "upgrade_node" {
+                Some(wait_for_upgrade_version_check(&state.pool, node_id, &before_node).await?)
+            } else {
+                None
+            };
             update_ssh_credential_status(&state.pool, node_id, "ok", None).await?;
             insert_node_audit_log(
                 &state.pool,
@@ -2341,6 +2365,7 @@ async fn admin_run_ssh_action(
                     "command_label": plan.command_label,
                     "exit_code": output.exit_code,
                     "duration_ms": duration_ms,
+                    "version_check": &version_check,
                 }),
             )
             .await?;
@@ -2353,6 +2378,7 @@ async fn admin_run_ssh_action(
                 exit_code: output.exit_code,
                 output: output.combined,
                 duration_ms,
+                version_check,
                 server_time: now_unix(),
             }))
         }
@@ -5928,6 +5954,82 @@ async fn run_ssh_command(
     }
 }
 
+async fn wait_for_upgrade_version_check(
+    pool: &MySqlPool,
+    node_id: u64,
+    before: &AdminNodeRow,
+) -> Result<AdminSshActionVersionCheck, AppError> {
+    let started = Instant::now();
+    loop {
+        let after = select_admin_node(pool, node_id).await?.ok_or_else(|| {
+            AppError::not_found("node_not_found", "node disappeared after upgrade")
+        })?;
+        let waited_ms = started.elapsed().as_millis();
+        let observation = build_upgrade_version_check(before, &after, waited_ms);
+
+        if observation.report_refreshed
+            || started.elapsed() >= Duration::from_secs(SSH_UPGRADE_REPORT_WAIT_SEC)
+        {
+            return Ok(observation);
+        }
+
+        sleep(Duration::from_secs(SSH_UPGRADE_REPORT_POLL_SEC)).await;
+    }
+}
+
+fn build_upgrade_version_check(
+    before: &AdminNodeRow,
+    after: &AdminNodeRow,
+    waited_ms: u128,
+) -> AdminSshActionVersionCheck {
+    let report_refreshed = report_refreshed(before.last_report_at, after.last_report_at);
+    let before_version = before.kernel_version.clone();
+    let after_version = after.kernel_version.clone();
+    let version_changed = before_version != after_version && after_version.is_some();
+    let message = if version_changed {
+        format!(
+            "节点版本已从 {} 变为 {}",
+            version_label(before_version.as_deref()),
+            version_label(after_version.as_deref())
+        )
+    } else if report_refreshed {
+        format!(
+            "节点已重新上报，但版本仍是 {}，可能当前节点内核已经是最新版本",
+            version_label(after_version.as_deref())
+        )
+    } else {
+        format!(
+            "升级命令已执行，但等待 {} 秒内还没有看到新的节点上报",
+            SSH_UPGRADE_REPORT_WAIT_SEC
+        )
+    };
+
+    AdminSshActionVersionCheck {
+        before_version,
+        after_version,
+        version_changed,
+        report_refreshed,
+        before_report_at: before.last_report_at,
+        after_report_at: after.last_report_at,
+        waited_ms,
+        message,
+    }
+}
+
+fn report_refreshed(before_report_at: Option<u64>, after_report_at: Option<u64>) -> bool {
+    match (before_report_at, after_report_at) {
+        (Some(before), Some(after)) => after > before,
+        (None, Some(_)) => true,
+        _ => false,
+    }
+}
+
+fn version_label(version: Option<&str>) -> &str {
+    version
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("--")
+}
+
 fn validate_node_task_result_status(status: &str) -> Result<&'static str, AppError> {
     match status.trim() {
         "succeeded" => Ok("succeeded"),
@@ -7248,6 +7350,43 @@ mod tests {
     }
 
     #[test]
+    fn builds_upgrade_version_check_for_unchanged_refreshed_report() {
+        let mut before = valid_admin_node_row();
+        before.kernel_version = Some("0.33.0".to_string());
+        before.last_report_at = Some(1_779_500_000);
+        let mut after = valid_admin_node_row();
+        after.kernel_version = Some("0.33.0".to_string());
+        after.last_report_at = Some(1_779_500_030);
+
+        let check = build_upgrade_version_check(&before, &after, 30_000);
+
+        assert!(!check.version_changed);
+        assert!(check.report_refreshed);
+        assert_eq!(check.before_version.as_deref(), Some("0.33.0"));
+        assert_eq!(check.after_version.as_deref(), Some("0.33.0"));
+        assert!(check.message.contains("版本仍是 0.33.0"));
+    }
+
+    #[test]
+    fn builds_upgrade_version_check_for_changed_version() {
+        let mut before = valid_admin_node_row();
+        before.kernel_version = Some("0.33.0".to_string());
+        before.last_report_at = Some(1_779_500_000);
+        let mut after = valid_admin_node_row();
+        after.kernel_version = Some("0.35.0".to_string());
+        after.last_report_at = Some(1_779_500_030);
+
+        let check = build_upgrade_version_check(&before, &after, 12_000);
+
+        assert!(check.version_changed);
+        assert!(check.report_refreshed);
+        assert_eq!(check.before_version.as_deref(), Some("0.33.0"));
+        assert_eq!(check.after_version.as_deref(), Some("0.35.0"));
+        assert!(check.message.contains("0.33.0"));
+        assert!(check.message.contains("0.35.0"));
+    }
+
+    #[test]
     fn validates_node_task_result_request() {
         let request = NodeTaskResultRequest {
             node_id: 2,
@@ -7470,6 +7609,8 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("data-delete-ssh"));
         assert!(ADMIN_DASHBOARD_HTML.contains("ssh-credential"));
         assert!(ADMIN_DASHBOARD_HTML.contains("ssh-actions"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("版本检查"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("sshVersionCheckLines"));
         assert!(ADMIN_DASHBOARD_HTML.contains("createNodeMeta"));
         assert!(ADMIN_DASHBOARD_HTML.contains("submitCreateNode"));
         assert!(ADMIN_DASHBOARD_HTML.contains("openEditNodeModal"));
