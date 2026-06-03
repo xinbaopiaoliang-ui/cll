@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.33.0"
+INSTALLER_VERSION="0.34.0"
 SERVICE_NAME="xaccel-control-api"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-control-api"
@@ -18,6 +18,7 @@ MAX_DB_CONNECTIONS="8"
 ADMIN_TOKEN=""
 PUBLIC_BASE_URL=""
 BUSINESS_SYNC_TOKEN=""
+CREDENTIAL_KEY=""
 ARTIFACT_URL=""
 SHA256_URL=""
 DRY_RUN="0"
@@ -36,6 +37,8 @@ Options:
   --public-base-url URL   Optional public base URL for node bootstrap responses.
   --business-sync-token TOKEN
                          Optional bearer token for business backend catalog sync API.
+  --credential-key KEY   Base64 32-byte key for encrypting saved SSH passwords.
+                         Generated automatically when omitted.
   --artifact-url URL      Override xaccel-control-api tar.gz download URL.
   --sha256-url URL        Override xaccel-control-api sha256 download URL.
   --dry-run               Run preflight only and print planned actions.
@@ -80,6 +83,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --business-sync-token)
       BUSINESS_SYNC_TOKEN="${2:-}"
+      shift 2
+      ;;
+    --credential-key)
+      CREDENTIAL_KEY="${2:-}"
       shift 2
       ;;
     --artifact-url)
@@ -167,6 +174,49 @@ load_existing_business_sync_token_if_needed() {
   fi
 }
 
+generate_credential_key_if_needed() {
+  if [[ -n "$CREDENTIAL_KEY" ]]; then
+    return 0
+  fi
+
+  if [[ -f "$ENV_FILE" ]]; then
+    local existing_key
+    existing_key="$(sed -n "s/^XACCEL_CREDENTIAL_KEY='\(.*\)'$/\1/p" "$ENV_FILE" | tail -n 1 || true)"
+    if [[ -n "$existing_key" ]]; then
+      CREDENTIAL_KEY="$existing_key"
+      log "reuse existing credential key from ${ENV_FILE}"
+      return 0
+    fi
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    CREDENTIAL_KEY="$(openssl rand -base64 32)"
+  else
+    fail "openssl is required to generate XACCEL_CREDENTIAL_KEY"
+  fi
+}
+
+install_ssh_tools_if_possible() {
+  if command -v ssh >/dev/null 2>&1 && command -v sshpass >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    log "install ssh client tools for server account control"
+    apt-get update >/dev/null 2>&1 || {
+      log "warning: apt-get update failed; SSH account control may require manual sshpass install"
+      return 0
+    }
+    DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client sshpass >/dev/null 2>&1 || {
+      log "warning: failed to install openssh-client/sshpass; SSH account control may require manual install"
+      return 0
+    }
+    return 0
+  fi
+
+  log "warning: sshpass not installed and no supported package manager found; SSH account control may require manual install"
+}
+
 env_escape() {
   printf '%s' "$1" | sed "s/'/'\\\\''/g"
 }
@@ -223,6 +273,7 @@ XACCEL_CONTROL_LISTEN='$(env_escape "$LISTEN")'
 XACCEL_TOKEN_TTL_SEC='$(env_escape "$TOKEN_TTL_SEC")'
 XACCEL_MAX_DB_CONNECTIONS='$(env_escape "$MAX_DB_CONNECTIONS")'
 XACCEL_ADMIN_TOKEN='$(env_escape "$ADMIN_TOKEN")'
+XACCEL_CREDENTIAL_KEY='$(env_escape "$CREDENTIAL_KEY")'
 RUST_LOG='xaccel_control_api=info'
 EOF
   if [[ -n "$PUBLIC_BASE_URL" ]]; then
@@ -294,8 +345,10 @@ main() {
   fi
 
   install_binary_release
+  install_ssh_tools_if_possible
   generate_admin_token_if_needed
   load_existing_business_sync_token_if_needed
+  generate_credential_key_if_needed
   write_env
   write_systemd_unit
   enable_service

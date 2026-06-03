@@ -1174,6 +1174,20 @@
         overflow-wrap: anywhere;
       }
 
+      .ssh-output {
+        min-height: 64px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(12, 24, 32, 0.04);
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
       .diagnostic-strip {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1616,7 +1630,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.33.0</span>
+          <span class="mono">v0.34.0</span>
         </div>
       </aside>
 
@@ -2750,6 +2764,27 @@
         return "bad";
       }
 
+      function sshStatusText(status) {
+        if (status === "ok") return "已验证";
+        if (status === "failed") return "失败";
+        if (status === "untested") return "未测试";
+        return status || "未配置";
+      }
+
+      function sshStatusClass(status) {
+        if (status === "ok") return "ok";
+        if (status === "failed") return "bad";
+        return "warn";
+      }
+
+      function sshActionText(action) {
+        if (action === "test_connection") return "测试连接";
+        if (action === "restart_node_service") return "重启节点服务";
+        if (action === "upgrade_node") return "升级节点内核";
+        if (action === "reboot_server") return "重启服务器";
+        return action || "SSH 操作";
+      }
+
       function canResumeScheduling(node) {
         return ["draining", "disabled", "offline"].includes(node?.status);
       }
@@ -2760,6 +2795,10 @@
         if (action === "node.bootstrap_token.create") return "生成安装令牌";
         if (action === "node.task.create") return "创建节点任务";
         if (action === "node.task.result") return "节点任务结果";
+        if (action === "node.ssh_credential.upsert") return "保存 SSH 凭据";
+        if (action === "node.ssh_credential.delete") return "删除 SSH 凭据";
+        if (action === "node.ssh_action") return "SSH 操作";
+        if (action === "node.ssh_action_failed") return "SSH 操作失败";
         return action || "操作记录";
       }
 
@@ -3252,6 +3291,12 @@
         const control = health.control_plane || {};
         const config = health.config || {};
         const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
+        const ssh = node.ssh_credential || {};
+        const sshConfigured = Boolean(ssh.configured);
+        const sshHost = ssh.host || node.server_ip || "";
+        const sshPort = ssh.port || 22;
+        const sshUser = ssh.username || "root";
+        const sshDisabled = sshConfigured ? "" : "disabled title=\"请先保存 SSH 账号密码\"";
 
         els.detailTitle.textContent = node.name;
         els.detailMeta.textContent = `${endpoint} / ID ${node.id}`;
@@ -3303,6 +3348,49 @@
                   <button type="button" data-detail-restart="${node.id}" ${node.status === "online" ? "" : "disabled title=\"节点在线后才能远程重启\""}>重启节点</button>
                 </div>
               </div>
+              <details class="operation-card" open>
+                <summary>
+                  <span class="strong">服务器账号控制</span>
+                  <span class="muted">${sshConfigured ? `${escapeHtml(sshUser)}@${escapeHtml(sshHost)}:${escapeHtml(sshPort)}` : "未配置 SSH"}</span>
+                </summary>
+                <form data-action="ssh-credential">
+                  <div class="operation-card-body">
+                    <div class="detail-kicker">
+                      <span class="chip ${sshConfigured ? sshStatusClass(ssh.auth_status) : "warn"}">${escapeHtml(sshConfigured ? sshStatusText(ssh.auth_status) : "未配置")}</span>
+                      ${ssh.last_checked_at ? `<span class="chip">最近测试 ${escapeHtml(ageText(ssh.last_checked_at))}</span>` : ""}
+                    </div>
+                    <div class="form-grid">
+                      <div class="field">
+                        <label>SSH 主机</label>
+                        <input name="host" value="${escapeHtml(sshHost)}" autocomplete="off" required />
+                        <div class="form-help">默认使用节点公网 IP。</div>
+                      </div>
+                      <div class="field">
+                        <label>SSH 端口</label>
+                        <input name="port" type="number" min="1" max="65535" value="${escapeHtml(sshPort)}" required />
+                      </div>
+                      <div class="field">
+                        <label>账号</label>
+                        <input name="username" value="${escapeHtml(sshUser)}" autocomplete="off" required />
+                      </div>
+                      <div class="field span-2">
+                        <label>密码</label>
+                        <input name="password" type="password" autocomplete="new-password" placeholder="${sshConfigured ? "不回显旧密码，填写后会覆盖保存" : "输入服务器 SSH 密码"}" required />
+                        <div class="form-help">密码加密保存，不会返回到页面。</div>
+                      </div>
+                    </div>
+                    <div class="form-actions">
+                      <button class="primary" type="submit">保存账号密码</button>
+                      <button type="button" data-ssh-action="test_connection" data-node-id="${node.id}" ${sshDisabled}>测试连接</button>
+                      <button type="button" data-ssh-action="restart_node_service" data-node-id="${node.id}" ${sshDisabled}>重启节点服务</button>
+                      <button type="button" data-ssh-action="upgrade_node" data-node-id="${node.id}" ${sshDisabled}>升级节点</button>
+                      <button class="danger" type="button" data-ssh-action="reboot_server" data-node-id="${node.id}" ${sshDisabled}>重启服务器</button>
+                      ${sshConfigured ? `<button class="danger" type="button" data-delete-ssh="${node.id}">删除凭据</button>` : ""}
+                    </div>
+                    <div class="ssh-output" data-ssh-output>${escapeHtml(ssh.last_error || "SSH 操作结果会显示在这里。")}</div>
+                  </div>
+                </form>
+              </details>
               <details class="operation-card">
                 <summary>
                   <span class="strong">编辑配置</span>
@@ -4027,6 +4115,74 @@
         els.statusLine.textContent = `已创建节点 ${id} 重启任务 #${task.id}，等待节点领取`;
       }
 
+      async function saveSshCredential(form) {
+        if (!state.selectedId) return;
+        const payload = {
+          host: textOrNull(form.elements.host.value),
+          port: numberOrNull(form.elements.port.value) || 22,
+          username: textOrNull(form.elements.username.value),
+          password: form.elements.password.value,
+        };
+        if (!payload.username || !payload.password) {
+          throw new Error("SSH 账号和密码不能为空");
+        }
+
+        const data = await api(`/api/admin/v1/nodes/${state.selectedId}/ssh-credential`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        form.elements.password.value = "";
+        await loadNodes();
+        await loadDetail(data.node_id);
+        els.statusLine.textContent = `已保存节点 ${data.node_id} 的 SSH 账号密码`;
+      }
+
+      async function deleteSshCredential(nodeId = state.selectedId) {
+        const id = Number(nodeId);
+        if (!id) return;
+        const confirmed = window.confirm("确定删除这个节点保存的 SSH 账号密码吗？删除后将无法通过账号密码直控服务器。");
+        if (!confirmed) return;
+        await api(`/api/admin/v1/nodes/${id}/ssh-credential`, {
+          method: "DELETE",
+        });
+        await loadNodes();
+        await loadDetail(id);
+        els.statusLine.textContent = `已删除节点 ${id} 的 SSH 凭据`;
+      }
+
+      async function runSshAction(nodeId, action, button) {
+        const id = Number(nodeId);
+        if (!id || !action) return;
+        const node = state.nodes.find((item) => Number(item.id) === id);
+        const actionLabel = sshActionText(action);
+        if (action === "reboot_server") {
+          const confirmed = window.confirm(`确定通过 SSH ${actionLabel} ${node?.name || `节点 ${id}`} 吗？服务器会在约 1 分钟后重启。`);
+          if (!confirmed) return;
+        }
+        if (action === "upgrade_node") {
+          const confirmed = window.confirm(`确定通过 SSH ${actionLabel} ${node?.name || `节点 ${id}`} 吗？控制面会生成一次性安装令牌并在服务器上执行升级命令。`);
+          if (!confirmed) return;
+        }
+
+        const output = button?.closest("form")?.querySelector("[data-ssh-output]");
+        if (output) output.textContent = `${actionLabel} 执行中...`;
+        const data = await api(`/api/admin/v1/nodes/${id}/ssh-actions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        const resultText = [
+          `${data.command_label} / exit ${data.exit_code ?? "--"} / ${data.duration_ms}ms`,
+          data.output || "命令已执行，没有输出。",
+        ].join("\n");
+        await loadNodes();
+        await loadDetail(id);
+        const refreshedOutput = els.detailBody.querySelector("[data-ssh-output]");
+        if (refreshedOutput) refreshedOutput.textContent = resultText;
+        els.statusLine.textContent = `SSH ${actionLabel} 已完成 / 节点 ${id}`;
+      }
+
       async function createBootstrapCommand(form) {
         const nodeId = numberOrNull(form.elements.node_id?.value) || state.selectedId;
         if (!nodeId) return;
@@ -4290,12 +4446,27 @@
         if (form.dataset.action === "bootstrap") {
           createBootstrapCommand(form).catch(showError);
         }
+        if (form.dataset.action === "ssh-credential") {
+          saveSshCredential(form).catch(showError);
+        }
       });
 
       els.detailBody.addEventListener("click", (event) => {
         const restartButton = event.target.closest("[data-detail-restart]");
         if (restartButton) {
           restartNode(restartButton.dataset.detailRestart).catch(showError);
+          return;
+        }
+
+        const sshButton = event.target.closest("[data-ssh-action]");
+        if (sshButton) {
+          runSshAction(sshButton.dataset.nodeId, sshButton.dataset.sshAction, sshButton).catch(showError);
+          return;
+        }
+
+        const deleteSshButton = event.target.closest("[data-delete-ssh]");
+        if (deleteSshButton) {
+          deleteSshCredential(deleteSshButton.dataset.deleteSsh).catch(showError);
           return;
         }
 

@@ -227,6 +227,23 @@ CREATE TABLE node_remote_tasks (
     ON DELETE CASCADE
 );
 
+CREATE TABLE node_ssh_credentials (
+  node_id BIGINT UNSIGNED PRIMARY KEY,
+  host VARCHAR(128) NOT NULL,
+  port INT UNSIGNED NOT NULL DEFAULT 22,
+  username VARCHAR(64) NOT NULL,
+  password_ciphertext TEXT NOT NULL,
+  password_nonce VARCHAR(64) NOT NULL,
+  auth_status ENUM('untested', 'ok', 'failed') NOT NULL DEFAULT 'untested',
+  last_error VARCHAR(512) NULL,
+  last_checked_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ssh_credential_node
+    FOREIGN KEY (node_id) REFERENCES accel_nodes(id)
+    ON DELETE CASCADE
+);
+
 CREATE TABLE node_audit_logs (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   node_id BIGINT UNSIGNED NOT NULL,

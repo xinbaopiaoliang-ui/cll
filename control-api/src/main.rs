@@ -1,10 +1,14 @@
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    Aes256Gcm, Nonce,
+};
 use anyhow::{bail, Context};
 use axum::{
     body::Bytes,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
     Json, Router,
 };
 use base64::{
@@ -19,12 +23,17 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{mysql::MySqlPoolOptions, FromRow, MySql, MySqlPool, QueryBuilder};
 use std::{
+    io::ErrorKind,
     net::{IpAddr, SocketAddr},
+    path::Path as FsPath,
+    process::Stdio,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
+    io::AsyncWriteExt,
     net::{TcpListener, UdpSocket},
+    process::Command,
     time::timeout,
 };
 use tracing::{error, info};
@@ -51,6 +60,9 @@ const UDP_BUFFER_BYTES: usize = 64 * 1024;
 const DEFAULT_DIAGNOSTIC_PAYLOAD: &str = "hello";
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SEC: u64 = 3;
 const DEFAULT_DIAGNOSTIC_RESPONSE_TIMEOUT_MS: u64 = 500;
+const SSH_KNOWN_HOSTS_FILE: &str = "/var/lib/xaccel-control-api/known_hosts";
+const SSH_ACTION_TIMEOUT_SEC: u64 = 120;
+const SSH_BOOTSTRAP_TTL_SEC: u64 = 3600;
 
 #[derive(Debug, Parser)]
 #[command(name = "xaccel-control-api")]
@@ -76,6 +88,9 @@ struct Cli {
 
     #[arg(long, env = "XACCEL_BUSINESS_SYNC_TOKEN")]
     business_sync_token: Option<String>,
+
+    #[arg(long, env = "XACCEL_CREDENTIAL_KEY")]
+    credential_key: Option<String>,
 }
 
 #[derive(Clone)]
@@ -85,6 +100,7 @@ struct AppState {
     admin_token: Option<String>,
     public_base_url: Option<String>,
     business_sync_token: Option<String>,
+    credential_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -567,6 +583,47 @@ struct AdminCreateNodeTaskRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct AdminSshCredentialRequest {
+    host: Option<String>,
+    port: Option<u16>,
+    username: String,
+    password: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminSshCredentialResponse {
+    status: &'static str,
+    node_id: u64,
+    credential: AdminSshCredentialSummary,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminDeleteSshCredentialResponse {
+    status: &'static str,
+    node_id: u64,
+    deleted: bool,
+    server_time: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminSshActionRequest {
+    action: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminSshActionResponse {
+    status: &'static str,
+    node_id: u64,
+    action: String,
+    command_label: String,
+    exit_code: Option<i32>,
+    output: String,
+    duration_ms: u128,
+    server_time: u64,
+}
+
+#[derive(Debug, Deserialize)]
 struct AdminListGamesQuery {
     status: Option<String>,
     platform: Option<String>,
@@ -807,6 +864,7 @@ struct AdminNodeSummary {
     last_seen_at: Option<u64>,
     last_report_at: Option<u64>,
     latest_report: Option<AdminReportSummary>,
+    ssh_credential: AdminSshCredentialSummary,
 }
 
 #[derive(Debug, Serialize)]
@@ -822,6 +880,17 @@ struct AdminNodeTaskSummary {
     claimed_at: Option<u64>,
     started_at: Option<u64>,
     finished_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminSshCredentialSummary {
+    configured: bool,
+    host: Option<String>,
+    port: Option<u32>,
+    username: Option<String>,
+    auth_status: Option<String>,
+    last_error: Option<String>,
+    last_checked_at: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -969,6 +1038,12 @@ struct AdminNodeRow {
     latest_udp_sessions: Option<u32>,
     latest_tcp_sessions: Option<u32>,
     latest_reported_at: Option<u64>,
+    ssh_host: Option<String>,
+    ssh_port: Option<u32>,
+    ssh_username: Option<String>,
+    ssh_auth_status: Option<String>,
+    ssh_last_error: Option<String>,
+    ssh_last_checked_at: Option<u64>,
 }
 
 #[derive(Debug, FromRow)]
@@ -1008,6 +1083,42 @@ struct NodeTaskRow {
     claimed_at: Option<u64>,
     started_at: Option<u64>,
     finished_at: Option<u64>,
+}
+
+#[derive(Debug, FromRow)]
+struct SshCredentialRow {
+    host: String,
+    port: u32,
+    username: String,
+    password_ciphertext: String,
+    password_nonce: String,
+    auth_status: String,
+    last_error: Option<String>,
+    last_checked_at: Option<u64>,
+}
+
+#[derive(Debug)]
+struct NormalizedSshCredential {
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+}
+
+struct SshActionPlan {
+    command_label: String,
+    remote_command: String,
+    send_password_to_stdin: bool,
+}
+
+struct SshCommandOutput {
+    exit_code: Option<i32>,
+    combined: String,
+}
+
+struct SshCommandError {
+    exit_code: Option<i32>,
+    message: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -1207,6 +1318,12 @@ async fn main() -> anyhow::Result<()> {
             .map(str::trim)
             .filter(|token| !token.is_empty())
             .map(ToOwned::to_owned),
+        credential_key: cli
+            .credential_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .map(ToOwned::to_owned),
     };
     let app = Router::new()
         .route("/admin", get(admin_dashboard))
@@ -1240,6 +1357,14 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/admin/v1/nodes/:node_id/tasks",
             post(admin_create_node_task),
+        )
+        .route(
+            "/api/admin/v1/nodes/:node_id/ssh-credential",
+            put(admin_upsert_ssh_credential).delete(admin_delete_ssh_credential),
+        )
+        .route(
+            "/api/admin/v1/nodes/:node_id/ssh-actions",
+            post(admin_run_ssh_action),
         )
         .route(
             "/api/admin/v1/connectivity-diagnostic",
@@ -1287,6 +1412,7 @@ async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
     ensure_game_route_region_indexes(pool).await?;
     ensure_connect_intent_region_column(pool).await?;
     ensure_node_remote_tasks_table(pool).await?;
+    ensure_node_ssh_credentials_table(pool).await?;
     seed_game_catalog_from_routes(pool).await?;
     Ok(())
 }
@@ -1568,6 +1694,33 @@ CREATE TABLE IF NOT EXISTS node_remote_tasks (
     .execute(pool)
     .await
     .context("failed to create node_remote_tasks")?;
+    Ok(())
+}
+
+async fn ensure_node_ssh_credentials_table(pool: &MySqlPool) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+CREATE TABLE IF NOT EXISTS node_ssh_credentials (
+  node_id BIGINT UNSIGNED PRIMARY KEY,
+  host VARCHAR(128) NOT NULL,
+  port INT UNSIGNED NOT NULL DEFAULT 22,
+  username VARCHAR(64) NOT NULL,
+  password_ciphertext TEXT NOT NULL,
+  password_nonce VARCHAR(64) NOT NULL,
+  auth_status ENUM('untested', 'ok', 'failed') NOT NULL DEFAULT 'untested',
+  last_error VARCHAR(512) NULL,
+  last_checked_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ssh_credential_node
+    FOREIGN KEY (node_id) REFERENCES accel_nodes(id)
+    ON DELETE CASCADE
+)
+"#,
+    )
+    .execute(pool)
+    .await
+    .context("failed to create node_ssh_credentials")?;
     Ok(())
 }
 
@@ -2087,6 +2240,142 @@ async fn admin_create_node_task(
         task: AdminNodeTaskSummary::from_row(task),
         server_time: now_unix(),
     }))
+}
+
+async fn admin_upsert_ssh_credential(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+    Json(request): Json<AdminSshCredentialRequest>,
+) -> Result<Json<AdminSshCredentialResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let node = select_admin_node(&state.pool, node_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("node_not_found", "node does not exist"))?;
+    let normalized = normalize_ssh_credential_request(&node, request)?;
+    let key = credential_key(&state)?;
+    let (password_ciphertext, password_nonce) =
+        encrypt_credential_secret(&key, &normalized.password)?;
+    let row = upsert_ssh_credential(
+        &state.pool,
+        node_id,
+        &normalized,
+        &password_ciphertext,
+        &password_nonce,
+    )
+    .await?;
+
+    Ok(Json(AdminSshCredentialResponse {
+        status: "ok",
+        node_id,
+        credential: AdminSshCredentialSummary::from_ssh_row(Some(&row)),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_delete_ssh_credential(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+) -> Result<Json<AdminDeleteSshCredentialResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let deleted = delete_ssh_credential(&state.pool, node_id).await?;
+
+    Ok(Json(AdminDeleteSshCredentialResponse {
+        status: "ok",
+        node_id,
+        deleted,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_run_ssh_action(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+    Json(request): Json<AdminSshActionRequest>,
+) -> Result<Json<AdminSshActionResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let action = validate_ssh_action(&request.action)?;
+    let credential = select_ssh_credential(&state.pool, node_id)
+        .await?
+        .ok_or_else(|| {
+            AppError::bad_request(
+                "ssh_not_configured",
+                "node ssh credential is not configured",
+            )
+        })?;
+    let key = credential_key(&state)?;
+    let password = decrypt_credential_secret(
+        &key,
+        &credential.password_ciphertext,
+        &credential.password_nonce,
+    )?;
+    let public_base_url = if action == "upgrade_node" {
+        Some(resolve_public_base_url(&state, &headers)?)
+    } else {
+        None
+    };
+    let plan = build_ssh_action_plan(
+        &state.pool,
+        node_id,
+        action,
+        &credential,
+        public_base_url.as_deref(),
+    )
+    .await?;
+    let started = Instant::now();
+    let result = run_ssh_command(&credential, &password, &plan).await;
+    let duration_ms = started.elapsed().as_millis();
+
+    match result {
+        Ok(output) => {
+            update_ssh_credential_status(&state.pool, node_id, "ok", None).await?;
+            insert_node_audit_log(
+                &state.pool,
+                node_id,
+                "admin_api",
+                "node.ssh_action",
+                serde_json::json!({
+                    "action": action,
+                    "command_label": plan.command_label,
+                    "exit_code": output.exit_code,
+                    "duration_ms": duration_ms,
+                }),
+            )
+            .await?;
+
+            Ok(Json(AdminSshActionResponse {
+                status: "ok",
+                node_id,
+                action: action.to_string(),
+                command_label: plan.command_label,
+                exit_code: output.exit_code,
+                output: output.combined,
+                duration_ms,
+                server_time: now_unix(),
+            }))
+        }
+        Err(error) => {
+            let message = trim_for_log(&error.message, 512);
+            update_ssh_credential_status(&state.pool, node_id, "failed", Some(&message)).await?;
+            insert_node_audit_log(
+                &state.pool,
+                node_id,
+                "admin_api",
+                "node.ssh_action_failed",
+                serde_json::json!({
+                    "action": action,
+                    "command_label": plan.command_label,
+                    "exit_code": error.exit_code,
+                    "error": message,
+                    "duration_ms": duration_ms,
+                }),
+            )
+            .await?;
+            Err(AppError::service_unavailable("ssh_action_failed", message))
+        }
+    }
 }
 
 async fn admin_list_games(
@@ -3087,7 +3376,13 @@ SELECT
   lr.active_sessions AS latest_active_sessions,
   lr.udp_sessions AS latest_udp_sessions,
   lr.tcp_sessions AS latest_tcp_sessions,
-  CAST(UNIX_TIMESTAMP(lr.reported_at) AS UNSIGNED) AS latest_reported_at
+  CAST(UNIX_TIMESTAMP(lr.reported_at) AS UNSIGNED) AS latest_reported_at,
+  sc.host AS ssh_host,
+  sc.port AS ssh_port,
+  sc.username AS ssh_username,
+  sc.auth_status AS ssh_auth_status,
+  sc.last_error AS ssh_last_error,
+  CAST(UNIX_TIMESTAMP(sc.last_checked_at) AS UNSIGNED) AS ssh_last_checked_at
 FROM accel_nodes n
 LEFT JOIN node_runtime_reports lr
   ON lr.id = (
@@ -3097,6 +3392,7 @@ LEFT JOIN node_runtime_reports lr
     ORDER BY r.id DESC
     LIMIT 1
   )
+LEFT JOIN node_ssh_credentials sc ON sc.node_id = n.id
 ORDER BY
   n.last_report_at IS NULL ASC,
   n.last_report_at DESC,
@@ -3141,7 +3437,13 @@ SELECT
   lr.active_sessions AS latest_active_sessions,
   lr.udp_sessions AS latest_udp_sessions,
   lr.tcp_sessions AS latest_tcp_sessions,
-  CAST(UNIX_TIMESTAMP(lr.reported_at) AS UNSIGNED) AS latest_reported_at
+  CAST(UNIX_TIMESTAMP(lr.reported_at) AS UNSIGNED) AS latest_reported_at,
+  sc.host AS ssh_host,
+  sc.port AS ssh_port,
+  sc.username AS ssh_username,
+  sc.auth_status AS ssh_auth_status,
+  sc.last_error AS ssh_last_error,
+  CAST(UNIX_TIMESTAMP(sc.last_checked_at) AS UNSIGNED) AS ssh_last_checked_at
 FROM accel_nodes n
 LEFT JOIN node_runtime_reports lr
   ON lr.id = (
@@ -3151,6 +3453,7 @@ LEFT JOIN node_runtime_reports lr
     ORDER BY r.id DESC
     LIMIT 1
   )
+LEFT JOIN node_ssh_credentials sc ON sc.node_id = n.id
 WHERE n.id = ?
 LIMIT 1
 "#,
@@ -3247,6 +3550,32 @@ LIMIT ?
     .bind(node_id)
     .bind(limit)
     .fetch_all(pool)
+    .await
+    .map_err(AppError::database)
+}
+
+async fn select_ssh_credential(
+    pool: &MySqlPool,
+    node_id: u64,
+) -> Result<Option<SshCredentialRow>, AppError> {
+    sqlx::query_as::<_, SshCredentialRow>(
+        r#"
+SELECT
+  host,
+  port,
+  username,
+  password_ciphertext,
+  password_nonce,
+  auth_status,
+  last_error,
+  CAST(UNIX_TIMESTAMP(last_checked_at) AS UNSIGNED) AS last_checked_at
+FROM node_ssh_credentials
+WHERE node_id = ?
+LIMIT 1
+"#,
+    )
+    .bind(node_id)
+    .fetch_optional(pool)
     .await
     .map_err(AppError::database)
 }
@@ -4004,6 +4333,119 @@ INSERT INTO node_audit_logs (
     Ok(task)
 }
 
+async fn upsert_ssh_credential(
+    pool: &MySqlPool,
+    node_id: u64,
+    credential: &NormalizedSshCredential,
+    password_ciphertext: &str,
+    password_nonce: &str,
+) -> Result<SshCredentialRow, AppError> {
+    ensure_admin_node_exists(pool, node_id).await?;
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
+
+    sqlx::query(
+        r#"
+INSERT INTO node_ssh_credentials (
+  node_id,
+  host,
+  port,
+  username,
+  password_ciphertext,
+  password_nonce,
+  auth_status,
+  last_error,
+  last_checked_at,
+  created_at,
+  updated_at
+) VALUES (?, ?, ?, ?, ?, ?, 'untested', NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  host = VALUES(host),
+  port = VALUES(port),
+  username = VALUES(username),
+  password_ciphertext = VALUES(password_ciphertext),
+  password_nonce = VALUES(password_nonce),
+  auth_status = 'untested',
+  last_error = NULL,
+  last_checked_at = NULL,
+  updated_at = CURRENT_TIMESTAMP
+"#,
+    )
+    .bind(node_id)
+    .bind(&credential.host)
+    .bind(u32::from(credential.port))
+    .bind(&credential.username)
+    .bind(password_ciphertext)
+    .bind(password_nonce)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    let detail_json = serde_json::json!({
+        "host": credential.host,
+        "port": credential.port,
+        "username": credential.username,
+    });
+    sqlx::query(
+        r#"
+INSERT INTO node_audit_logs (
+  node_id,
+  actor_type,
+  actor_id,
+  action,
+  detail_json,
+  created_at
+) VALUES (?, 'admin_api', NULL, 'node.ssh_credential.upsert', ?, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(node_id)
+    .bind(detail_json.to_string())
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    tx.commit().await.map_err(AppError::database)?;
+    select_ssh_credential(pool, node_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("ssh_not_found", "ssh credential was not stored"))
+}
+
+async fn delete_ssh_credential(pool: &MySqlPool, node_id: u64) -> Result<bool, AppError> {
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
+    let result = sqlx::query(
+        r#"
+DELETE FROM node_ssh_credentials
+WHERE node_id = ?
+"#,
+    )
+    .bind(node_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+    let deleted = result.rows_affected() > 0;
+
+    if deleted {
+        sqlx::query(
+            r#"
+INSERT INTO node_audit_logs (
+  node_id,
+  actor_type,
+  actor_id,
+  action,
+  detail_json,
+  created_at
+) VALUES (?, 'admin_api', NULL, 'node.ssh_credential.delete', NULL, CURRENT_TIMESTAMP)
+"#,
+        )
+        .bind(node_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::database)?;
+    }
+
+    tx.commit().await.map_err(AppError::database)?;
+    Ok(deleted)
+}
+
 async fn claim_next_node_task(
     pool: &MySqlPool,
     node_id: u64,
@@ -4367,6 +4809,60 @@ INSERT INTO node_audit_logs (
     .map_err(AppError::database)?;
 
     tx.commit().await.map_err(AppError::database)?;
+    Ok(())
+}
+
+async fn update_ssh_credential_status(
+    pool: &MySqlPool,
+    node_id: u64,
+    auth_status: &str,
+    last_error: Option<&str>,
+) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+UPDATE node_ssh_credentials
+SET auth_status = ?,
+    last_error = ?,
+    last_checked_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE node_id = ?
+"#,
+    )
+    .bind(auth_status)
+    .bind(last_error)
+    .bind(node_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+    Ok(())
+}
+
+async fn insert_node_audit_log(
+    pool: &MySqlPool,
+    node_id: u64,
+    actor_type: &str,
+    action: &str,
+    detail_json: Value,
+) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+INSERT INTO node_audit_logs (
+  node_id,
+  actor_type,
+  actor_id,
+  action,
+  detail_json,
+  created_at
+) VALUES (?, ?, NULL, ?, ?, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(node_id)
+    .bind(actor_type)
+    .bind(action)
+    .bind(detail_json.to_string())
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
     Ok(())
 }
 
@@ -5095,6 +5591,343 @@ fn validate_admin_node_task_type(task_type: &str) -> Result<&'static str, AppErr
     }
 }
 
+fn validate_ssh_action(action: &str) -> Result<&'static str, AppError> {
+    match action.trim() {
+        "test_connection" => Ok("test_connection"),
+        "restart_node_service" => Ok("restart_node_service"),
+        "upgrade_node" => Ok("upgrade_node"),
+        "reboot_server" => Ok("reboot_server"),
+        _ => Err(AppError::bad_request(
+            "invalid_ssh_action",
+            "ssh action must be test_connection, restart_node_service, upgrade_node, or reboot_server",
+        )),
+    }
+}
+
+fn normalize_ssh_credential_request(
+    node: &AdminNodeRow,
+    request: AdminSshCredentialRequest,
+) -> Result<NormalizedSshCredential, AppError> {
+    let host = request
+        .host
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&node.server_ip);
+    let host = normalize_ssh_host(host)?;
+    let port = request.port.unwrap_or(22);
+    if port == 0 {
+        return Err(AppError::bad_request(
+            "invalid_ssh_port",
+            "ssh port must be between 1 and 65535",
+        ));
+    }
+    let username = normalize_ssh_username(&request.username)?;
+    let password = normalize_required_text(&request.password, "password", 2048)?;
+
+    Ok(NormalizedSshCredential {
+        host,
+        port,
+        username,
+        password,
+    })
+}
+
+fn normalize_ssh_host(value: &str) -> Result<String, AppError> {
+    let host = normalize_required_text(value, "ssh host", 128)?;
+    let allowed = host
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | ':' | '_'));
+    if !allowed || host.starts_with('-') {
+        return Err(AppError::bad_request(
+            "invalid_ssh_host",
+            "ssh host contains unsupported characters",
+        ));
+    }
+    Ok(host)
+}
+
+fn normalize_ssh_username(value: &str) -> Result<String, AppError> {
+    let username = normalize_required_text(value, "username", 64)?;
+    let allowed = username
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'));
+    if !allowed || username.starts_with('-') {
+        return Err(AppError::bad_request(
+            "invalid_ssh_username",
+            "ssh username contains unsupported characters",
+        ));
+    }
+    Ok(username)
+}
+
+fn credential_key(state: &AppState) -> Result<[u8; 32], AppError> {
+    let key = state.credential_key.as_deref().ok_or_else(|| {
+        AppError::service_unavailable(
+            "credential_key_missing",
+            "XACCEL_CREDENTIAL_KEY is required before storing SSH passwords",
+        )
+    })?;
+    let decoded = BASE64.decode(key).map_err(|_| {
+        AppError::service_unavailable(
+            "credential_key_invalid",
+            "XACCEL_CREDENTIAL_KEY must be base64 encoded 32 bytes",
+        )
+    })?;
+    decoded.try_into().map_err(|_| {
+        AppError::service_unavailable(
+            "credential_key_invalid",
+            "XACCEL_CREDENTIAL_KEY must decode to exactly 32 bytes",
+        )
+    })
+}
+
+fn encrypt_credential_secret(
+    key: &[u8; 32],
+    plaintext: &str,
+) -> Result<(String, String), AppError> {
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|error| {
+        AppError::internal(anyhow::anyhow!(
+            "failed to initialize credential cipher: {error}"
+        ))
+    })?;
+    let mut nonce_bytes = [0u8; 12];
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_bytes())
+        .map_err(|error| {
+            AppError::internal(anyhow::anyhow!("failed to encrypt credential: {error}"))
+        })?;
+    Ok((BASE64.encode(ciphertext), BASE64.encode(nonce_bytes)))
+}
+
+fn decrypt_credential_secret(
+    key: &[u8; 32],
+    ciphertext: &str,
+    nonce: &str,
+) -> Result<String, AppError> {
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|error| {
+        AppError::internal(anyhow::anyhow!(
+            "failed to initialize credential cipher: {error}"
+        ))
+    })?;
+    let ciphertext = BASE64.decode(ciphertext).map_err(|_| {
+        AppError::service_unavailable("credential_decode_failed", "stored credential is invalid")
+    })?;
+    let nonce = BASE64.decode(nonce).map_err(|_| {
+        AppError::service_unavailable(
+            "credential_decode_failed",
+            "stored credential nonce is invalid",
+        )
+    })?;
+    if nonce.len() != 12 {
+        return Err(AppError::service_unavailable(
+            "credential_decode_failed",
+            "stored credential nonce has invalid length",
+        ));
+    }
+    let plaintext = cipher
+        .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
+        .map_err(|_| {
+            AppError::service_unavailable(
+                "credential_decrypt_failed",
+                "stored credential cannot be decrypted with current key",
+            )
+        })?;
+    String::from_utf8(plaintext).map_err(|_| {
+        AppError::service_unavailable("credential_decode_failed", "stored credential is not UTF-8")
+    })
+}
+
+async fn build_ssh_action_plan(
+    pool: &MySqlPool,
+    node_id: u64,
+    action: &str,
+    credential: &SshCredentialRow,
+    public_base_url: Option<&str>,
+) -> Result<SshActionPlan, AppError> {
+    let is_root = credential.username == "root";
+    let sudo = if is_root { "" } else { "sudo -S -p '' " };
+    match action {
+        "test_connection" => Ok(SshActionPlan {
+            command_label: "测试 SSH 连接".to_string(),
+            remote_command: "printf 'xaccel-ssh-ok\\n'".to_string(),
+            send_password_to_stdin: false,
+        }),
+        "restart_node_service" => Ok(SshActionPlan {
+            command_label: "重启节点服务".to_string(),
+            remote_command: format!(
+                "{sudo}systemctl restart xaccel-node && {sudo}systemctl is-active xaccel-node"
+            ),
+            send_password_to_stdin: !is_root,
+        }),
+        "reboot_server" => Ok(SshActionPlan {
+            command_label: "重启服务器".to_string(),
+            remote_command: format!("{sudo}shutdown -r +1 'xaccel control scheduled reboot'"),
+            send_password_to_stdin: !is_root,
+        }),
+        "upgrade_node" => {
+            let public_base_url = public_base_url.ok_or_else(|| {
+                AppError::service_unavailable(
+                    "public_base_url_missing",
+                    "public base url is required for node upgrade",
+                )
+            })?;
+            let expires_at = now_unix() + SSH_BOOTSTRAP_TTL_SEC;
+            let bootstrap_token = create_bootstrap_token(pool, node_id, None, expires_at).await?;
+            let bootstrap_url = format!("{public_base_url}{NODE_BOOTSTRAP_PATH}");
+            Ok(SshActionPlan {
+                command_label: "升级节点内核".to_string(),
+                remote_command: build_remote_bootstrap_install_command(
+                    DEFAULT_INSTALL_URL,
+                    &bootstrap_url,
+                    &bootstrap_token,
+                    !is_root,
+                ),
+                send_password_to_stdin: !is_root,
+            })
+        }
+        _ => Err(AppError::bad_request(
+            "invalid_ssh_action",
+            "unsupported ssh action",
+        )),
+    }
+}
+
+fn build_remote_bootstrap_install_command(
+    install_url: &str,
+    bootstrap_url: &str,
+    bootstrap_token: &str,
+    use_sudo: bool,
+) -> String {
+    let runner = if use_sudo {
+        "sudo -S -p '' bash"
+    } else {
+        "bash"
+    };
+    let install_url = shell_quote(install_url);
+    let bootstrap_url = shell_quote(bootstrap_url);
+    let bootstrap_token = shell_quote(bootstrap_token);
+    format!(
+        "curl -fsSL {install_url} | {runner} -s -- --bootstrap-url {bootstrap_url} --bootstrap-token {bootstrap_token} --enable-control-plane"
+    )
+}
+
+fn shell_quote(value: &str) -> String {
+    let mut quoted = String::from("'");
+    for ch in value.chars() {
+        if ch == '\'' {
+            quoted.push_str("'\\''");
+        } else {
+            quoted.push(ch);
+        }
+    }
+    quoted.push('\'');
+    quoted
+}
+
+async fn run_ssh_command(
+    credential: &SshCredentialRow,
+    password: &str,
+    plan: &SshActionPlan,
+) -> Result<SshCommandOutput, SshCommandError> {
+    if let Some(parent) = FsPath::new(SSH_KNOWN_HOSTS_FILE).parent() {
+        std::fs::create_dir_all(parent).map_err(|error| SshCommandError {
+            exit_code: None,
+            message: format!("failed to prepare ssh known_hosts directory: {error}"),
+        })?;
+    }
+
+    let mut command = Command::new("sshpass");
+    command
+        .arg("-e")
+        .arg("ssh")
+        .arg("-o")
+        .arg("BatchMode=no")
+        .arg("-o")
+        .arg("ConnectTimeout=10")
+        .arg("-o")
+        .arg("StrictHostKeyChecking=accept-new")
+        .arg("-o")
+        .arg(format!("UserKnownHostsFile={SSH_KNOWN_HOSTS_FILE}"))
+        .arg("-p")
+        .arg(credential.port.to_string())
+        .arg(format!("{}@{}", credential.username, credential.host))
+        .arg(&plan.remote_command)
+        .env("SSHPASS", password)
+        .stdin(if plan.send_password_to_stdin {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let mut child = command.spawn().map_err(|error| {
+        let message = if error.kind() == ErrorKind::NotFound {
+            "sshpass is not installed on the control server; install sshpass and openssh-client"
+                .to_string()
+        } else {
+            format!("failed to start ssh command: {error}")
+        };
+        SshCommandError {
+            exit_code: None,
+            message,
+        }
+    })?;
+
+    if plan.send_password_to_stdin {
+        if let Some(mut stdin) = child.stdin.take() {
+            let sudo_password = format!("{password}\n{password}\n{password}\n");
+            tokio::spawn(async move {
+                let _ = stdin.write_all(sudo_password.as_bytes()).await;
+            });
+        }
+    }
+
+    let output = timeout(
+        Duration::from_secs(SSH_ACTION_TIMEOUT_SEC),
+        child.wait_with_output(),
+    )
+    .await
+    .map_err(|_| SshCommandError {
+        exit_code: None,
+        message: format!("ssh action timed out after {SSH_ACTION_TIMEOUT_SEC}s"),
+    })?
+    .map_err(|error| SshCommandError {
+        exit_code: None,
+        message: format!("failed to wait for ssh command: {error}"),
+    })?;
+
+    let mut combined = String::new();
+    combined.push_str(&String::from_utf8_lossy(&output.stdout));
+    if !output.stderr.is_empty() {
+        if !combined.trim().is_empty() {
+            combined.push('\n');
+        }
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    }
+    let combined = trim_for_log(&combined, 4096);
+    let exit_code = output.status.code();
+
+    if output.status.success() {
+        Ok(SshCommandOutput {
+            exit_code,
+            combined,
+        })
+    } else {
+        Err(SshCommandError {
+            exit_code,
+            message: if combined.trim().is_empty() {
+                format!("ssh command exited with status {}", output.status)
+            } else {
+                combined
+            },
+        })
+    }
+}
+
 fn validate_node_task_result_status(status: &str) -> Result<&'static str, AppError> {
     match status.trim() {
         "succeeded" => Ok("succeeded"),
@@ -5604,6 +6437,14 @@ fn trim_trailing_slash(value: &str) -> String {
     value.trim_end_matches('/').to_string()
 }
 
+fn trim_for_log(value: &str, max_chars: usize) -> String {
+    let mut output = value.trim().chars().take(max_chars).collect::<String>();
+    if value.trim().chars().count() > max_chars {
+        output.push_str("...");
+    }
+    output
+}
+
 fn generate_bootstrap_token() -> String {
     let mut bytes = [0_u8; 32];
     OsRng.fill_bytes(&mut bytes);
@@ -5770,6 +6611,40 @@ impl AdminNodeSummary {
                 tcp_sessions: row.latest_tcp_sessions.unwrap_or_default(),
                 reported_at: row.latest_reported_at,
             }),
+            ssh_credential: AdminSshCredentialSummary {
+                configured: row.ssh_host.is_some(),
+                host: row.ssh_host,
+                port: row.ssh_port,
+                username: row.ssh_username,
+                auth_status: row.ssh_auth_status,
+                last_error: row.ssh_last_error,
+                last_checked_at: row.ssh_last_checked_at,
+            },
+        }
+    }
+}
+
+impl AdminSshCredentialSummary {
+    fn from_ssh_row(row: Option<&SshCredentialRow>) -> Self {
+        let Some(row) = row else {
+            return Self {
+                configured: false,
+                host: None,
+                port: None,
+                username: None,
+                auth_status: None,
+                last_error: None,
+                last_checked_at: None,
+            };
+        };
+        Self {
+            configured: true,
+            host: Some(row.host.clone()),
+            port: Some(row.port),
+            username: Some(row.username.clone()),
+            auth_status: Some(row.auth_status.clone()),
+            last_error: row.last_error.clone(),
+            last_checked_at: row.last_checked_at,
         }
     }
 }
@@ -5992,6 +6867,42 @@ mod tests {
             mobile_ip: None,
             unicom_ip: None,
             tag: Some("test".to_string()),
+        }
+    }
+
+    fn valid_admin_node_row() -> AdminNodeRow {
+        AdminNodeRow {
+            id: 1,
+            name: "node-1".to_string(),
+            server_ip: "103.201.131.99".to_string(),
+            server_port: 666,
+            relay_server_ip: None,
+            relay_server_port: None,
+            is_support_ipv6: 0,
+            area: "UNKNOWN".to_string(),
+            tag: Some("test".to_string()),
+            bandwidth_quality: "fast".to_string(),
+            disable_quic: 0,
+            telecom_ip: None,
+            mobile_ip: None,
+            unicom_ip: None,
+            status: "online".to_string(),
+            kernel_version: Some("0.34.0".to_string()),
+            config_revision: 1,
+            last_seen_at: None,
+            last_report_at: None,
+            latest_report_id: None,
+            latest_report_status: None,
+            latest_active_sessions: None,
+            latest_udp_sessions: None,
+            latest_tcp_sessions: None,
+            latest_reported_at: None,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_username: None,
+            ssh_auth_status: None,
+            ssh_last_error: None,
+            ssh_last_checked_at: None,
         }
     }
 
@@ -6257,6 +7168,86 @@ mod tests {
     }
 
     #[test]
+    fn validates_ssh_action_whitelist() {
+        for action in [
+            "test_connection",
+            "restart_node_service",
+            "upgrade_node",
+            "reboot_server",
+        ] {
+            assert_eq!(validate_ssh_action(action).expect("ssh action"), action);
+        }
+
+        let error = validate_ssh_action("shell").unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_ssh_action");
+    }
+
+    #[test]
+    fn normalizes_ssh_credential_request() {
+        let node = valid_admin_node_row();
+        let credential = normalize_ssh_credential_request(
+            &node,
+            AdminSshCredentialRequest {
+                host: None,
+                port: None,
+                username: "root".to_string(),
+                password: "secret-password".to_string(),
+            },
+        )
+        .expect("ssh credential is valid");
+
+        assert_eq!(credential.host, "103.201.131.99");
+        assert_eq!(credential.port, 22);
+        assert_eq!(credential.username, "root");
+        assert_eq!(credential.password, "secret-password");
+    }
+
+    #[test]
+    fn rejects_invalid_ssh_credential_fields() {
+        let node = valid_admin_node_row();
+        let bad_host = normalize_ssh_credential_request(
+            &node,
+            AdminSshCredentialRequest {
+                host: Some(";rm -rf /".to_string()),
+                port: Some(22),
+                username: "root".to_string(),
+                password: "secret-password".to_string(),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(bad_host.status, StatusCode::BAD_REQUEST);
+        assert_eq!(bad_host.code, "invalid_ssh_host");
+
+        let bad_user = normalize_ssh_credential_request(
+            &node,
+            AdminSshCredentialRequest {
+                host: Some("103.201.131.99".to_string()),
+                port: Some(22),
+                username: "-oProxyCommand".to_string(),
+                password: "secret-password".to_string(),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(bad_user.status, StatusCode::BAD_REQUEST);
+        assert_eq!(bad_user.code, "invalid_ssh_username");
+    }
+
+    #[test]
+    fn encrypts_and_decrypts_credential_secret() {
+        let key = [7u8; 32];
+        let (ciphertext, nonce) =
+            encrypt_credential_secret(&key, "secret-password").expect("credential encrypts");
+
+        assert_ne!(ciphertext, "secret-password");
+        assert_eq!(BASE64.decode(&nonce).expect("nonce decodes").len(), 12);
+
+        let plaintext =
+            decrypt_credential_secret(&key, &ciphertext, &nonce).expect("credential decrypts");
+        assert_eq!(plaintext, "secret-password");
+    }
+
+    #[test]
     fn validates_node_task_result_request() {
         let request = NodeTaskResultRequest {
             node_id: 2,
@@ -6470,6 +7461,15 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("node.task.create"));
         assert!(ADMIN_DASHBOARD_HTML.contains("node.task.result"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes/${nodeId}/tasks"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("服务器账号控制"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-action=\"ssh-credential\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-ssh-action=\"test_connection\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-ssh-action=\"restart_node_service\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-ssh-action=\"upgrade_node\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-ssh-action=\"reboot_server\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-delete-ssh"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("ssh-credential"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("ssh-actions"));
         assert!(ADMIN_DASHBOARD_HTML.contains("createNodeMeta"));
         assert!(ADMIN_DASHBOARD_HTML.contains("submitCreateNode"));
         assert!(ADMIN_DASHBOARD_HTML.contains("openEditNodeModal"));
@@ -6627,5 +7627,25 @@ mod tests {
         assert!(command.contains("--bootstrap-url http://127.0.0.1:18080/api/node/v1/bootstrap"));
         assert!(command.contains("--bootstrap-token xbt.token"));
         assert!(command.contains("--enable-control-plane"));
+    }
+
+    #[test]
+    fn quotes_remote_bootstrap_install_command_args() {
+        assert_eq!(
+            shell_quote("http://install.test/a'b"),
+            "'http://install.test/a'\\''b'"
+        );
+
+        let command = build_remote_bootstrap_install_command(
+            "http://install.test/a'b",
+            "http://control.test/bootstrap?x=1;touch /tmp/pwn",
+            "xbt.token",
+            false,
+        );
+
+        assert_eq!(
+            command,
+            "curl -fsSL 'http://install.test/a'\\''b' | bash -s -- --bootstrap-url 'http://control.test/bootstrap?x=1;touch /tmp/pwn' --bootstrap-token 'xbt.token' --enable-control-plane"
+        );
     }
 }
