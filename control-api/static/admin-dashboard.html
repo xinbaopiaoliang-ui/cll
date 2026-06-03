@@ -1616,7 +1616,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.32.0</span>
+          <span class="mono">v0.33.0</span>
         </div>
       </aside>
 
@@ -2730,6 +2730,26 @@
         return status || "未知";
       }
 
+      function taskTypeText(type) {
+        if (type === "restart_node") return "重启节点";
+        return type || "未知任务";
+      }
+
+      function taskStatusText(status) {
+        if (status === "pending") return "待执行";
+        if (status === "running") return "执行中";
+        if (status === "succeeded") return "成功";
+        if (status === "failed") return "失败";
+        if (status === "canceled") return "已取消";
+        return status || "未知";
+      }
+
+      function taskStatusClass(status) {
+        if (status === "succeeded") return "ok";
+        if (status === "pending" || status === "running") return "warn";
+        return "bad";
+      }
+
       function canResumeScheduling(node) {
         return ["draining", "disabled", "offline"].includes(node?.status);
       }
@@ -2738,6 +2758,8 @@
         if (action === "node.status.update") return "状态调整";
         if (action === "node.config.update") return "配置变更";
         if (action === "node.bootstrap_token.create") return "生成安装令牌";
+        if (action === "node.task.create") return "创建节点任务";
+        if (action === "node.task.result") return "节点任务结果";
         return action || "操作记录";
       }
 
@@ -3043,6 +3065,7 @@
             const report = node.latest_report || {};
             const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
             const resumeEnabled = canResumeScheduling(node);
+            const canRestart = node.status === "online";
             return `
               <tr class="${selected}" data-node-id="${node.id}">
                 <td>
@@ -3068,6 +3091,7 @@
                 <td>
                   <div class="row-actions">
                     <button type="button" data-node-action="deploy" data-node-id="${node.id}">部署</button>
+                    <button type="button" data-node-action="restart" data-node-id="${node.id}" ${canRestart ? "" : "disabled title=\"节点在线后才能远程重启\""}>重启</button>
                     <button type="button" data-node-action="edit" data-node-id="${node.id}">修改</button>
                     ${
                       resumeEnabled
@@ -3272,6 +3296,13 @@
             <div class="detail-section">
               <div class="section-title">节点操作</div>
               <div class="action-grid node-actions-grid">
+              <div class="operation-card">
+                <div class="operation-title">远程运维</div>
+                <div class="message">通过节点内核领取控制面任务执行，不保存服务器账号密码。</div>
+                <div class="form-actions">
+                  <button type="button" data-detail-restart="${node.id}" ${node.status === "online" ? "" : "disabled title=\"节点在线后才能远程重启\""}>重启节点</button>
+                </div>
+              </div>
               <details class="operation-card">
                 <summary>
                   <span class="strong">编辑配置</span>
@@ -3419,6 +3450,29 @@
                     `,
                   )
                   .join("") || '<div class="empty">暂无上报</div>'}
+              </div>
+            </div>
+            <div class="detail-section">
+              <div class="section-title">远程任务</div>
+              <div class="report-list">
+                ${(data.recent_tasks || [])
+                  .slice(0, 8)
+                  .map(
+                    (item) => `
+                      <div class="report-row audit-row">
+                        <span class="mono">#${item.id}</span>
+                        <span>
+                          <span class="audit-action">${escapeHtml(taskTypeText(item.task_type))}</span>
+                          <span class="audit-summary">${escapeHtml(item.message || item.error_message || item.output || "等待节点处理")}</span>
+                        </span>
+                        <span>
+                          <span class="chip ${taskStatusClass(item.status)}">${escapeHtml(taskStatusText(item.status))}</span>
+                          <span class="cell-note mono">${escapeHtml(ageText(item.finished_at || item.started_at || item.created_at))}</span>
+                        </span>
+                      </div>
+                    `,
+                  )
+                  .join("") || '<div class="empty">暂无远程任务</div>'}
               </div>
             </div>
             <div class="detail-section">
@@ -3944,6 +3998,35 @@
         els.statusLine.textContent = `已提交节点 ${id} 恢复调度，等待节点上报恢复在线`;
       }
 
+      async function createNodeTask(nodeId, taskType, message) {
+        const data = await api(`/api/admin/v1/nodes/${nodeId}/tasks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            task_type: taskType,
+            message,
+          }),
+        });
+        return data.task;
+      }
+
+      async function restartNode(nodeId = state.selectedId) {
+        const id = Number(nodeId);
+        if (!id) return;
+        const node = state.nodes.find((item) => Number(item.id) === id);
+        const label = node?.name || `节点 ${id}`;
+        const confirmed = window.confirm(
+          `确定远程重启 ${label} 吗？控制面会创建重启任务，节点下一次轮询到任务后会重启 xaccel-node 服务。`,
+        );
+        if (!confirmed) return;
+
+        state.selectedId = id;
+        const task = await createNodeTask(id, "restart_node", "控制面手动重启节点");
+        await loadNodes();
+        await loadDetail(id);
+        els.statusLine.textContent = `已创建节点 ${id} 重启任务 #${task.id}，等待节点领取`;
+      }
+
       async function createBootstrapCommand(form) {
         const nodeId = numberOrNull(form.elements.node_id?.value) || state.selectedId;
         if (!nodeId) return;
@@ -4111,6 +4194,9 @@
           if (actionButton.dataset.nodeAction === "deploy") {
             openDeployNodeModal(nodeId).catch(showError);
           }
+          if (actionButton.dataset.nodeAction === "restart") {
+            restartNode(nodeId).catch(showError);
+          }
           if (actionButton.dataset.nodeAction === "edit") {
             openNodeEditor(nodeId, "name").catch(showError);
           }
@@ -4207,6 +4293,12 @@
       });
 
       els.detailBody.addEventListener("click", (event) => {
+        const restartButton = event.target.closest("[data-detail-restart]");
+        if (restartButton) {
+          restartNode(restartButton.dataset.detailRestart).catch(showError);
+          return;
+        }
+
         const button = event.target.closest("[data-copy-install]");
         if (!button) return;
         const output = button.closest("form").querySelector("[data-install-command]");

@@ -36,6 +36,7 @@ const TOKEN_VERSION: &str = "v1";
 const NODE_REPORT_PATH: &str = "/api/node/v1/report";
 const NODE_HANDSHAKE_PATH: &str = "/api/node/v1/handshake";
 const NODE_CONFIG_PATH: &str = "/api/node/v1/config";
+const NODE_TASKS_PATH: &str = "/api/node/v1/tasks";
 const NODE_REPORT_MAX_SKEW_SEC: u64 = 300;
 const NODE_BOOTSTRAP_PATH: &str = "/api/node/v1/bootstrap";
 const DEFAULT_BOOTSTRAP_TTL_SEC: u64 = 3600;
@@ -449,6 +450,43 @@ struct NodeHandshakeWebsocket {
     url: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct NodeTasksResponse {
+    status: &'static str,
+    node_id: u64,
+    tasks: Vec<NodeTaskItem>,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct NodeTaskItem {
+    task_id: u64,
+    task_type: String,
+    status: String,
+    message: Option<String>,
+    created_at: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeTaskResultRequest {
+    node_id: u64,
+    task_id: u64,
+    status: String,
+    message: Option<String>,
+    output: Option<String>,
+    started_at: Option<u64>,
+    finished_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct NodeTaskResultResponse {
+    status: &'static str,
+    node_id: u64,
+    task_id: u64,
+    stored: bool,
+    server_time: u64,
+}
+
 #[derive(Debug, Deserialize)]
 struct BootstrapRequest {
     bootstrap_token: String,
@@ -520,6 +558,12 @@ struct AdminCreateBootstrapTokenRequest {
     install_url: Option<String>,
     enable_control_plane: Option<bool>,
     channel: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminCreateNodeTaskRequest {
+    task_type: String,
+    message: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -629,6 +673,7 @@ struct AdminListNodesResponse {
 struct AdminNodeDetailResponse {
     node: AdminNodeSummary,
     recent_reports: Vec<AdminReportDetail>,
+    recent_tasks: Vec<AdminNodeTaskSummary>,
     recent_audit_logs: Vec<AdminAuditLogDetail>,
     server_time: u64,
 }
@@ -673,6 +718,14 @@ struct AdminCreateBootstrapTokenResponse {
     bootstrap_url: String,
     expires_at: u64,
     install_command: String,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminCreateNodeTaskResponse {
+    status: &'static str,
+    node_id: u64,
+    task: AdminNodeTaskSummary,
     server_time: u64,
 }
 
@@ -754,6 +807,21 @@ struct AdminNodeSummary {
     last_seen_at: Option<u64>,
     last_report_at: Option<u64>,
     latest_report: Option<AdminReportSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminNodeTaskSummary {
+    id: u64,
+    node_id: u64,
+    task_type: String,
+    status: String,
+    message: Option<String>,
+    output: Option<String>,
+    error_message: Option<String>,
+    created_at: Option<u64>,
+    claimed_at: Option<u64>,
+    started_at: Option<u64>,
+    finished_at: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -925,6 +993,21 @@ struct AdminAuditLogRow {
     action: String,
     created_at: Option<u64>,
     detail_json: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct NodeTaskRow {
+    id: u64,
+    node_id: u64,
+    task_type: String,
+    status: String,
+    message: Option<String>,
+    output: Option<String>,
+    error_message: Option<String>,
+    created_at: Option<u64>,
+    claimed_at: Option<u64>,
+    started_at: Option<u64>,
+    finished_at: Option<u64>,
 }
 
 #[derive(Debug, FromRow)]
@@ -1134,6 +1217,8 @@ async fn main() -> anyhow::Result<()> {
         .route(NODE_HANDSHAKE_PATH, post(node_handshake))
         .route(NODE_CONFIG_PATH, get(node_config))
         .route(NODE_REPORT_PATH, post(node_report))
+        .route(NODE_TASKS_PATH, get(node_tasks))
+        .route("/api/node/v1/tasks/:task_id/result", post(node_task_result))
         .route(
             "/api/admin/v1/nodes",
             get(admin_list_nodes).post(admin_create_node),
@@ -1151,6 +1236,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/admin/v1/nodes/:node_id/bootstrap-token",
             post(admin_create_bootstrap_token),
+        )
+        .route(
+            "/api/admin/v1/nodes/:node_id/tasks",
+            post(admin_create_node_task),
         )
         .route(
             "/api/admin/v1/connectivity-diagnostic",
@@ -1197,6 +1286,7 @@ async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
     ensure_game_route_business_columns(pool).await?;
     ensure_game_route_region_indexes(pool).await?;
     ensure_connect_intent_region_column(pool).await?;
+    ensure_node_remote_tasks_table(pool).await?;
     seed_game_catalog_from_routes(pool).await?;
     Ok(())
 }
@@ -1447,6 +1537,37 @@ CREATE TABLE IF NOT EXISTS accel_games (
     .execute(pool)
     .await
     .context("failed to create accel_games")?;
+    Ok(())
+}
+
+async fn ensure_node_remote_tasks_table(pool: &MySqlPool) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+CREATE TABLE IF NOT EXISTS node_remote_tasks (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  node_id BIGINT UNSIGNED NOT NULL,
+  task_type VARCHAR(32) NOT NULL,
+  status ENUM('pending', 'running', 'succeeded', 'failed', 'canceled') NOT NULL DEFAULT 'pending',
+  message VARCHAR(512) NULL,
+  output TEXT NULL,
+  error_message VARCHAR(512) NULL,
+  requested_by VARCHAR(64) NULL,
+  claimed_at TIMESTAMP NULL,
+  started_at TIMESTAMP NULL,
+  finished_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_node_status_created (node_id, status, created_at),
+  INDEX idx_status_created (status, created_at),
+  CONSTRAINT fk_remote_task_node
+    FOREIGN KEY (node_id) REFERENCES accel_nodes(id)
+    ON DELETE CASCADE
+)
+"#,
+    )
+    .execute(pool)
+    .await
+    .context("failed to create node_remote_tasks")?;
     Ok(())
 }
 
@@ -1713,6 +1834,53 @@ async fn node_config(
     Ok(Json(NodeConfigResponse::from_row(row)))
 }
 
+async fn node_tasks(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<NodeTasksResponse>, AppError> {
+    let node_id =
+        authenticate_node_request(&state.pool, &headers, "GET", NODE_TASKS_PATH, b"").await?;
+    let tasks = claim_next_node_task(&state.pool, node_id)
+        .await?
+        .into_iter()
+        .map(NodeTaskItem::from_row)
+        .collect::<Vec<_>>();
+
+    Ok(Json(NodeTasksResponse {
+        status: "ok",
+        node_id,
+        tasks,
+        server_time: now_unix(),
+    }))
+}
+
+async fn node_task_result(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(task_id): Path<u64>,
+    body: Bytes,
+) -> Result<Json<NodeTaskResultResponse>, AppError> {
+    let path = format!("/api/node/v1/tasks/{task_id}/result");
+    let node_id = authenticate_node_request(&state.pool, &headers, "POST", &path, &body).await?;
+    let request = serde_json::from_slice::<NodeTaskResultRequest>(&body).map_err(|error| {
+        AppError::bad_request(
+            "invalid_task_result",
+            format!("invalid node task result body: {error}"),
+        )
+    })?;
+    validate_node_task_result(node_id, task_id, &request)?;
+    let status = validate_node_task_result_status(&request.status)?;
+    update_node_task_result(&state.pool, node_id, task_id, status, &request).await?;
+
+    Ok(Json(NodeTaskResultResponse {
+        status: "ok",
+        node_id,
+        task_id,
+        stored: true,
+        server_time: now_unix(),
+    }))
+}
+
 async fn admin_list_nodes(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1758,6 +1926,15 @@ async fn admin_get_node(
     Ok(Json(AdminNodeDetailResponse {
         node: AdminNodeSummary::from_row(node),
         recent_reports: reports,
+        recent_tasks: select_admin_node_tasks(
+            &state.pool,
+            node_id,
+            clamp_limit(query.limit, 20, 100),
+        )
+        .await?
+        .into_iter()
+        .map(AdminNodeTaskSummary::from_row)
+        .collect(),
         recent_audit_logs: audit_logs,
         server_time: now_unix(),
     }))
@@ -1885,6 +2062,29 @@ async fn admin_create_bootstrap_token(
         bootstrap_url,
         expires_at,
         install_command,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_create_node_task(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+    Json(request): Json<AdminCreateNodeTaskRequest>,
+) -> Result<Json<AdminCreateNodeTaskResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let task_type = validate_admin_node_task_type(&request.task_type)?;
+    let message = request
+        .message
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(512).collect::<String>());
+    let task = insert_admin_node_task(&state.pool, node_id, task_type, message.as_deref()).await?;
+
+    Ok(Json(AdminCreateNodeTaskResponse {
+        status: "ok",
+        node_id,
+        task: AdminNodeTaskSummary::from_row(task),
         server_time: now_unix(),
     }))
 }
@@ -3019,6 +3219,38 @@ LIMIT ?
     .map_err(AppError::database)
 }
 
+async fn select_admin_node_tasks(
+    pool: &MySqlPool,
+    node_id: u64,
+    limit: u32,
+) -> Result<Vec<NodeTaskRow>, AppError> {
+    sqlx::query_as::<_, NodeTaskRow>(
+        r#"
+SELECT
+  id,
+  node_id,
+  task_type,
+  status,
+  message,
+  output,
+  error_message,
+  CAST(UNIX_TIMESTAMP(created_at) AS UNSIGNED) AS created_at,
+  CAST(UNIX_TIMESTAMP(claimed_at) AS UNSIGNED) AS claimed_at,
+  CAST(UNIX_TIMESTAMP(started_at) AS UNSIGNED) AS started_at,
+  CAST(UNIX_TIMESTAMP(finished_at) AS UNSIGNED) AS finished_at
+FROM node_remote_tasks
+WHERE node_id = ?
+ORDER BY id DESC
+LIMIT ?
+"#,
+    )
+    .bind(node_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::database)
+}
+
 async fn select_admin_games(
     pool: &MySqlPool,
     query: &AdminListGamesQuery,
@@ -3714,6 +3946,146 @@ INSERT INTO accel_nodes (
     }
 }
 
+async fn insert_admin_node_task(
+    pool: &MySqlPool,
+    node_id: u64,
+    task_type: &str,
+    message: Option<&str>,
+) -> Result<NodeTaskRow, AppError> {
+    ensure_admin_node_exists(pool, node_id).await?;
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
+
+    let result = sqlx::query(
+        r#"
+INSERT INTO node_remote_tasks (
+  node_id,
+  task_type,
+  status,
+  message,
+  requested_by,
+  created_at,
+  updated_at
+) VALUES (?, ?, 'pending', ?, 'admin_api', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(node_id)
+    .bind(task_type)
+    .bind(message)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+    let task_id = result.last_insert_id();
+
+    let detail_json = serde_json::json!({
+        "task_id": task_id,
+        "task_type": task_type,
+        "message": message,
+    });
+    sqlx::query(
+        r#"
+INSERT INTO node_audit_logs (
+  node_id,
+  actor_type,
+  actor_id,
+  action,
+  detail_json,
+  created_at
+) VALUES (?, 'admin_api', NULL, 'node.task.create', ?, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(node_id)
+    .bind(detail_json.to_string())
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    let task = select_node_task_for_update(&mut tx, node_id, task_id).await?;
+    tx.commit().await.map_err(AppError::database)?;
+    Ok(task)
+}
+
+async fn claim_next_node_task(
+    pool: &MySqlPool,
+    node_id: u64,
+) -> Result<Option<NodeTaskRow>, AppError> {
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
+    let task_id = sqlx::query_scalar::<_, u64>(
+        r#"
+SELECT id
+FROM node_remote_tasks
+WHERE node_id = ?
+  AND status = 'pending'
+ORDER BY id ASC
+LIMIT 1
+FOR UPDATE
+"#,
+    )
+    .bind(node_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    let Some(task_id) = task_id else {
+        tx.commit().await.map_err(AppError::database)?;
+        return Ok(None);
+    };
+
+    sqlx::query(
+        r#"
+UPDATE node_remote_tasks
+SET status = 'running',
+    claimed_at = CURRENT_TIMESTAMP,
+    started_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+  AND node_id = ?
+"#,
+    )
+    .bind(task_id)
+    .bind(node_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    let task = select_node_task_for_update(&mut tx, node_id, task_id).await?;
+    tx.commit().await.map_err(AppError::database)?;
+    Ok(Some(task))
+}
+
+async fn select_node_task_for_update(
+    tx: &mut sqlx::Transaction<'_, MySql>,
+    node_id: u64,
+    task_id: u64,
+) -> Result<NodeTaskRow, AppError> {
+    sqlx::query_as::<_, NodeTaskRow>(
+        r#"
+SELECT
+  id,
+  node_id,
+  task_type,
+  status,
+  message,
+  output,
+  error_message,
+  CAST(UNIX_TIMESTAMP(created_at) AS UNSIGNED) AS created_at,
+  CAST(UNIX_TIMESTAMP(claimed_at) AS UNSIGNED) AS claimed_at,
+  CAST(UNIX_TIMESTAMP(started_at) AS UNSIGNED) AS started_at,
+  CAST(UNIX_TIMESTAMP(finished_at) AS UNSIGNED) AS finished_at
+FROM node_remote_tasks
+WHERE id = ?
+  AND node_id = ?
+LIMIT 1
+FOR UPDATE
+"#,
+    )
+    .bind(task_id)
+    .bind(node_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(AppError::database)?
+    .ok_or_else(|| AppError::not_found("task_not_found", "node task does not exist"))
+}
+
 async fn update_admin_node_config(
     pool: &MySqlPool,
     node_id: u64,
@@ -3909,6 +4281,93 @@ INSERT INTO node_audit_logs (
 
     tx.commit().await.map_err(AppError::database)?;
     Ok(response_previous_status)
+}
+
+async fn update_node_task_result(
+    pool: &MySqlPool,
+    node_id: u64,
+    task_id: u64,
+    status: &str,
+    request: &NodeTaskResultRequest,
+) -> Result<(), AppError> {
+    let message = request
+        .message
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(512).collect::<String>());
+    let output = request
+        .output
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(4096).collect::<String>());
+    let error_message = if status == "failed" {
+        message.clone()
+    } else {
+        None
+    };
+
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
+    let result = sqlx::query(
+        r#"
+UPDATE node_remote_tasks
+SET status = ?,
+    message = COALESCE(?, message),
+    output = ?,
+    error_message = ?,
+    started_at = COALESCE(FROM_UNIXTIME(?), started_at),
+    finished_at = COALESCE(FROM_UNIXTIME(?), CURRENT_TIMESTAMP),
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+  AND node_id = ?
+  AND status IN ('pending', 'running')
+"#,
+    )
+    .bind(status)
+    .bind(&message)
+    .bind(&output)
+    .bind(&error_message)
+    .bind(request.started_at)
+    .bind(request.finished_at)
+    .bind(task_id)
+    .bind(node_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::not_found(
+            "task_not_found",
+            "node task does not exist or is already finished",
+        ));
+    }
+
+    let detail_json = serde_json::json!({
+        "task_id": task_id,
+        "status": status,
+        "message": message,
+    });
+    sqlx::query(
+        r#"
+INSERT INTO node_audit_logs (
+  node_id,
+  actor_type,
+  actor_id,
+  action,
+  detail_json,
+  created_at
+) VALUES (?, 'node', NULL, 'node.task.result', ?, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(node_id)
+    .bind(detail_json.to_string())
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::database)?;
+
+    tx.commit().await.map_err(AppError::database)?;
+    Ok(())
 }
 
 async fn select_node_secret(pool: &MySqlPool, node_id: u64) -> Result<Option<String>, AppError> {
@@ -4626,6 +5085,53 @@ fn validate_admin_node_status(status: &str) -> Result<&'static str, AppError> {
     }
 }
 
+fn validate_admin_node_task_type(task_type: &str) -> Result<&'static str, AppError> {
+    match task_type.trim() {
+        "restart_node" => Ok("restart_node"),
+        _ => Err(AppError::bad_request(
+            "invalid_task_type",
+            "task_type must be restart_node",
+        )),
+    }
+}
+
+fn validate_node_task_result_status(status: &str) -> Result<&'static str, AppError> {
+    match status.trim() {
+        "succeeded" => Ok("succeeded"),
+        "failed" => Ok("failed"),
+        _ => Err(AppError::bad_request(
+            "invalid_task_status",
+            "task result status must be succeeded or failed",
+        )),
+    }
+}
+
+fn validate_node_task_result(
+    header_node_id: u64,
+    path_task_id: u64,
+    request: &NodeTaskResultRequest,
+) -> Result<(), AppError> {
+    if request.node_id != header_node_id {
+        return Err(AppError::bad_request(
+            "node_id_mismatch",
+            "header node id does not match task result body",
+        ));
+    }
+    if request.task_id != path_task_id {
+        return Err(AppError::bad_request(
+            "task_id_mismatch",
+            "path task id does not match task result body",
+        ));
+    }
+    if request.task_id == 0 {
+        return Err(AppError::bad_request(
+            "invalid_task_id",
+            "task_id must be positive",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_node_handshake_request(
     header_node_id: u64,
     header_timestamp: u64,
@@ -4783,6 +5289,37 @@ fn verify_node_signature(
     mac.update(canonical.as_bytes());
     mac.verify_slice(&signature)
         .map_err(|_| AppError::unauthorized("invalid_signature", "node signature mismatch"))
+}
+
+async fn authenticate_node_request(
+    pool: &MySqlPool,
+    headers: &HeaderMap,
+    method: &str,
+    path: &str,
+    body: &[u8],
+) -> Result<u64, AppError> {
+    let node_id = required_header_u64(headers, "X-Node-Id")?;
+    let timestamp = required_header_u64(headers, "X-Node-Timestamp")?;
+    let nonce = required_header(headers, "X-Node-Nonce")?;
+    let body_sha256 = required_header(headers, "X-Node-Body-Sha256")?;
+    let signature = required_header(headers, "X-Node-Signature")?;
+
+    validate_node_report_timestamp(timestamp)?;
+
+    let node_secret = select_node_secret(pool, node_id)
+        .await?
+        .ok_or_else(|| AppError::unauthorized("unknown_node", "node is not registered"))?;
+    verify_node_signature(
+        method,
+        path,
+        &node_secret,
+        timestamp,
+        nonce,
+        body_sha256,
+        signature,
+        body,
+    )?;
+    Ok(node_id)
 }
 
 fn required_header<'a>(headers: &'a HeaderMap, name: &'static str) -> Result<&'a str, AppError> {
@@ -5237,6 +5774,36 @@ impl AdminNodeSummary {
     }
 }
 
+impl AdminNodeTaskSummary {
+    fn from_row(row: NodeTaskRow) -> Self {
+        Self {
+            id: row.id,
+            node_id: row.node_id,
+            task_type: row.task_type,
+            status: row.status,
+            message: row.message,
+            output: row.output,
+            error_message: row.error_message,
+            created_at: row.created_at,
+            claimed_at: row.claimed_at,
+            started_at: row.started_at,
+            finished_at: row.finished_at,
+        }
+    }
+}
+
+impl NodeTaskItem {
+    fn from_row(row: NodeTaskRow) -> Self {
+        Self {
+            task_id: row.id,
+            task_type: row.task_type,
+            status: row.status,
+            message: row.message,
+            created_at: row.created_at,
+        }
+    }
+}
+
 impl AdminGameSummary {
     fn from_row(row: AdminGameRow) -> Self {
         Self {
@@ -5678,6 +6245,49 @@ mod tests {
     }
 
     #[test]
+    fn validates_admin_node_task_type() {
+        assert_eq!(
+            validate_admin_node_task_type("restart_node").expect("task type"),
+            "restart_node"
+        );
+
+        let error = validate_admin_node_task_type("shell").unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_task_type");
+    }
+
+    #[test]
+    fn validates_node_task_result_request() {
+        let request = NodeTaskResultRequest {
+            node_id: 2,
+            task_id: 9,
+            status: "succeeded".to_string(),
+            message: None,
+            output: None,
+            started_at: Some(1_779_500_000),
+            finished_at: Some(1_779_500_001),
+        };
+
+        validate_node_task_result(2, 9, &request).expect("task result is valid");
+        assert_eq!(
+            validate_node_task_result_status(&request.status).expect("status"),
+            "succeeded"
+        );
+
+        let node_error = validate_node_task_result(3, 9, &request).unwrap_err();
+        assert_eq!(node_error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(node_error.code, "node_id_mismatch");
+
+        let task_error = validate_node_task_result(2, 10, &request).unwrap_err();
+        assert_eq!(task_error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(task_error.code, "task_id_mismatch");
+
+        let status_error = validate_node_task_result_status("running").unwrap_err();
+        assert_eq!(status_error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(status_error.code, "invalid_task_status");
+    }
+
+    #[test]
     fn parses_admin_audit_log_detail() {
         let row = AdminAuditLogRow {
             id: 9,
@@ -5852,7 +6462,14 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"edit-area\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"edit-tag\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"delete\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action=\"restart\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-detail-restart"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-resume-node"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("restartNode"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("createNodeTask"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("node.task.create"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("node.task.result"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes/${nodeId}/tasks"));
         assert!(ADMIN_DASHBOARD_HTML.contains("createNodeMeta"));
         assert!(ADMIN_DASHBOARD_HTML.contains("submitCreateNode"));
         assert!(ADMIN_DASHBOARD_HTML.contains("openEditNodeModal"));

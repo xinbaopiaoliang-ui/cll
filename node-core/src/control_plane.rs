@@ -18,6 +18,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
+    process::Command,
     task::JoinHandle,
     time::{interval, MissedTickBehavior},
 };
@@ -28,6 +29,7 @@ type HmacSha256 = Hmac<Sha256>;
 const REPORT_PATH: &str = "/api/node/v1/report";
 const HANDSHAKE_PATH: &str = "/api/node/v1/handshake";
 const CONFIG_PATH: &str = "/api/node/v1/config";
+const TASKS_PATH: &str = "/api/node/v1/tasks";
 static NONCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub fn spawn_control_plane(state: RuntimeState, config_path: PathBuf) -> Vec<JoinHandle<()>> {
@@ -67,13 +69,17 @@ pub fn spawn_control_plane(state: RuntimeState, config_path: PathBuf) -> Vec<Joi
 
     let task_state = state.clone();
     let config_state = state.clone();
+    let remote_task_state = state.clone();
     let panel_url = panel_url.trim_end_matches('/').to_string();
     let config_panel_url = panel_url.clone();
+    let task_panel_url = panel_url.clone();
     let node_secret = node_secret.to_string();
     let config_node_secret = node_secret.clone();
+    let task_node_secret = node_secret.clone();
     let config_poll_interval_sec = control.config_poll_interval_sec.max(5);
     let report_client = client.clone();
-    let config_client = client;
+    let config_client = client.clone();
+    let task_client = client;
 
     let task = tokio::spawn(async move {
         if let Err(error) = send_handshake(
@@ -112,7 +118,19 @@ pub fn spawn_control_plane(state: RuntimeState, config_path: PathBuf) -> Vec<Joi
         .await;
     });
 
-    vec![task, config_task]
+    let remote_task = tokio::spawn(async move {
+        run_task_loop(
+            task_client,
+            remote_task_state,
+            node_id,
+            task_panel_url,
+            task_node_secret,
+            config_poll_interval_sec,
+        )
+        .await;
+    });
+
+    vec![task, config_task, remote_task]
 }
 
 #[derive(Serialize)]
@@ -280,6 +298,33 @@ async fn run_config_loop(
         {
             state.stats().record_config_failure(None, error.to_string());
             warn!(?error, "control plane config sync failed");
+        }
+    }
+}
+
+async fn run_task_loop(
+    client: Client,
+    _state: RuntimeState,
+    node_id: u64,
+    panel_url: String,
+    node_secret: String,
+    task_poll_interval_sec: u64,
+) {
+    info!(
+        %panel_url,
+        task_poll_interval_sec,
+        "control plane task loop started"
+    );
+
+    let mut ticker = interval(Duration::from_secs(task_poll_interval_sec.max(5)));
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    loop {
+        ticker.tick().await;
+        if let Err(error) =
+            fetch_and_execute_tasks(&client, node_id, &panel_url, &node_secret).await
+        {
+            warn!(?error, "control plane task sync failed");
         }
     }
 }
@@ -459,6 +504,202 @@ async fn fetch_and_apply_config(
         );
     }
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct NodeTasksResponse {
+    status: String,
+    node_id: u64,
+    tasks: Vec<RemoteNodeTask>,
+}
+
+#[derive(Deserialize)]
+struct RemoteNodeTask {
+    task_id: u64,
+    task_type: String,
+    status: String,
+    message: Option<String>,
+}
+
+#[derive(Serialize)]
+struct NodeTaskResult {
+    node_id: u64,
+    task_id: u64,
+    status: String,
+    message: Option<String>,
+    output: Option<String>,
+    started_at: u64,
+    finished_at: u64,
+}
+
+struct TaskExecution {
+    status: &'static str,
+    message: String,
+    output: Option<String>,
+}
+
+async fn fetch_and_execute_tasks(
+    client: &Client,
+    node_id: u64,
+    panel_url: &str,
+    node_secret: &str,
+) -> anyhow::Result<()> {
+    let body: &[u8] = b"";
+    let timestamp = now_unix();
+    let nonce = next_nonce(timestamp);
+    let signed = sign_request("GET", TASKS_PATH, timestamp, &nonce, body, node_secret)?;
+    let url = format!("{panel_url}{TASKS_PATH}");
+
+    let response = client
+        .get(url)
+        .header("X-Node-Id", node_id.to_string())
+        .header("X-Node-Timestamp", timestamp.to_string())
+        .header("X-Node-Nonce", &nonce)
+        .header("X-Node-Body-Sha256", signed.body_sha256)
+        .header("X-Node-Signature", signed.signature)
+        .send()
+        .await
+        .context("task request failed")?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let message = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "failed to read response body".to_string());
+        bail!(
+            "task sync rejected: http {} {}",
+            status.as_u16(),
+            trim_for_log(&message, 200)
+        );
+    }
+
+    let payload = response
+        .json::<NodeTasksResponse>()
+        .await
+        .context("failed to decode task response")?;
+    if payload.status != "ok" {
+        bail!("task response status is {}", payload.status);
+    }
+    if payload.node_id != node_id {
+        bail!("task response node_id mismatch");
+    }
+    if payload.tasks.is_empty() {
+        return Ok(());
+    }
+
+    for task in payload.tasks {
+        let started_at = now_unix();
+        let result = execute_remote_task(&task).await;
+        let finished_at = now_unix();
+        let task_result = match result {
+            Ok(execution) => NodeTaskResult {
+                node_id,
+                task_id: task.task_id,
+                status: execution.status.to_string(),
+                message: Some(execution.message),
+                output: execution.output,
+                started_at,
+                finished_at,
+            },
+            Err(error) => NodeTaskResult {
+                node_id,
+                task_id: task.task_id,
+                status: "failed".to_string(),
+                message: Some(trim_for_log(&error.to_string(), 512)),
+                output: None,
+                started_at,
+                finished_at,
+            },
+        };
+        send_task_result(client, panel_url, node_secret, &task_result).await?;
+    }
+
+    Ok(())
+}
+
+async fn execute_remote_task(task: &RemoteNodeTask) -> anyhow::Result<TaskExecution> {
+    if task.status != "running" {
+        bail!(
+            "task {} has unexpected status {}",
+            task.task_id,
+            task.status
+        );
+    }
+
+    match task.task_type.as_str() {
+        "restart_node" => {
+            schedule_node_restart().await?;
+            Ok(TaskExecution {
+                status: "succeeded",
+                message: "restart scheduled; xaccel-node will restart in about 2 seconds"
+                    .to_string(),
+                output: task.message.clone(),
+            })
+        }
+        other => bail!("unsupported task type: {other}"),
+    }
+}
+
+async fn schedule_node_restart() -> anyhow::Result<()> {
+    let status = Command::new("sh")
+        .arg("-c")
+        .arg("(sleep 2; systemctl restart xaccel-node >/dev/null 2>&1) &")
+        .status()
+        .await
+        .context("failed to schedule xaccel-node restart")?;
+    if status.success() {
+        Ok(())
+    } else {
+        bail!("restart scheduler exited with status {status}");
+    }
+}
+
+async fn send_task_result(
+    client: &Client,
+    panel_url: &str,
+    node_secret: &str,
+    result: &NodeTaskResult,
+) -> anyhow::Result<()> {
+    let body = serde_json::to_vec(result).context("failed to encode task result")?;
+    let timestamp = now_unix();
+    let nonce = next_nonce(timestamp);
+    let path = format!("/api/node/v1/tasks/{}/result", result.task_id);
+    let signed = sign_request("POST", &path, timestamp, &nonce, &body, node_secret)?;
+    let url = format!("{panel_url}{path}");
+
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .header("X-Node-Id", result.node_id.to_string())
+        .header("X-Node-Timestamp", timestamp.to_string())
+        .header("X-Node-Nonce", &nonce)
+        .header("X-Node-Body-Sha256", signed.body_sha256)
+        .header("X-Node-Signature", signed.signature)
+        .body(body)
+        .send()
+        .await
+        .context("task result request failed")?;
+
+    let status = response.status();
+    if status.is_success() {
+        info!(
+            task_id = result.task_id,
+            task_status = %result.status,
+            "control plane task result stored"
+        );
+        return Ok(());
+    }
+
+    let message = response
+        .text()
+        .await
+        .unwrap_or_else(|_| "failed to read response body".to_string());
+    bail!(
+        "task result rejected: http {} {}",
+        status.as_u16(),
+        trim_for_log(&message, 200)
+    )
 }
 
 struct SignedRequest {

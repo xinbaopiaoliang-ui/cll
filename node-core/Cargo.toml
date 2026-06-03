@@ -1,6 +1,6 @@
 [package]
 name = "xaccel-node"
-version = "0.32.0"
+version = "0.33.0"
 edition = "2021"
 rust-version = "1.75"
 
@@ -13,7 +13,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
-tokio = { version = "1.37", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1.37", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "time"] }
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

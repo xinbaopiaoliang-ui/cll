@@ -206,6 +206,27 @@ CREATE TABLE node_traffic_logs (
     ON DELETE CASCADE
 );
 
+CREATE TABLE node_remote_tasks (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  node_id BIGINT UNSIGNED NOT NULL,
+  task_type VARCHAR(32) NOT NULL,
+  status ENUM('pending', 'running', 'succeeded', 'failed', 'canceled') NOT NULL DEFAULT 'pending',
+  message VARCHAR(512) NULL,
+  output TEXT NULL,
+  error_message VARCHAR(512) NULL,
+  requested_by VARCHAR(64) NULL,
+  claimed_at TIMESTAMP NULL,
+  started_at TIMESTAMP NULL,
+  finished_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_node_status_created (node_id, status, created_at),
+  INDEX idx_status_created (status, created_at),
+  CONSTRAINT fk_remote_task_node
+    FOREIGN KEY (node_id) REFERENCES accel_nodes(id)
+    ON DELETE CASCADE
+);
+
 CREATE TABLE node_audit_logs (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   node_id BIGINT UNSIGNED NOT NULL,
