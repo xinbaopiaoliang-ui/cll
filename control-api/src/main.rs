@@ -673,6 +673,20 @@ struct AdminOperationTaskResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct AdminListAuditLogsQuery {
+    node_id: Option<u64>,
+    action: Option<String>,
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminListAuditLogsResponse {
+    logs: Vec<AdminAuditLogDetail>,
+    total: usize,
+    server_time: u64,
+}
+
+#[derive(Debug, Deserialize)]
 struct AdminListGamesQuery {
     status: Option<String>,
     platform: Option<String>,
@@ -1044,6 +1058,8 @@ struct AdminReportDetail {
 struct AdminAuditLogDetail {
     id: u64,
     node_id: u64,
+    node_name: String,
+    node_endpoint: String,
     actor_type: String,
     actor_id: Option<u64>,
     action: String,
@@ -1149,6 +1165,9 @@ struct AdminReportRow {
 struct AdminAuditLogRow {
     id: u64,
     node_id: u64,
+    node_name: String,
+    node_server_ip: String,
+    node_server_port: u32,
     actor_type: String,
     actor_id: Option<u64>,
     action: String,
@@ -1485,6 +1504,7 @@ async fn main() -> anyhow::Result<()> {
             "/api/admin/v1/operation-tasks/:task_id",
             get(admin_get_operation_task),
         )
+        .route("/api/admin/v1/audit-logs", get(admin_list_audit_logs))
         .route(
             "/api/admin/v1/connectivity-diagnostic",
             post(admin_connectivity_diagnostic),
@@ -2223,12 +2243,16 @@ async fn admin_get_node(
         .into_iter()
         .map(AdminReportDetail::from_row)
         .collect::<Result<Vec<_>, _>>()?;
-    let audit_logs =
-        select_admin_audit_logs(&state.pool, node_id, clamp_limit(query.limit, 20, 100))
-            .await?
-            .into_iter()
-            .map(AdminAuditLogDetail::from_row)
-            .collect::<Result<Vec<_>, _>>()?;
+    let audit_logs = select_admin_audit_logs(
+        &state.pool,
+        Some(node_id),
+        None,
+        clamp_limit(query.limit, 20, 100),
+    )
+    .await?
+    .into_iter()
+    .map(AdminAuditLogDetail::from_row)
+    .collect::<Result<Vec<_>, _>>()?;
 
     Ok(Json(AdminNodeDetailResponse {
         node: AdminNodeSummary::from_row(node),
@@ -2625,6 +2649,35 @@ async fn admin_get_operation_task(
 
     Ok(Json(AdminOperationTaskResponse {
         task: AdminOperationTaskSummary::from_row(task),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_list_audit_logs(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<AdminListAuditLogsQuery>,
+) -> Result<Json<AdminListAuditLogsResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let action = query
+        .action
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let logs = select_admin_audit_logs(
+        &state.pool,
+        query.node_id,
+        action,
+        clamp_limit(query.limit, 100, 500),
+    )
+    .await?
+    .into_iter()
+    .map(AdminAuditLogDetail::from_row)
+    .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Json(AdminListAuditLogsResponse {
+        total: logs.len(),
+        logs,
         server_time: now_unix(),
     }))
 }
@@ -3933,30 +3986,44 @@ LIMIT ?
 
 async fn select_admin_audit_logs(
     pool: &MySqlPool,
-    node_id: u64,
+    node_id: Option<u64>,
+    action: Option<&str>,
     limit: u32,
 ) -> Result<Vec<AdminAuditLogRow>, AppError> {
-    sqlx::query_as::<_, AdminAuditLogRow>(
+    let mut builder = QueryBuilder::<MySql>::new(
         r#"
 SELECT
-  id,
-  node_id,
-  actor_type,
-  actor_id,
-  action,
-  CAST(UNIX_TIMESTAMP(created_at) AS UNSIGNED) AS created_at,
-  CAST(detail_json AS CHAR) AS detail_json
-FROM node_audit_logs
-WHERE node_id = ?
-ORDER BY id DESC
-LIMIT ?
+  a.id,
+  a.node_id,
+  n.name AS node_name,
+  n.server_ip AS node_server_ip,
+  n.server_port AS node_server_port,
+  a.actor_type,
+  a.actor_id,
+  a.action,
+  CAST(UNIX_TIMESTAMP(a.created_at) AS UNSIGNED) AS created_at,
+  CAST(a.detail_json AS CHAR) AS detail_json
+FROM node_audit_logs a
+JOIN accel_nodes n ON n.id = a.node_id
+WHERE 1 = 1
 "#,
-    )
-    .bind(node_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
-    .map_err(AppError::database)
+    );
+    if let Some(node_id) = node_id {
+        builder.push(" AND a.node_id = ");
+        builder.push_bind(node_id);
+    }
+    if let Some(action) = action {
+        builder.push(" AND a.action = ");
+        builder.push_bind(action);
+    }
+    builder.push(" ORDER BY a.id DESC LIMIT ");
+    builder.push_bind(limit);
+
+    builder
+        .build_query_as::<AdminAuditLogRow>()
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::database)
 }
 
 async fn select_admin_node_tasks(
@@ -7535,6 +7602,8 @@ impl AdminAuditLogDetail {
         Ok(Self {
             id: row.id,
             node_id: row.node_id,
+            node_name: row.node_name,
+            node_endpoint: format!("{}:{}", row.node_server_ip, row.node_server_port),
             actor_type: row.actor_type,
             actor_id: row.actor_id,
             action: row.action,
@@ -8108,6 +8177,9 @@ mod tests {
         let row = AdminAuditLogRow {
             id: 9,
             node_id: 2,
+            node_name: "香港节点".to_string(),
+            node_server_ip: "47.83.160.126".to_string(),
+            node_server_port: 666,
             actor_type: "admin_api".to_string(),
             actor_id: None,
             action: "node.status.update".to_string(),
@@ -8121,6 +8193,8 @@ mod tests {
         let detail = AdminAuditLogDetail::from_row(row).expect("audit detail parses");
         assert_eq!(detail.id, 9);
         assert_eq!(detail.node_id, 2);
+        assert_eq!(detail.node_name, "香港节点");
+        assert_eq!(detail.node_endpoint, "47.83.160.126:666");
         assert_eq!(detail.action, "node.status.update");
         assert_eq!(
             detail
@@ -8270,6 +8344,11 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("游戏管理"));
         assert!(ADMIN_DASHBOARD_HTML.contains("游戏路由"));
         assert!(ADMIN_DASHBOARD_HTML.contains("操作日志"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-view=\"audit\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("auditRows"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("loadAuditLogs"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("auditActionFilter"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/audit-logs"));
         assert!(ADMIN_DASHBOARD_HTML.contains("恢复调度"));
         assert!(ADMIN_DASHBOARD_HTML.contains("调度诊断"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-node-action"));

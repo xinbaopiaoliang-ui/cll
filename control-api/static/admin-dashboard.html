@@ -611,7 +611,8 @@
         gap: 18px;
       }
 
-      .catalog-toolbar {
+      .catalog-toolbar,
+      .audit-toolbar {
         display: grid;
         grid-template-columns: minmax(280px, 1fr) repeat(2, minmax(150px, 190px)) auto;
         gap: 10px;
@@ -1254,6 +1255,35 @@
         white-space: nowrap;
       }
 
+      .audit-table td {
+        vertical-align: top;
+      }
+
+      .audit-entry {
+        display: grid;
+        gap: 5px;
+        min-width: 220px;
+      }
+
+      .audit-detail {
+        min-width: min(520px, 52vw);
+      }
+
+      .audit-detail summary {
+        min-height: 24px;
+        color: var(--accent-strong);
+      }
+
+      .audit-detail pre {
+        max-height: 220px;
+        margin-top: 10px;
+      }
+
+      .audit-detail-empty {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
       .command-output {
         margin-top: 12px;
       }
@@ -1512,7 +1542,7 @@
         }
 
         .nav-group {
-          grid-template-columns: repeat(5, minmax(0, 1fr));
+          grid-template-columns: repeat(6, minmax(0, 1fr));
         }
 
         .nav-label {
@@ -1566,6 +1596,7 @@
         .node-detail-panel .detail-grid,
         .node-actions-grid .operation-card:first-child .form-grid,
         .catalog-toolbar,
+        .audit-toolbar,
         .deploy-status-grid,
         .form-grid {
           grid-template-columns: 1fr;
@@ -1642,10 +1673,14 @@
             <span class="nav-icon"></span>
             <span>运维工具</span>
           </button>
+          <button class="nav-item" type="button" data-view="audit">
+            <span class="nav-icon"></span>
+            <span>操作日志</span>
+          </button>
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.37.0</span>
+          <span class="mono">v0.38.0</span>
         </div>
       </aside>
 
@@ -2067,6 +2102,73 @@
             </div>
           </section>
         </section>
+
+        <section class="view hidden" id="viewAudit" data-view-panel="audit">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">操作日志</div>
+                <div class="panel-meta" id="auditMeta">最近 100 条审计记录</div>
+              </div>
+              <div class="inline-actions">
+                <button type="button" id="refreshAuditLogs">刷新日志</button>
+              </div>
+            </div>
+            <div class="audit-toolbar">
+              <div class="field">
+                <label for="auditNodeFilter">节点</label>
+                <select id="auditNodeFilter">
+                  <option value="">全部节点</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="auditActionFilter">操作类型</label>
+                <select id="auditActionFilter">
+                  <option value="">全部操作</option>
+                  <option value="node.deploy">一键部署</option>
+                  <option value="node.deploy_failed">一键部署失败</option>
+                  <option value="node.ssh_action">SSH 操作</option>
+                  <option value="node.ssh_action_failed">SSH 操作失败</option>
+                  <option value="node.ssh_credential.upsert">保存 SSH 凭据</option>
+                  <option value="node.ssh_credential.delete">删除 SSH 凭据</option>
+                  <option value="node.status.update">状态调整</option>
+                  <option value="node.config.update">配置变更</option>
+                  <option value="node.bootstrap_token.create">生成安装令牌</option>
+                  <option value="node.task.create">创建节点任务</option>
+                  <option value="node.task.result">节点任务结果</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="auditLimitFilter">数量</label>
+                <select id="auditLimitFilter">
+                  <option value="50">最近 50 条</option>
+                  <option value="100" selected>最近 100 条</option>
+                  <option value="300">最近 300 条</option>
+                  <option value="500">最近 500 条</option>
+                </select>
+              </div>
+              <button type="button" id="applyAuditFilter">筛选</button>
+            </div>
+            <div class="table-wrap">
+              <table class="audit-table">
+                <thead>
+                  <tr>
+                    <th>操作</th>
+                    <th>节点</th>
+                    <th>来源</th>
+                    <th>时间</th>
+                    <th>详情</th>
+                  </tr>
+                </thead>
+                <tbody id="auditRows">
+                  <tr>
+                    <td colspan="5"><span class="skeleton"></span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
       </section>
     </main>
 
@@ -2381,6 +2483,7 @@
         games: "游戏管理",
         routes: "游戏路由",
         ops: "运维工具",
+        audit: "操作日志",
       };
 
       const state = {
@@ -2389,6 +2492,7 @@
         games: [],
         routeRules: [],
         operationTasks: [],
+        auditLogs: [],
         selectedId: null,
         serverTime: null,
         autoRefresh: true,
@@ -2473,6 +2577,13 @@
         opsTaskMeta: document.getElementById("opsTaskMeta"),
         opsTaskRows: document.getElementById("opsTaskRows"),
         refreshOpsTasks: document.getElementById("refreshOpsTasks"),
+        auditMeta: document.getElementById("auditMeta"),
+        auditRows: document.getElementById("auditRows"),
+        auditNodeFilter: document.getElementById("auditNodeFilter"),
+        auditActionFilter: document.getElementById("auditActionFilter"),
+        auditLimitFilter: document.getElementById("auditLimitFilter"),
+        applyAuditFilter: document.getElementById("applyAuditFilter"),
+        refreshAuditLogs: document.getElementById("refreshAuditLogs"),
         controlUpgradeCommand: document.getElementById("controlUpgradeCommand"),
       };
 
@@ -2493,6 +2604,9 @@
           panel.classList.toggle("hidden", panel.dataset.viewPanel !== state.activeView);
         });
         els.pageTitle.textContent = PAGE_TITLES[state.activeView];
+        if (state.activeView === "audit" && state.token) {
+          loadAuditLogs({ silent: true }).catch(showError);
+        }
       }
 
       function showInlineError(element, message) {
@@ -2939,9 +3053,53 @@
           const reason = detail.reason ? ` / 原因：${detail.reason}` : "";
           return `${previous} -> ${current}${reason}${actor}`;
         }
+        if (item.action === "node.config.update") {
+          return `配置已更新 / 修订版 ${detail.config_revision || "--"}${actor}`;
+        }
+        if (item.action === "node.bootstrap_token.create") {
+          return `安装令牌有效期到 ${formatTime(detail.expires_at)}${actor}`;
+        }
+        if (item.action === "node.task.create") {
+          return `任务 #${detail.task_id || "--"} / ${taskTypeText(detail.task_type)}${actor}`;
+        }
+        if (item.action === "node.task.result") {
+          return `任务 #${detail.task_id || "--"} / ${taskStatusText(detail.status)}${detail.message ? ` / ${detail.message}` : ""}${actor}`;
+        }
+        if (item.action === "node.ssh_credential.upsert") {
+          return `SSH ${detail.username || "--"}@${detail.host || "--"}:${detail.port || "--"} 已保存${actor}`;
+        }
+        if (item.action === "node.ssh_credential.delete") {
+          return `SSH 凭据已删除${actor}`;
+        }
+        if (item.action === "node.ssh_action" || item.action === "node.ssh_action_failed") {
+          const label = detail.command_label || sshActionText(detail.action);
+          return `${label || "SSH 操作"} / 耗时 ${operationTaskDuration({ duration_ms: detail.duration_ms })}${actor}`;
+        }
+        if (item.action === "node.deploy" || item.action === "node.deploy_failed") {
+          const label = detail.command_label || "一键部署 / 升级节点";
+          const saved = detail.credential_saved ? "已保存 SSH" : "未保存 SSH";
+          return `${label} / ${saved} / 耗时 ${operationTaskDuration({ duration_ms: detail.duration_ms })}${actor}`;
+        }
         if (detail.reason) return `原因：${detail.reason}${actor}`;
         if (detail.current_status) return `${nodeStatusValueText(detail.current_status)}${actor}`;
         return item.actor_type || "--";
+      }
+
+      function auditActionClass(action) {
+        if (String(action || "").includes("failed")) return "bad";
+        if (action === "node.status.update" || action === "node.config.update") return "warn";
+        return "ok";
+      }
+
+      function actorTypeText(actorType) {
+        if (actorType === "admin_api") return "控制面管理员";
+        if (actorType === "node") return "节点内核";
+        if (actorType === "business_api") return "业务后台";
+        return actorType || "未知来源";
+      }
+
+      function auditDetailJson(item) {
+        return JSON.stringify(item.detail || {}, null, 2);
       }
 
       function protocolText(protocol) {
@@ -3450,6 +3608,70 @@
           .join("");
       }
 
+      function populateAuditNodeFilter() {
+        if (!els.auditNodeFilter) return;
+        const selected = els.auditNodeFilter.value;
+        els.auditNodeFilter.innerHTML = [
+          `<option value="">全部节点</option>`,
+          ...state.nodes.map((node) => {
+            const label = `${node.name} / ${node.endpoint || `${node.server_ip}:${node.server_port}`}`;
+            return `<option value="${node.id}">${escapeHtml(label)}</option>`;
+          }),
+        ].join("");
+        if (selected && state.nodes.some((node) => String(node.id) === selected)) {
+          els.auditNodeFilter.value = selected;
+        }
+      }
+
+      function renderAuditLogs(serverTime = state.serverTime) {
+        const logs = state.auditLogs || [];
+        els.auditMeta.textContent = logs.length
+          ? `${logs.length} 条 / 刷新 ${formatClock(serverTime)}`
+          : "最近 100 条审计记录";
+        if (!logs.length) {
+          els.auditRows.innerHTML = `<tr><td colspan="5" class="empty">暂无操作日志。节点部署、SSH 操作、状态调整后会在这里留下记录。</td></tr>`;
+          return;
+        }
+
+        els.auditRows.innerHTML = logs
+          .map((item) => {
+            const summary = auditSummaryText(item);
+            const endpoint = item.node_endpoint || "--";
+            const detailJson = auditDetailJson(item);
+            return `
+              <tr>
+                <td>
+                  <div class="audit-entry">
+                    <span class="chip ${auditActionClass(item.action)}">${escapeHtml(auditActionText(item.action))}</span>
+                    <span class="cell-note mono">#${item.id} / ${escapeHtml(item.action || "--")}</span>
+                  </div>
+                </td>
+                <td>
+                  <span class="strong">${escapeHtml(item.node_name || `节点 ${item.node_id}`)}</span>
+                  <div class="cell-note mono">${escapeHtml(endpoint)} / ID ${item.node_id}</div>
+                </td>
+                <td>
+                  <span>${escapeHtml(actorTypeText(item.actor_type))}</span>
+                  <div class="cell-note mono">${escapeHtml(item.actor_type || "--")}</div>
+                </td>
+                <td>
+                  <div class="mono age ${ageClass(item.created_at)}">${escapeHtml(ageText(item.created_at))}</div>
+                  <div class="cell-note">${escapeHtml(formatTime(item.created_at))}</div>
+                </td>
+                <td>
+                  <div class="audit-summary">${escapeHtml(summary)}</div>
+                  ${
+                    detailJson === "{}"
+                      ? `<div class="audit-detail-empty">没有更多字段</div>`
+                      : `<details class="audit-detail"><summary>查看原始详情</summary><pre>${escapeHtml(detailJson)}</pre></details>`
+                  }
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
       function renderDetail(data) {
         const node = data.node;
         const report = data.recent_reports?.[0];
@@ -3778,9 +4000,11 @@
         if (!state.selectedId && state.nodes.length) {
           state.selectedId = state.nodes[0].id;
         }
+        populateAuditNodeFilter();
         await loadGames({ silent: true });
         await loadRouteRules({ silent: true });
         await loadOperationTasks({ silent: true });
+        await loadAuditLogs({ silent: true });
         const latestReport = state.nodes.reduce(
           (max, node) => Math.max(max, node.last_report_at || 0),
           0,
@@ -3854,6 +4078,23 @@
         renderOperationTasks(data.server_time);
       }
 
+      async function loadAuditLogs({ silent = false } = {}) {
+        if (!silent) {
+          els.auditRows.innerHTML = `<tr><td colspan="5"><span class="skeleton"></span></td></tr>`;
+        }
+        const params = new URLSearchParams({
+          limit: els.auditLimitFilter?.value || "100",
+        });
+        const nodeId = textOrNull(els.auditNodeFilter?.value);
+        const action = textOrNull(els.auditActionFilter?.value);
+        if (nodeId) params.set("node_id", nodeId);
+        if (action) params.set("action", action);
+
+        const data = await api(`/api/admin/v1/audit-logs?${params.toString()}`);
+        state.auditLogs = data.logs || [];
+        renderAuditLogs(data.server_time);
+      }
+
       function showError(error) {
         els.statusLine.textContent = error.message;
         els.statusLine.classList.add("error-state");
@@ -3888,6 +4129,7 @@
         state.games = [];
         state.routeRules = [];
         state.operationTasks = [];
+        state.auditLogs = [];
         state.selectedId = null;
         clearInterval(state.timer);
         state.timer = null;
@@ -4749,6 +4991,26 @@
         if (!button) return;
         setActiveView("nodes");
         loadDetail(button.dataset.taskNode).catch(showError);
+      });
+
+      els.refreshAuditLogs.addEventListener("click", () => {
+        loadAuditLogs().catch(showError);
+      });
+
+      els.applyAuditFilter.addEventListener("click", () => {
+        loadAuditLogs().catch(showError);
+      });
+
+      els.auditNodeFilter.addEventListener("change", () => {
+        loadAuditLogs().catch(showError);
+      });
+
+      els.auditActionFilter.addEventListener("change", () => {
+        loadAuditLogs().catch(showError);
+      });
+
+      els.auditLimitFilter.addEventListener("change", () => {
+        loadAuditLogs().catch(showError);
       });
 
       setActiveView("overview");
