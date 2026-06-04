@@ -542,6 +542,7 @@
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
+        align-items: center;
         min-width: 0;
         max-width: 230px;
       }
@@ -556,16 +557,22 @@
         box-shadow: none;
       }
 
-      .readonly-taxonomy-chip {
-        display: inline-flex;
-        min-height: 26px;
-        align-items: center;
-        gap: 6px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.72);
-        padding: 0 9px;
+      .taxonomy-readonly {
+        display: grid;
+        gap: 5px;
+        min-width: 0;
+      }
+
+      .taxonomy-readonly-line {
+        color: var(--ink);
+        font-size: 12px;
+        font-weight: 760;
+        line-height: 1.35;
         white-space: nowrap;
+      }
+
+      .taxonomy-readonly-line .taxonomy-prefix {
+        margin-right: 6px;
       }
 
       button.taxonomy-chip:hover {
@@ -1767,7 +1774,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.39.2</span>
+          <span class="mono">v0.39.3</span>
         </div>
       </aside>
 
@@ -3424,15 +3431,13 @@
         const tag = nodeTagValue(node);
         if (!canWrite()) {
           return `
-          <div class="taxonomy-cell">
-            <span class="readonly-taxonomy-chip ${area ? "" : "empty"}">
-              <span class="taxonomy-prefix">区域</span>
-              <span class="taxonomy-text">${escapeHtml(area || "未分区")}</span>
-            </span>
-            <span class="readonly-taxonomy-chip ${tag ? "" : "empty"}">
-              <span class="taxonomy-prefix">标签</span>
-              <span class="taxonomy-text">${escapeHtml(tag || "未设置")}</span>
-            </span>
+          <div class="taxonomy-readonly">
+            <div class="taxonomy-readonly-line ${area ? "" : "empty"}">
+              <span class="taxonomy-prefix">区域</span>${escapeHtml(area || "未分区")}
+            </div>
+            <div class="taxonomy-readonly-line ${tag ? "" : "empty"}">
+              <span class="taxonomy-prefix">标签</span>${escapeHtml(tag || "未设置")}
+            </div>
           </div>
         `;
         }
