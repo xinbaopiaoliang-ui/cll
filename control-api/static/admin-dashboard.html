@@ -1645,7 +1645,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.36.0</span>
+          <span class="mono">v0.37.0</span>
         </div>
       </aside>
 
@@ -2195,23 +2195,50 @@
                     开启节点上报
                   </label>
                 </div>
+              </div>
+              <div class="operation-card">
+                <div class="operation-title">服务器 SSH 账号</div>
+                <div class="message">控制面会通过 SSH 登录这台 Linux 服务器，自动执行安装或升级脚本。</div>
+                <div class="form-grid single">
+                  <div class="field">
+                    <label for="deploySshHost">SSH 主机</label>
+                    <input id="deploySshHost" name="ssh_host" autocomplete="off" required />
+                  </div>
+                  <div class="field">
+                    <label for="deploySshPort">SSH 端口</label>
+                    <input id="deploySshPort" name="ssh_port" type="number" min="1" max="65535" value="22" required />
+                  </div>
+                  <div class="field">
+                    <label for="deploySshUsername">SSH 账号</label>
+                    <input id="deploySshUsername" name="ssh_username" autocomplete="off" value="root" required />
+                  </div>
+                  <div class="field">
+                    <label for="deploySshPassword">SSH 密码</label>
+                    <input id="deploySshPassword" name="ssh_password" type="password" autocomplete="new-password" placeholder="输入服务器密码" required />
+                  </div>
+                  <label class="checkbox">
+                    <input name="save_credential" type="checkbox" checked />
+                    保存为节点 SSH 凭据，后续可直接重启或升级
+                  </label>
+                </div>
                 <div class="message error-text hidden" id="deployNodeError"></div>
                 <div class="form-actions">
                   <button id="cancelDeployNode" type="button">取消</button>
-                  <button class="primary" type="submit">生成命令</button>
+                  <button type="button" data-generate-deploy-command>只生成命令</button>
+                  <button class="primary" data-deploy-submit type="submit">开始部署</button>
                 </div>
               </div>
             </div>
             <div class="deploy-command-panel">
               <div class="deploy-command-toolbar">
                 <div class="deploy-command-title">
-                  <strong>一键安装 / 升级命令</strong>
-                  <span>在目标 Linux 节点服务器执行。已安装节点再次执行可刷新版本和控制面配置。</span>
+                  <strong>部署结果 / 备用命令</strong>
+                  <span>优先使用左侧开始部署；需要手工处理时再复制这里的命令或结果。</span>
                 </div>
-                <button type="button" data-copy-deploy-command>复制命令</button>
+                <button type="button" data-copy-deploy-command>复制内容</button>
               </div>
-              <textarea id="deployInstallCommand" data-install-command readonly placeholder="点击生成命令后，这里会显示可复制的一键部署命令。"></textarea>
-              <div class="message">命令会写入节点身份、下载 release 包、安装 systemd 服务，并启用控制面上报。</div>
+              <textarea id="deployInstallCommand" data-install-command readonly placeholder="点击开始部署后，这里会显示 SSH 执行结果；点击只生成命令后，这里会显示备用安装命令。"></textarea>
+              <div class="message">一键部署会在控制面服务器上执行 SSH，不需要再复制命令到节点服务器。</div>
             </div>
           </div>
         </form>
@@ -2400,6 +2427,7 @@
         deployStatusGrid: document.getElementById("deployStatusGrid"),
         deployInstallCommand: document.getElementById("deployInstallCommand"),
         deployNodeError: document.getElementById("deployNodeError"),
+        submitDeployNode: document.querySelector("[data-deploy-submit]"),
         openGame: document.getElementById("openGame"),
         gameModal: document.getElementById("gameModal"),
         closeGameModal: document.getElementById("closeGameModal"),
@@ -2609,11 +2637,16 @@
         els.deployNodeForm.elements.expires_in_sec.value = "3600";
         els.deployNodeForm.elements.channel.value = "stable";
         els.deployNodeForm.elements.enable_control_plane.checked = true;
+        els.deployNodeForm.elements.ssh_host.value = node.ssh_credential?.host || node.server_ip || "";
+        els.deployNodeForm.elements.ssh_port.value = node.ssh_credential?.port || 22;
+        els.deployNodeForm.elements.ssh_username.value = node.ssh_credential?.username || "root";
+        els.deployNodeForm.elements.ssh_password.value = "";
+        els.deployNodeForm.elements.save_credential.checked = true;
         els.deployInstallCommand.value = "";
         els.deployNodeTitle.textContent = node.status === "pending_install" ? "部署节点" : "升级节点";
         els.deployNodeMeta.textContent = `${node.name} / ${nodeEndpoint(node)} / ID ${id}`;
         els.deployNodeModal.classList.remove("hidden");
-        window.requestAnimationFrame(() => els.deployNodeForm.elements.public_base_url.focus());
+        window.requestAnimationFrame(() => els.deployNodeForm.elements.ssh_password.focus());
       }
 
       function closeDeployNodeModal() {
@@ -2892,6 +2925,8 @@
         if (action === "node.ssh_credential.delete") return "删除 SSH 凭据";
         if (action === "node.ssh_action") return "SSH 操作";
         if (action === "node.ssh_action_failed") return "SSH 操作失败";
+        if (action === "node.deploy") return "一键部署";
+        if (action === "node.deploy_failed") return "一键部署失败";
         return action || "操作记录";
       }
 
@@ -4363,6 +4398,66 @@
         els.statusLine.textContent = `已生成节点 ${data.node_id} 的安装命令`;
       }
 
+      async function deployNodeViaSsh(form) {
+        const nodeId = numberOrNull(form.elements.node_id?.value) || state.selectedId;
+        if (!nodeId) return;
+        const password = form.elements.ssh_password.value;
+        if (!password) {
+          throw new Error("请输入服务器 SSH 密码");
+        }
+        const payload = {
+          public_base_url: textOrNull(form.elements.public_base_url.value),
+          expires_in_sec: numberOrNull(form.elements.expires_in_sec.value),
+          channel: textOrNull(form.elements.channel.value),
+          enable_control_plane: form.elements.enable_control_plane.checked,
+          save_credential: form.elements.save_credential.checked,
+          ssh: {
+            host: textOrNull(form.elements.ssh_host.value),
+            port: numberOrNull(form.elements.ssh_port.value) || 22,
+            username: textOrNull(form.elements.ssh_username.value),
+            password,
+          },
+        };
+        Object.keys(payload).forEach((key) => {
+          if (payload[key] === null || payload[key] === undefined) delete payload[key];
+        });
+
+        els.deployInstallCommand.value = "正在通过 SSH 连接服务器并执行部署，请等待返回结果...";
+        els.submitDeployNode.disabled = true;
+        els.submitDeployNode.textContent = "部署中";
+        try {
+          const data = await api(`/api/admin/v1/nodes/${nodeId}/deploy`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const resultText = [
+            data.task ? `任务 #${data.task.id} / ${operationStatusText(data.task.status)}` : "",
+            `${data.command_label} / exit ${data.exit_code ?? "--"} / ${data.duration_ms}ms`,
+            `SSH 凭据：${data.credential_saved ? "已保存" : "未保存"}`,
+            ...sshVersionCheckLines(data.version_check),
+            "",
+            data.output || "命令已执行，没有输出。",
+          ].filter(Boolean).join("\n");
+          els.deployInstallCommand.value = resultText;
+          form.elements.ssh_password.value = "";
+          await loadNodes();
+          await loadOperationTasks({ silent: true });
+          if (state.selectedId) {
+            await loadDetail(state.selectedId, { silent: true });
+          }
+          els.statusLine.textContent =
+            data.status === "failed"
+              ? `节点 ${nodeId} 一键部署失败`
+              : `节点 ${nodeId} 一键部署完成`;
+          els.statusLine.classList.toggle("error-state", data.status === "failed");
+          els.statusLine.classList.toggle("connected", data.status !== "failed");
+        } finally {
+          els.submitDeployNode.disabled = false;
+          els.submitDeployNode.textContent = "开始部署";
+        }
+      }
+
       function resetTimer() {
         if (state.timer) {
           clearInterval(state.timer);
@@ -4432,6 +4527,13 @@
 
       els.deployNodeForm.addEventListener("submit", (event) => {
         event.preventDefault();
+        clearInlineError(els.deployNodeError);
+        deployNodeViaSsh(els.deployNodeForm).catch((error) => {
+          showInlineError(els.deployNodeError, error.message);
+        });
+      });
+
+      document.querySelector("[data-generate-deploy-command]").addEventListener("click", () => {
         clearInlineError(els.deployNodeError);
         createBootstrapCommand(els.deployNodeForm).catch((error) => {
           showInlineError(els.deployNodeError, error.message);

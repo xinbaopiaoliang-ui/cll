@@ -579,6 +579,17 @@ struct AdminCreateBootstrapTokenRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct AdminDeployNodeRequest {
+    public_base_url: Option<String>,
+    install_url: Option<String>,
+    expires_in_sec: Option<u64>,
+    enable_control_plane: Option<bool>,
+    channel: Option<String>,
+    ssh: AdminSshCredentialRequest,
+    save_credential: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
 struct AdminCreateNodeTaskRequest {
     task_type: String,
     message: Option<String>,
@@ -813,6 +824,22 @@ struct AdminCreateBootstrapTokenResponse {
     bootstrap_url: String,
     expires_at: u64,
     install_command: String,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminDeployNodeResponse {
+    status: &'static str,
+    node_id: u64,
+    action: String,
+    command_label: String,
+    exit_code: Option<i32>,
+    output: String,
+    duration_ms: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version_check: Option<AdminSshActionVersionCheck>,
+    task: AdminOperationTaskSummary,
+    credential_saved: bool,
     server_time: u64,
 }
 
@@ -1433,6 +1460,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/admin/v1/nodes/:node_id/bootstrap-token",
             post(admin_create_bootstrap_token),
+        )
+        .route(
+            "/api/admin/v1/nodes/:node_id/deploy",
+            post(admin_deploy_node),
         )
         .route(
             "/api/admin/v1/nodes/:node_id/tasks",
@@ -2340,6 +2371,189 @@ async fn admin_create_bootstrap_token(
         install_command,
         server_time: now_unix(),
     }))
+}
+
+async fn admin_deploy_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+    Json(request): Json<AdminDeployNodeRequest>,
+) -> Result<Json<AdminDeployNodeResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let before_node = select_admin_node(&state.pool, node_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("node_not_found", "node does not exist"))?;
+    let public_base_url = request
+        .public_base_url
+        .as_deref()
+        .map(normalize_url_arg)
+        .transpose()?
+        .unwrap_or(resolve_public_base_url(&state, &headers)?);
+    let install_url = request
+        .install_url
+        .as_deref()
+        .map(normalize_url_arg)
+        .transpose()?
+        .unwrap_or_else(|| DEFAULT_INSTALL_URL.to_string());
+    let channel = request
+        .channel
+        .as_deref()
+        .map(normalize_command_arg)
+        .transpose()?;
+    let expires_in_sec = clamp_bootstrap_ttl(request.expires_in_sec)?;
+    let normalized = normalize_ssh_credential_request(&before_node, request.ssh)?;
+    let password = normalized.password.clone();
+    let save_credential = request.save_credential.unwrap_or(true);
+    let credential = if save_credential {
+        let key = credential_key(&state)?;
+        let (password_ciphertext, password_nonce) =
+            encrypt_credential_secret(&key, &normalized.password)?;
+        upsert_ssh_credential(
+            &state.pool,
+            node_id,
+            &normalized,
+            &password_ciphertext,
+            &password_nonce,
+        )
+        .await?
+    } else {
+        SshCredentialRow {
+            host: normalized.host.clone(),
+            port: u32::from(normalized.port),
+            username: normalized.username.clone(),
+            password_ciphertext: String::new(),
+            password_nonce: String::new(),
+            auth_status: "untested".to_string(),
+            last_error: None,
+            last_checked_at: None,
+        }
+    };
+    let is_root = credential.username == "root";
+    let expires_at = now_unix() + expires_in_sec;
+    let bootstrap_token = create_bootstrap_token(&state.pool, node_id, None, expires_at).await?;
+    let bootstrap_url = format!("{public_base_url}{NODE_BOOTSTRAP_PATH}");
+    let plan = SshActionPlan {
+        command_label: "一键部署 / 升级节点".to_string(),
+        remote_command: build_remote_bootstrap_install_command(
+            &install_url,
+            &bootstrap_url,
+            &bootstrap_token,
+            !is_root,
+            request.enable_control_plane.unwrap_or(true),
+            channel.as_deref(),
+        ),
+        send_password_to_stdin: !is_root,
+    };
+    let command_label = plan.command_label.clone();
+    let operation_task =
+        insert_operation_task(&state.pool, node_id, "deploy_node", &command_label).await?;
+    let started = Instant::now();
+    let result = run_ssh_command(&credential, &password, &plan).await;
+    let duration_ms = started.elapsed().as_millis();
+    let duration_ms_u64 = duration_ms_to_u64(duration_ms);
+
+    match result {
+        Ok(output) => {
+            let version_check = wait_for_upgrade_version_check(&state.pool, node_id, &before_node)
+                .await
+                .ok();
+            let task = finish_operation_task(
+                &state.pool,
+                operation_task.id,
+                "succeeded",
+                output.exit_code,
+                duration_ms_u64,
+                Some(&output.combined),
+                None,
+                version_check.as_ref(),
+            )
+            .await?;
+            if save_credential {
+                update_ssh_credential_status(&state.pool, node_id, "ok", None).await?;
+            }
+            insert_node_audit_log(
+                &state.pool,
+                node_id,
+                "admin_api",
+                "node.deploy",
+                serde_json::json!({
+                    "operation_task_id": operation_task.id,
+                    "command_label": command_label,
+                    "ssh_host": credential.host,
+                    "ssh_port": credential.port,
+                    "ssh_username": credential.username,
+                    "duration_ms": duration_ms,
+                    "version_check": &version_check,
+                    "credential_saved": save_credential,
+                }),
+            )
+            .await?;
+
+            Ok(Json(AdminDeployNodeResponse {
+                status: "ok",
+                node_id,
+                action: "deploy_node".to_string(),
+                command_label,
+                exit_code: output.exit_code,
+                output: output.combined,
+                duration_ms,
+                version_check,
+                task: AdminOperationTaskSummary::from_row(task),
+                credential_saved: save_credential,
+                server_time: now_unix(),
+            }))
+        }
+        Err(error) => {
+            let message = trim_for_log(&error.message, 512);
+            let task = finish_operation_task(
+                &state.pool,
+                operation_task.id,
+                "failed",
+                error.exit_code,
+                duration_ms_u64,
+                None,
+                Some(&message),
+                None,
+            )
+            .await?;
+            if save_credential {
+                update_ssh_credential_status(&state.pool, node_id, "failed", Some(&message))
+                    .await?;
+            }
+            insert_node_audit_log(
+                &state.pool,
+                node_id,
+                "admin_api",
+                "node.deploy_failed",
+                serde_json::json!({
+                    "operation_task_id": operation_task.id,
+                    "command_label": command_label,
+                    "ssh_host": credential.host,
+                    "ssh_port": credential.port,
+                    "ssh_username": credential.username,
+                    "exit_code": error.exit_code,
+                    "error": message,
+                    "duration_ms": duration_ms,
+                    "credential_saved": save_credential,
+                }),
+            )
+            .await?;
+
+            Ok(Json(AdminDeployNodeResponse {
+                status: "failed",
+                node_id,
+                action: "deploy_node".to_string(),
+                command_label,
+                exit_code: error.exit_code,
+                output: message,
+                duration_ms,
+                version_check: None,
+                task: AdminOperationTaskSummary::from_row(task),
+                credential_saved: save_credential,
+                server_time: now_unix(),
+            }))
+        }
+    }
 }
 
 async fn admin_create_node_task(
@@ -5989,6 +6203,7 @@ fn operation_action_label(action: &str) -> &'static str {
         "restart_node_service" => "重启节点服务",
         "upgrade_node" => "升级节点内核",
         "reboot_server" => "重启服务器",
+        "deploy_node" => "一键部署节点",
         _ => "远程运维",
     }
 }
@@ -6176,6 +6391,8 @@ async fn build_ssh_action_plan(
                     &bootstrap_url,
                     &bootstrap_token,
                     !is_root,
+                    true,
+                    None,
                 ),
                 send_password_to_stdin: !is_root,
             })
@@ -6192,6 +6409,8 @@ fn build_remote_bootstrap_install_command(
     bootstrap_url: &str,
     bootstrap_token: &str,
     use_sudo: bool,
+    enable_control_plane: bool,
+    channel: Option<&str>,
 ) -> String {
     let runner = if use_sudo {
         "sudo -S -p '' bash"
@@ -6201,9 +6420,17 @@ fn build_remote_bootstrap_install_command(
     let install_url = shell_quote(install_url);
     let bootstrap_url = shell_quote(bootstrap_url);
     let bootstrap_token = shell_quote(bootstrap_token);
-    format!(
-        "curl -fsSL {install_url} | {runner} -s -- --bootstrap-url {bootstrap_url} --bootstrap-token {bootstrap_token} --enable-control-plane"
-    )
+    let mut command = format!(
+        "curl -fsSL {install_url} | {runner} -s -- --bootstrap-url {bootstrap_url} --bootstrap-token {bootstrap_token}"
+    );
+    if enable_control_plane {
+        command.push_str(" --enable-control-plane");
+    }
+    if let Some(channel) = channel {
+        command.push_str(" --channel ");
+        command.push_str(&shell_quote(channel));
+    }
+    command
 }
 
 fn shell_quote(value: &str) -> String {
@@ -8075,6 +8302,11 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("operationStatusText"));
         assert!(ADMIN_DASHBOARD_HTML.contains("operationTaskSummary"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/operation-tasks"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes/${nodeId}/deploy"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("deployNodeViaSsh"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("deploySshHost"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("deploySshPassword"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-generate-deploy-command"));
         assert!(ADMIN_DASHBOARD_HTML.contains("createNodeMeta"));
         assert!(ADMIN_DASHBOARD_HTML.contains("submitCreateNode"));
         assert!(ADMIN_DASHBOARD_HTML.contains("openEditNodeModal"));
@@ -8246,11 +8478,26 @@ mod tests {
             "http://control.test/bootstrap?x=1;touch /tmp/pwn",
             "xbt.token",
             false,
+            true,
+            None,
         );
 
         assert_eq!(
             command,
             "curl -fsSL 'http://install.test/a'\\''b' | bash -s -- --bootstrap-url 'http://control.test/bootstrap?x=1;touch /tmp/pwn' --bootstrap-token 'xbt.token' --enable-control-plane"
+        );
+
+        let command = build_remote_bootstrap_install_command(
+            "http://install.test/install.sh",
+            "http://control.test/bootstrap",
+            "xbt.token",
+            true,
+            false,
+            Some("beta"),
+        );
+        assert_eq!(
+            command,
+            "curl -fsSL 'http://install.test/install.sh' | sudo -S -p '' bash -s -- --bootstrap-url 'http://control.test/bootstrap' --bootstrap-token 'xbt.token' --channel 'beta'"
         );
     }
 }
