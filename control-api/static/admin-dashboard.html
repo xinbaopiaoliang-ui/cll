@@ -258,6 +258,43 @@
         gap: 16px;
       }
 
+      .login-divider {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 10px;
+        align-items: center;
+        color: var(--faint);
+        font-size: 12px;
+      }
+
+      .login-divider::before,
+      .login-divider::after {
+        content: "";
+        height: 1px;
+        background: var(--line);
+      }
+
+      .admin-profile {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .role-badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 0 10px;
+        border: 1px solid var(--accent-line);
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent-strong);
+        font-weight: 760;
+      }
+
       .login-card h2 {
         font-size: 20px;
       }
@@ -1618,17 +1655,26 @@
       <div class="login-copy">
         <div class="brand-mark">XA</div>
         <div class="eyebrow">XAccel Control</div>
-        <h1>登录节点后台</h1>
+        <h1>登录节点控制台</h1>
         <div class="login-note">
-          用控制面安装时生成的管理员令牌登录。登录后可以查看节点状态、新增节点、管理游戏路由规则、生成一键安装命令，并处理节点下线、排空或禁用。
+          可以使用管理员账号登录，也可以继续使用控制面安装时生成的管理员令牌。登录后可管理节点、游戏、路由、远程运维任务和账号权限。
         </div>
       </div>
       <div class="login-card">
         <form id="loginForm">
           <div>
             <h2>管理员入口</h2>
-            <div class="form-help">令牌保存在本机浏览器，不会写入服务端。</div>
+            <div class="form-help">账号登录会生成 8 小时会话；管理员令牌仍可作为兜底入口。</div>
           </div>
+          <div class="field">
+            <label for="loginUsernameInput">账号</label>
+            <input id="loginUsernameInput" autocomplete="username" placeholder="admin" />
+          </div>
+          <div class="field">
+            <label for="loginPasswordInput">密码</label>
+            <input id="loginPasswordInput" type="password" autocomplete="current-password" placeholder="输入账号密码" />
+          </div>
+          <div class="login-divider">或使用令牌</div>
           <div class="field">
             <label for="loginTokenInput">管理员令牌</label>
             <input id="loginTokenInput" type="password" autocomplete="off" />
@@ -1637,7 +1683,7 @@
             </div>
           </div>
           <div class="message error-text hidden" id="loginError"></div>
-          <button class="primary" type="submit">登录后台</button>
+          <button class="primary" type="submit">登录控制台</button>
         </form>
       </div>
     </section>
@@ -1677,10 +1723,14 @@
             <span class="nav-icon"></span>
             <span>操作日志</span>
           </button>
+          <button class="nav-item" type="button" data-view="admins" data-super-only>
+            <span class="nav-icon"></span>
+            <span>权限管理</span>
+          </button>
         </nav>
         <div class="sidebar-foot">
-          <span>当前版本</span>
-          <span class="mono">v0.38.0</span>
+          <span id="currentAdminLabel">未登录</span>
+          <span class="mono">v0.39.0</span>
         </div>
       </aside>
 
@@ -2169,6 +2219,45 @@
             </div>
           </div>
         </section>
+
+        <section class="view hidden" id="viewAdmins" data-view-panel="admins">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">权限管理</div>
+                <div class="panel-meta" id="adminUserMeta">管理员账号、角色和启停状态</div>
+              </div>
+              <div class="inline-actions">
+                <button class="primary" type="button" id="openAdminUser">新增账号</button>
+                <button type="button" id="refreshAdminUsers">刷新账号</button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="message">
+                超级管理员可以管理账号；运维人员可以操作节点但不能删除核心数据；只读账号只能查看状态、日志和报表。
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>账号</th>
+                    <th>角色</th>
+                    <th>状态</th>
+                    <th>最近登录</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="adminUserRows">
+                  <tr>
+                    <td colspan="6"><span class="skeleton"></span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
       </section>
     </main>
 
@@ -2476,6 +2565,57 @@
       </div>
     </div>
 
+    <div class="modal-backdrop hidden" id="adminUserModal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="adminUserTitle">
+        <div class="modal-head">
+          <div>
+            <div class="panel-title" id="adminUserTitle">新增管理员账号</div>
+            <div class="panel-meta" id="adminUserHint">账号用于登录控制面板，权限只影响控制面后台操作。</div>
+          </div>
+          <button id="closeAdminUserModal" type="button">关闭</button>
+        </div>
+        <form class="modal-body" id="adminUserForm">
+          <input name="user_id" type="hidden" />
+          <div class="form-grid">
+            <div class="field">
+              <label for="adminUsername">登录账号</label>
+              <input id="adminUsername" name="username" autocomplete="off" maxlength="64" placeholder="ops-admin" required />
+              <div class="form-help">3-64 位，只能用字母、数字、点、下划线和横线。</div>
+            </div>
+            <div class="field">
+              <label for="adminDisplayName">显示名称</label>
+              <input id="adminDisplayName" name="display_name" autocomplete="off" maxlength="128" placeholder="运维管理员" />
+            </div>
+            <div class="field">
+              <label for="adminPassword">密码</label>
+              <input id="adminPassword" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" placeholder="至少 8 位" />
+              <div class="form-help" id="adminPasswordHelp">新增账号必须填写密码；修改时留空表示不改密码。</div>
+            </div>
+            <div class="field">
+              <label for="adminRole">角色</label>
+              <select id="adminRole" name="role">
+                <option value="super_admin">超级管理员</option>
+                <option value="operator">运维人员</option>
+                <option value="viewer">只读账号</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="adminStatus">状态</label>
+              <select id="adminStatus" name="status">
+                <option value="active">启用</option>
+                <option value="disabled">停用</option>
+              </select>
+            </div>
+          </div>
+          <div class="message error-text hidden" id="adminUserError"></div>
+          <div class="form-actions">
+            <button id="cancelAdminUserModal" type="button">取消</button>
+            <button class="primary" type="submit">保存账号</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <script>
       const PAGE_TITLES = {
         overview: "控制总览",
@@ -2484,15 +2624,24 @@
         routes: "游戏路由",
         ops: "运维工具",
         audit: "操作日志",
+        admins: "权限管理",
       };
 
       const state = {
         token: localStorage.getItem("xaccel_admin_token") || "",
+        currentAdmin: (() => {
+          try {
+            return JSON.parse(localStorage.getItem("xaccel_admin_current") || "null");
+          } catch {
+            return null;
+          }
+        })(),
         nodes: [],
         games: [],
         routeRules: [],
         operationTasks: [],
         auditLogs: [],
+        adminUsers: [],
         selectedId: null,
         serverTime: null,
         autoRefresh: true,
@@ -2504,9 +2653,12 @@
         loginScreen: document.getElementById("loginScreen"),
         appShell: document.getElementById("appShell"),
         loginForm: document.getElementById("loginForm"),
+        loginUsernameInput: document.getElementById("loginUsernameInput"),
+        loginPasswordInput: document.getElementById("loginPasswordInput"),
         loginTokenInput: document.getElementById("loginTokenInput"),
         loginError: document.getElementById("loginError"),
         logoutButton: document.getElementById("logoutButton"),
+        currentAdminLabel: document.getElementById("currentAdminLabel"),
         navItems: [...document.querySelectorAll("[data-view]")],
         viewPanels: [...document.querySelectorAll("[data-view-panel]")],
         pageTitle: document.getElementById("pageTitle"),
@@ -2584,6 +2736,18 @@
         auditLimitFilter: document.getElementById("auditLimitFilter"),
         applyAuditFilter: document.getElementById("applyAuditFilter"),
         refreshAuditLogs: document.getElementById("refreshAuditLogs"),
+        adminUserMeta: document.getElementById("adminUserMeta"),
+        adminUserRows: document.getElementById("adminUserRows"),
+        openAdminUser: document.getElementById("openAdminUser"),
+        refreshAdminUsers: document.getElementById("refreshAdminUsers"),
+        adminUserModal: document.getElementById("adminUserModal"),
+        adminUserForm: document.getElementById("adminUserForm"),
+        adminUserTitle: document.getElementById("adminUserTitle"),
+        adminUserHint: document.getElementById("adminUserHint"),
+        closeAdminUserModal: document.getElementById("closeAdminUserModal"),
+        cancelAdminUserModal: document.getElementById("cancelAdminUserModal"),
+        adminUserError: document.getElementById("adminUserError"),
+        adminPasswordHelp: document.getElementById("adminPasswordHelp"),
         controlUpgradeCommand: document.getElementById("controlUpgradeCommand"),
       };
 
@@ -2593,6 +2757,25 @@
       function setLoggedIn(loggedIn) {
         els.loginScreen.classList.toggle("hidden", loggedIn);
         els.appShell.classList.toggle("hidden", !loggedIn);
+        renderAdminIdentity();
+      }
+
+      function isSuperAdmin() {
+        return state.currentAdmin?.role === "super_admin";
+      }
+
+      function renderAdminIdentity() {
+        const admin = state.currentAdmin;
+        const label = admin
+          ? `${admin.display_name || admin.username} / ${adminRoleText(admin.role)}`
+          : "未登录";
+        els.currentAdminLabel.textContent = label;
+        document.querySelectorAll("[data-super-only]").forEach((item) => {
+          item.classList.toggle("hidden", Boolean(admin) && !isSuperAdmin());
+        });
+        if (admin && state.activeView === "admins" && !isSuperAdmin()) {
+          setActiveView("overview");
+        }
       }
 
       function setActiveView(view) {
@@ -2606,6 +2789,9 @@
         els.pageTitle.textContent = PAGE_TITLES[state.activeView];
         if (state.activeView === "audit" && state.token) {
           loadAuditLogs({ silent: true }).catch(showError);
+        }
+        if (state.activeView === "admins" && state.token && isSuperAdmin()) {
+          loadAdminUsers({ silent: true }).catch(showError);
         }
       }
 
@@ -2919,6 +3105,23 @@
         return routeStatusText(status);
       }
 
+      function adminRoleText(role) {
+        if (role === "super_admin") return "超级管理员";
+        if (role === "operator") return "运维人员";
+        if (role === "viewer") return "只读账号";
+        return role || "未知角色";
+      }
+
+      function adminStatusText(status) {
+        if (status === "active") return "启用";
+        if (status === "disabled") return "停用";
+        return status || "未知";
+      }
+
+      function adminStatusClass(status) {
+        return status === "active" ? "ok" : "bad";
+      }
+
       function platformText(platform) {
         if (platform === "pc") return "PC";
         if (platform === "android") return "Android";
@@ -3093,6 +3296,7 @@
 
       function actorTypeText(actorType) {
         if (actorType === "admin_api") return "控制面管理员";
+        if (actorType === "admin_user") return "管理员账号";
         if (actorType === "node") return "节点内核";
         if (actorType === "business_api") return "业务后台";
         return actorType || "未知来源";
@@ -3672,6 +3876,49 @@
           .join("");
       }
 
+      function renderAdminUsers(serverTime = state.serverTime) {
+        const users = state.adminUsers || [];
+        els.adminUserMeta.textContent = users.length
+          ? `${users.length} 个账号 / 刷新 ${formatClock(serverTime)}`
+          : "暂无管理员账号";
+        if (!users.length) {
+          els.adminUserRows.innerHTML = `<tr><td colspan="6" class="empty">暂无管理员账号。可以先用管理员令牌创建第一个超级管理员账号。</td></tr>`;
+          return;
+        }
+
+        els.adminUserRows.innerHTML = users
+          .map((user) => {
+            const isSelf = state.currentAdmin?.id && Number(state.currentAdmin.id) === Number(user.id);
+            return `
+              <tr data-admin-user-id="${user.id}">
+                <td>
+                  <div class="node-name">
+                    <span class="strong node-title" title="${escapeHtml(user.username)}">${escapeHtml(user.display_name || user.username)}</span>
+                    <span class="muted mono">${escapeHtml(user.username)} / ID ${user.id}${isSelf ? " / 当前账号" : ""}</span>
+                  </div>
+                </td>
+                <td><span class="role-badge">${escapeHtml(adminRoleText(user.role))}</span></td>
+                <td><span class="chip ${adminStatusClass(user.status)}">${escapeHtml(adminStatusText(user.status))}</span></td>
+                <td>
+                  <div class="mono age ${ageClass(user.last_login_at)}">${escapeHtml(ageText(user.last_login_at))}</div>
+                  <div class="cell-note">${escapeHtml(formatTime(user.last_login_at))}</div>
+                </td>
+                <td>
+                  <div class="mono">${escapeHtml(formatTime(user.created_at))}</div>
+                  <div class="cell-note">更新 ${escapeHtml(formatTime(user.updated_at))}</div>
+                </td>
+                <td>
+                  <div class="row-actions">
+                    <button type="button" data-admin-action="edit" data-admin-user-id="${user.id}">修改</button>
+                    <button class="danger" type="button" data-admin-action="disable" data-admin-user-id="${user.id}" ${user.status === "disabled" ? "disabled" : ""}>停用</button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
       function renderDetail(data) {
         const node = data.node;
         const report = data.recent_reports?.[0];
@@ -4095,6 +4342,16 @@
         renderAuditLogs(data.server_time);
       }
 
+      async function loadAdminUsers({ silent = false } = {}) {
+        if (!isSuperAdmin()) return;
+        if (!silent) {
+          els.adminUserRows.innerHTML = `<tr><td colspan="6"><span class="skeleton"></span></td></tr>`;
+        }
+        const data = await api("/api/admin/v1/admin-users");
+        state.adminUsers = data.users || [];
+        renderAdminUsers(data.server_time);
+      }
+
       function showError(error) {
         els.statusLine.textContent = error.message;
         els.statusLine.classList.add("error-state");
@@ -4104,19 +4361,50 @@
 
       async function login() {
         clearInlineError(els.loginError);
-        state.token = els.loginTokenInput.value.trim();
-        if (!state.token) {
-          showInlineError(els.loginError, "请输入管理员令牌");
-          return;
-        }
-        localStorage.setItem("xaccel_admin_token", state.token);
         try {
+          const username = els.loginUsernameInput.value.trim();
+          const password = els.loginPasswordInput.value;
+          const token = els.loginTokenInput.value.trim();
+          if (username || password) {
+            if (!username || !password) {
+              showInlineError(els.loginError, "账号和密码都要填写");
+              return;
+            }
+            const response = await fetch("/api/admin/v1/login", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ username, password }),
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok) {
+              throw new Error(data?.error?.message || data?.error?.code || "登录失败");
+            }
+            state.token = data.token;
+            state.currentAdmin = data.admin;
+            els.loginTokenInput.value = state.token;
+          } else {
+            state.token = token;
+            if (!state.token) {
+              showInlineError(els.loginError, "请输入账号密码，或填写管理员令牌");
+              return;
+            }
+            const me = await api("/api/admin/v1/me");
+            state.currentAdmin = me.admin;
+          }
+          localStorage.setItem("xaccel_admin_token", state.token);
+          localStorage.setItem("xaccel_admin_current", JSON.stringify(state.currentAdmin || {}));
+          els.loginPasswordInput.value = "";
           setLoggedIn(true);
           resetTimer();
           await loadNodes();
+          if (isSuperAdmin()) {
+            await loadAdminUsers({ silent: true });
+          }
         } catch (error) {
           localStorage.removeItem("xaccel_admin_token");
+          localStorage.removeItem("xaccel_admin_current");
           state.token = "";
+          state.currentAdmin = null;
           setLoggedIn(false);
           showInlineError(els.loginError, error.message);
         }
@@ -4124,15 +4412,20 @@
 
       function logout() {
         localStorage.removeItem("xaccel_admin_token");
+        localStorage.removeItem("xaccel_admin_current");
         state.token = "";
+        state.currentAdmin = null;
         state.nodes = [];
         state.games = [];
         state.routeRules = [];
         state.operationTasks = [];
         state.auditLogs = [];
+        state.adminUsers = [];
         state.selectedId = null;
         clearInterval(state.timer);
         state.timer = null;
+        els.loginUsernameInput.value = "";
+        els.loginPasswordInput.value = "";
         els.loginTokenInput.value = "";
         setLoggedIn(false);
       }
@@ -4457,6 +4750,81 @@
           method: "DELETE",
         });
         await loadRouteRules();
+      }
+
+      function openAdminUserModal(user = null) {
+        clearInlineError(els.adminUserError);
+        els.adminUserForm.reset();
+        const form = els.adminUserForm.elements;
+        form.user_id.value = user?.id || "";
+        form.username.value = user?.username || "";
+        form.username.disabled = Boolean(user);
+        form.display_name.value = user?.display_name || "";
+        form.password.value = "";
+        form.role.value = user?.role || "operator";
+        form.status.value = user?.status || "active";
+        els.adminUserTitle.textContent = user ? "修改管理员账号" : "新增管理员账号";
+        els.adminUserHint.textContent = user
+          ? `${user.display_name || user.username} / ${adminRoleText(user.role)} / ID ${user.id}`
+          : "账号用于登录控制面板，权限只影响控制面后台操作。";
+        els.adminPasswordHelp.textContent = user
+          ? "修改时留空表示不改密码。"
+          : "新增账号必须填写密码，至少 8 位。";
+        form.password.required = !user;
+        els.adminUserModal.classList.remove("hidden");
+        window.requestAnimationFrame(() => (user ? form.display_name : form.username).focus());
+      }
+
+      function closeAdminUserModal() {
+        els.adminUserModal.classList.add("hidden");
+        els.adminUserForm.elements.username.disabled = false;
+      }
+
+      function adminUserPayloadFromForm(form) {
+        const payload = {
+          display_name: textOrNull(form.elements.display_name.value),
+          role: form.elements.role.value,
+          status: form.elements.status.value,
+        };
+        const password = form.elements.password.value;
+        if (password) payload.password = password;
+        return payload;
+      }
+
+      async function saveAdminUser(form) {
+        const userId = numberOrNull(form.elements.user_id.value);
+        const payload = adminUserPayloadFromForm(form);
+        let data;
+        if (userId) {
+          data = await api(`/api/admin/v1/admin-users/${userId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+        } else {
+          payload.username = form.elements.username.value.trim();
+          if (!payload.password) {
+            throw new Error("新增账号必须填写密码");
+          }
+          data = await api("/api/admin/v1/admin-users", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+        }
+        closeAdminUserModal();
+        await loadAdminUsers();
+        els.statusLine.textContent = `管理员账号 ${data.user.username} 已保存`;
+      }
+
+      async function disableAdminUser(userId) {
+        const id = Number(userId);
+        const user = state.adminUsers.find((item) => Number(item.id) === id);
+        const confirmed = window.confirm(`确定停用账号 ${user?.display_name || user?.username || id} 吗？`);
+        if (!confirmed) return;
+        await api(`/api/admin/v1/admin-users/${id}`, { method: "DELETE" });
+        await loadAdminUsers();
+        els.statusLine.textContent = `管理员账号 ${id} 已停用`;
       }
 
       async function updateNodeConfig(form) {
@@ -5013,11 +5381,53 @@
         loadAuditLogs().catch(showError);
       });
 
+      els.openAdminUser.addEventListener("click", () => openAdminUserModal());
+      els.refreshAdminUsers.addEventListener("click", () => {
+        loadAdminUsers().catch(showError);
+      });
+      els.closeAdminUserModal.addEventListener("click", closeAdminUserModal);
+      els.cancelAdminUserModal.addEventListener("click", closeAdminUserModal);
+      els.adminUserModal.addEventListener("click", (event) => {
+        if (event.target === els.adminUserModal) closeAdminUserModal();
+      });
+      els.adminUserForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        saveAdminUser(els.adminUserForm).catch((error) => {
+          showInlineError(els.adminUserError, error.message);
+        });
+      });
+      els.adminUserRows.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-admin-action]");
+        if (!button) return;
+        const userId = Number(button.dataset.adminUserId);
+        const user = state.adminUsers.find((item) => Number(item.id) === userId);
+        if (!user) return;
+        if (button.dataset.adminAction === "edit") {
+          openAdminUserModal(user);
+        }
+        if (button.dataset.adminAction === "disable") {
+          disableAdminUser(userId).catch(showError);
+        }
+      });
+
       setActiveView("overview");
       if (state.token) {
-        setLoggedIn(true);
-        resetTimer();
-        loadNodes().catch(showError);
+        (async () => {
+          try {
+            const me = await api("/api/admin/v1/me");
+            state.currentAdmin = me.admin;
+            localStorage.setItem("xaccel_admin_current", JSON.stringify(state.currentAdmin || {}));
+            setLoggedIn(true);
+            resetTimer();
+            await loadNodes();
+            if (isSuperAdmin()) {
+              await loadAdminUsers({ silent: true });
+            }
+          } catch (error) {
+            logout();
+            showInlineError(els.loginError, error.message);
+          }
+        })();
       } else {
         setLoggedIn(false);
       }

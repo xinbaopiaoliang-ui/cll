@@ -65,6 +65,11 @@ const SSH_ACTION_TIMEOUT_SEC: u64 = 120;
 const SSH_BOOTSTRAP_TTL_SEC: u64 = 3600;
 const SSH_UPGRADE_REPORT_WAIT_SEC: u64 = 45;
 const SSH_UPGRADE_REPORT_POLL_SEC: u64 = 3;
+const ADMIN_SESSION_PREFIX: &str = "xas";
+const ADMIN_SESSION_VERSION: &str = "v1";
+const ADMIN_SESSION_TTL_SEC: u64 = 8 * 60 * 60;
+const ADMIN_PASSWORD_SCHEME: &str = "pbkdf2-sha256";
+const ADMIN_PASSWORD_ITERATIONS: u32 = 120_000;
 
 #[derive(Debug, Parser)]
 #[command(name = "xaccel-control-api")]
@@ -153,6 +158,46 @@ struct AdminConnectivityDiagnosticResponse {
     probe: Option<DiagnosticProbeSummary>,
     session_data: Option<DiagnosticSessionDataSummary>,
     error: Option<DiagnosticStepError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminLoginRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminLoginResponse {
+    status: &'static str,
+    token: String,
+    expires_at: u64,
+    admin: AdminCurrentUser,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminMeResponse {
+    admin: AdminCurrentUser,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct AdminCurrentUser {
+    id: Option<u64>,
+    username: String,
+    display_name: Option<String>,
+    role: String,
+    auth_type: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AdminSessionClaims {
+    user_id: u64,
+    username: String,
+    display_name: Option<String>,
+    role: String,
+    exp: u64,
+    nonce: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -672,6 +717,37 @@ struct AdminOperationTaskResponse {
     server_time: u64,
 }
 
+#[derive(Debug, Serialize)]
+struct AdminListUsersResponse {
+    users: Vec<AdminUserSummary>,
+    total: usize,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminUserResponse {
+    status: &'static str,
+    user: AdminUserSummary,
+    server_time: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminCreateUserRequest {
+    username: String,
+    display_name: Option<String>,
+    password: String,
+    role: String,
+    status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminUpdateUserRequest {
+    display_name: Option<String>,
+    password: Option<String>,
+    role: Option<String>,
+    status: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct AdminListAuditLogsQuery {
     node_id: Option<u64>,
@@ -983,6 +1059,18 @@ struct AdminOperationTaskSummary {
 }
 
 #[derive(Debug, Serialize)]
+struct AdminUserSummary {
+    id: u64,
+    username: String,
+    display_name: Option<String>,
+    role: String,
+    status: String,
+    last_login_at: Option<u64>,
+    created_at: Option<u64>,
+    updated_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
 struct AdminSshCredentialSummary {
     configured: bool,
     host: Option<String>,
@@ -1212,6 +1300,19 @@ struct OperationTaskRow {
 }
 
 #[derive(Debug, FromRow)]
+struct AdminUserRow {
+    id: u64,
+    username: String,
+    display_name: Option<String>,
+    password_hash: String,
+    role: String,
+    status: String,
+    last_login_at: Option<u64>,
+    created_at: Option<u64>,
+    updated_at: Option<u64>,
+}
+
+#[derive(Debug, FromRow)]
 struct SshCredentialRow {
     host: String,
     port: u32,
@@ -1235,6 +1336,15 @@ struct SshActionPlan {
     command_label: String,
     remote_command: String,
     send_password_to_stdin: bool,
+}
+
+#[derive(Debug, Clone)]
+struct AdminActor {
+    id: Option<u64>,
+    username: String,
+    display_name: Option<String>,
+    role: String,
+    auth_type: String,
 }
 
 struct SshCommandOutput {
@@ -1466,6 +1576,16 @@ async fn main() -> anyhow::Result<()> {
             "/api/admin/v1/nodes",
             get(admin_list_nodes).post(admin_create_node),
         )
+        .route("/api/admin/v1/login", post(admin_login))
+        .route("/api/admin/v1/me", get(admin_me))
+        .route(
+            "/api/admin/v1/admin-users",
+            get(admin_list_users).post(admin_create_user),
+        )
+        .route(
+            "/api/admin/v1/admin-users/:user_id",
+            patch(admin_update_user).delete(admin_delete_user),
+        )
         .route(
             "/api/admin/v1/nodes/:node_id",
             get(admin_get_node)
@@ -1543,7 +1663,151 @@ async fn admin_dashboard() -> Html<&'static str> {
     Html(ADMIN_DASHBOARD_HTML)
 }
 
+async fn admin_login(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<AdminLoginRequest>,
+) -> Result<Json<AdminLoginResponse>, AppError> {
+    let signing_secret = state.admin_token.as_deref().ok_or_else(|| {
+        AppError::service_unavailable(
+            "admin_disabled",
+            "admin login is disabled because XACCEL_ADMIN_TOKEN is not configured",
+        )
+    })?;
+    let username = normalize_admin_username(&request.username)?;
+    let user = select_admin_user_by_username(&state.pool, &username)
+        .await?
+        .ok_or_else(|| {
+            AppError::unauthorized("admin_auth_failed", "username or password is invalid")
+        })?;
+    if user.status != "active" {
+        return Err(AppError::unauthorized(
+            "admin_user_disabled",
+            "admin user is disabled",
+        ));
+    }
+    if !verify_admin_password(&request.password, &user.password_hash)? {
+        return Err(AppError::unauthorized(
+            "admin_auth_failed",
+            "username or password is invalid",
+        ));
+    }
+    let (token, expires_at) = create_admin_session_token(signing_secret, &user)?;
+    mark_admin_user_login(&state.pool, user.id).await?;
+
+    Ok(Json(AdminLoginResponse {
+        status: "ok",
+        token,
+        expires_at,
+        admin: AdminActor {
+            id: Some(user.id),
+            username: user.username,
+            display_name: user.display_name,
+            role: user.role,
+            auth_type: "password".to_string(),
+        }
+        .current_user(),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_me(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<AdminMeResponse>, AppError> {
+    let actor = require_admin(&state, &headers)?;
+    Ok(Json(AdminMeResponse {
+        admin: actor.current_user(),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_list_users(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<AdminListUsersResponse>, AppError> {
+    require_admin_super(&state, &headers)?;
+    let users = select_admin_users(&state.pool)
+        .await?
+        .into_iter()
+        .map(AdminUserSummary::from_row)
+        .collect::<Vec<_>>();
+
+    Ok(Json(AdminListUsersResponse {
+        total: users.len(),
+        users,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_create_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<AdminCreateUserRequest>,
+) -> Result<Json<AdminUserResponse>, AppError> {
+    require_admin_super(&state, &headers)?;
+    let user = insert_admin_user(&state.pool, request).await?;
+    Ok(Json(AdminUserResponse {
+        status: "ok",
+        user: AdminUserSummary::from_row(user),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_update_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(user_id): Path<u64>,
+    Json(request): Json<AdminUpdateUserRequest>,
+) -> Result<Json<AdminUserResponse>, AppError> {
+    let actor = require_admin_super(&state, &headers)?;
+    if actor.id == Some(user_id) {
+        if request.status.as_deref() == Some("disabled") {
+            return Err(AppError::bad_request(
+                "cannot_disable_self",
+                "current admin user cannot disable itself",
+            ));
+        }
+        if request
+            .role
+            .as_deref()
+            .is_some_and(|role| role != "super_admin")
+        {
+            return Err(AppError::bad_request(
+                "cannot_downgrade_self",
+                "current admin user cannot downgrade itself",
+            ));
+        }
+    }
+    let user = update_admin_user(&state.pool, user_id, request).await?;
+    Ok(Json(AdminUserResponse {
+        status: "ok",
+        user: AdminUserSummary::from_row(user),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_delete_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(user_id): Path<u64>,
+) -> Result<Json<AdminUserResponse>, AppError> {
+    let actor = require_admin_super(&state, &headers)?;
+    if actor.id == Some(user_id) {
+        return Err(AppError::bad_request(
+            "cannot_disable_self",
+            "current admin user cannot disable itself",
+        ));
+    }
+    let user = disable_admin_user(&state.pool, user_id).await?;
+    Ok(Json(AdminUserResponse {
+        status: "ok",
+        user: AdminUserSummary::from_row(user),
+        server_time: now_unix(),
+    }))
+}
+
 async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
+    ensure_admin_users_table(pool).await?;
     ensure_game_route_game_name_column(pool).await?;
     ensure_game_catalog_table(pool).await?;
     ensure_game_region_table(pool).await?;
@@ -1554,6 +1818,30 @@ async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
     ensure_node_ssh_credentials_table(pool).await?;
     ensure_node_operation_tasks_table(pool).await?;
     seed_game_catalog_from_routes(pool).await?;
+    Ok(())
+}
+
+async fn ensure_admin_users_table(pool: &MySqlPool) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+CREATE TABLE IF NOT EXISTS admin_users (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  username VARCHAR(64) NOT NULL,
+  display_name VARCHAR(128) NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  role ENUM('super_admin', 'operator', 'viewer') NOT NULL DEFAULT 'viewer',
+  status ENUM('active', 'disabled') NOT NULL DEFAULT 'active',
+  last_login_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_admin_username (username),
+  INDEX idx_role_status (role, status)
+)
+"#,
+    )
+    .execute(pool)
+    .await
+    .context("failed to create admin_users")?;
     Ok(())
 }
 
@@ -2276,7 +2564,7 @@ async fn admin_create_node(
     headers: HeaderMap,
     Json(request): Json<AdminCreateNodeRequest>,
 ) -> Result<Json<AdminCreateNodeResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    require_admin_write(&state, &headers)?;
     let node_id = insert_admin_node(&state.pool, request).await?;
     let node = select_admin_node(&state.pool, node_id)
         .await?
@@ -2295,7 +2583,7 @@ async fn admin_update_node(
     Path(node_id): Path<u64>,
     Json(request): Json<AdminUpdateNodeRequest>,
 ) -> Result<Json<AdminUpdateNodeResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    require_admin_write(&state, &headers)?;
     update_admin_node_config(&state.pool, node_id, request).await?;
     let node = select_admin_node(&state.pool, node_id)
         .await?
@@ -2313,7 +2601,7 @@ async fn admin_delete_node(
     headers: HeaderMap,
     Path(node_id): Path<u64>,
 ) -> Result<Json<AdminDeleteNodeResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    require_admin_super(&state, &headers)?;
     let deleted = delete_admin_node(&state.pool, node_id).await?;
 
     Ok(Json(AdminDeleteNodeResponse {
@@ -2330,14 +2618,15 @@ async fn admin_update_node_status(
     Path(node_id): Path<u64>,
     Json(request): Json<AdminUpdateNodeStatusRequest>,
 ) -> Result<Json<AdminUpdateNodeStatusResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    let actor = require_admin_write(&state, &headers)?;
     let next_status = validate_admin_node_status(&request.status)?;
     let reason = request
         .reason
         .map(|reason| reason.trim().to_string())
         .filter(|reason| !reason.is_empty());
     let previous_status =
-        update_admin_node_status(&state.pool, node_id, next_status, reason.as_deref()).await?;
+        update_admin_node_status(&state.pool, node_id, next_status, reason.as_deref(), &actor)
+            .await?;
 
     Ok(Json(AdminUpdateNodeStatusResponse {
         status: "ok",
@@ -2355,7 +2644,7 @@ async fn admin_create_bootstrap_token(
     Path(node_id): Path<u64>,
     Json(request): Json<AdminCreateBootstrapTokenRequest>,
 ) -> Result<Json<AdminCreateBootstrapTokenResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    require_admin_write(&state, &headers)?;
     let public_base_url = request
         .public_base_url
         .as_deref()
@@ -2403,7 +2692,7 @@ async fn admin_deploy_node(
     Path(node_id): Path<u64>,
     Json(request): Json<AdminDeployNodeRequest>,
 ) -> Result<Json<AdminDeployNodeResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    let actor = require_admin_write(&state, &headers)?;
     let before_node = select_admin_node(&state.pool, node_id)
         .await?
         .ok_or_else(|| AppError::not_found("node_not_found", "node does not exist"))?;
@@ -2438,6 +2727,7 @@ async fn admin_deploy_node(
             &normalized,
             &password_ciphertext,
             &password_nonce,
+            &actor,
         )
         .await?
     } else {
@@ -2498,7 +2788,8 @@ async fn admin_deploy_node(
             insert_node_audit_log(
                 &state.pool,
                 node_id,
-                "admin_api",
+                actor.audit_actor_type(),
+                actor.id,
                 "node.deploy",
                 serde_json::json!({
                     "operation_task_id": operation_task.id,
@@ -2547,7 +2838,8 @@ async fn admin_deploy_node(
             insert_node_audit_log(
                 &state.pool,
                 node_id,
-                "admin_api",
+                actor.audit_actor_type(),
+                actor.id,
                 "node.deploy_failed",
                 serde_json::json!({
                     "operation_task_id": operation_task.id,
@@ -2586,14 +2878,15 @@ async fn admin_create_node_task(
     Path(node_id): Path<u64>,
     Json(request): Json<AdminCreateNodeTaskRequest>,
 ) -> Result<Json<AdminCreateNodeTaskResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    let actor = require_admin_write(&state, &headers)?;
     let task_type = validate_admin_node_task_type(&request.task_type)?;
     let message = request
         .message
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .map(|value| value.chars().take(512).collect::<String>());
-    let task = insert_admin_node_task(&state.pool, node_id, task_type, message.as_deref()).await?;
+    let task =
+        insert_admin_node_task(&state.pool, node_id, task_type, message.as_deref(), &actor).await?;
 
     Ok(Json(AdminCreateNodeTaskResponse {
         status: "ok",
@@ -2688,7 +2981,7 @@ async fn admin_upsert_ssh_credential(
     Path(node_id): Path<u64>,
     Json(request): Json<AdminSshCredentialRequest>,
 ) -> Result<Json<AdminSshCredentialResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    let actor = require_admin_write(&state, &headers)?;
     let node = select_admin_node(&state.pool, node_id)
         .await?
         .ok_or_else(|| AppError::not_found("node_not_found", "node does not exist"))?;
@@ -2702,6 +2995,7 @@ async fn admin_upsert_ssh_credential(
         &normalized,
         &password_ciphertext,
         &password_nonce,
+        &actor,
     )
     .await?;
 
@@ -2718,8 +3012,8 @@ async fn admin_delete_ssh_credential(
     headers: HeaderMap,
     Path(node_id): Path<u64>,
 ) -> Result<Json<AdminDeleteSshCredentialResponse>, AppError> {
-    require_admin(&state, &headers)?;
-    let deleted = delete_ssh_credential(&state.pool, node_id).await?;
+    let actor = require_admin_write(&state, &headers)?;
+    let deleted = delete_ssh_credential(&state.pool, node_id, &actor).await?;
 
     Ok(Json(AdminDeleteSshCredentialResponse {
         status: "ok",
@@ -2735,7 +3029,7 @@ async fn admin_run_ssh_action(
     Path(node_id): Path<u64>,
     Json(request): Json<AdminSshActionRequest>,
 ) -> Result<Json<AdminSshActionResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    let actor = require_admin_write(&state, &headers)?;
     let action = validate_ssh_action(&request.action)?;
     let before_node = select_admin_node(&state.pool, node_id)
         .await?
@@ -2797,7 +3091,8 @@ async fn admin_run_ssh_action(
             insert_node_audit_log(
                 &state.pool,
                 node_id,
-                "admin_api",
+                actor.audit_actor_type(),
+                actor.id,
                 "node.ssh_action",
                 serde_json::json!({
                     "operation_task_id": operation_task.id,
@@ -2840,7 +3135,8 @@ async fn admin_run_ssh_action(
             insert_node_audit_log(
                 &state.pool,
                 node_id,
-                "admin_api",
+                actor.audit_actor_type(),
+                actor.id,
                 "node.ssh_action_failed",
                 serde_json::json!({
                     "operation_task_id": operation_task.id,
@@ -2894,7 +3190,7 @@ async fn admin_create_game(
     headers: HeaderMap,
     Json(request): Json<AdminGameRequest>,
 ) -> Result<Json<AdminGameResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    require_admin_write(&state, &headers)?;
     let game_id = insert_admin_game(&state.pool, request).await?;
     let game = select_admin_game(&state.pool, game_id)
         .await?
@@ -2913,7 +3209,7 @@ async fn admin_update_game(
     Path(game_id): Path<u64>,
     Json(request): Json<AdminUpdateGameRequest>,
 ) -> Result<Json<AdminGameResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    require_admin_write(&state, &headers)?;
     update_admin_game(&state.pool, game_id, request).await?;
     let game = select_admin_game(&state.pool, game_id)
         .await?
@@ -2931,7 +3227,7 @@ async fn admin_delete_game(
     headers: HeaderMap,
     Path(game_id): Path<u64>,
 ) -> Result<Json<AdminDeleteGameResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    require_admin_super(&state, &headers)?;
     if game_id == 0 {
         return Err(AppError::bad_request(
             "invalid_game",
@@ -2974,7 +3270,7 @@ async fn admin_create_route_rule(
     headers: HeaderMap,
     Json(request): Json<AdminRouteRuleRequest>,
 ) -> Result<Json<AdminRouteRuleResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    require_admin_write(&state, &headers)?;
     let rule_id = insert_admin_route_rule(&state.pool, request).await?;
     let rule = select_admin_route_rule(&state.pool, rule_id)
         .await?
@@ -2995,7 +3291,7 @@ async fn admin_update_route_rule(
     Path(rule_id): Path<u64>,
     Json(request): Json<AdminUpdateRouteRuleRequest>,
 ) -> Result<Json<AdminRouteRuleResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    require_admin_write(&state, &headers)?;
     update_admin_route_rule(&state.pool, rule_id, request).await?;
     let rule = select_admin_route_rule(&state.pool, rule_id)
         .await?
@@ -3015,7 +3311,7 @@ async fn admin_delete_route_rule(
     headers: HeaderMap,
     Path(rule_id): Path<u64>,
 ) -> Result<Json<AdminDeleteRouteRuleResponse>, AppError> {
-    require_admin(&state, &headers)?;
+    require_admin_super(&state, &headers)?;
     if rule_id == 0 {
         return Err(AppError::bad_request(
             "invalid_route_rule",
@@ -4099,6 +4395,218 @@ async fn select_operation_task(
         .map_err(AppError::database)
 }
 
+async fn select_admin_users(pool: &MySqlPool) -> Result<Vec<AdminUserRow>, AppError> {
+    sqlx::query_as::<_, AdminUserRow>(
+        r#"
+SELECT
+  id,
+  username,
+  display_name,
+  password_hash,
+  role,
+  status,
+  CAST(UNIX_TIMESTAMP(last_login_at) AS UNSIGNED) AS last_login_at,
+  CAST(UNIX_TIMESTAMP(created_at) AS UNSIGNED) AS created_at,
+  CAST(UNIX_TIMESTAMP(updated_at) AS UNSIGNED) AS updated_at
+FROM admin_users
+ORDER BY id ASC
+"#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::database)
+}
+
+async fn select_admin_user(
+    pool: &MySqlPool,
+    user_id: u64,
+) -> Result<Option<AdminUserRow>, AppError> {
+    sqlx::query_as::<_, AdminUserRow>(
+        r#"
+SELECT
+  id,
+  username,
+  display_name,
+  password_hash,
+  role,
+  status,
+  CAST(UNIX_TIMESTAMP(last_login_at) AS UNSIGNED) AS last_login_at,
+  CAST(UNIX_TIMESTAMP(created_at) AS UNSIGNED) AS created_at,
+  CAST(UNIX_TIMESTAMP(updated_at) AS UNSIGNED) AS updated_at
+FROM admin_users
+WHERE id = ?
+LIMIT 1
+"#,
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::database)
+}
+
+async fn select_admin_user_by_username(
+    pool: &MySqlPool,
+    username: &str,
+) -> Result<Option<AdminUserRow>, AppError> {
+    sqlx::query_as::<_, AdminUserRow>(
+        r#"
+SELECT
+  id,
+  username,
+  display_name,
+  password_hash,
+  role,
+  status,
+  CAST(UNIX_TIMESTAMP(last_login_at) AS UNSIGNED) AS last_login_at,
+  CAST(UNIX_TIMESTAMP(created_at) AS UNSIGNED) AS created_at,
+  CAST(UNIX_TIMESTAMP(updated_at) AS UNSIGNED) AS updated_at
+FROM admin_users
+WHERE username = ?
+LIMIT 1
+"#,
+    )
+    .bind(username)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::database)
+}
+
+async fn insert_admin_user(
+    pool: &MySqlPool,
+    request: AdminCreateUserRequest,
+) -> Result<AdminUserRow, AppError> {
+    let username = normalize_admin_username(&request.username)?;
+    let display_name = normalize_admin_display_name(request.display_name.as_deref())?;
+    let role = validate_admin_role(&request.role)?;
+    let status = request
+        .status
+        .as_deref()
+        .map(validate_admin_user_status)
+        .transpose()?
+        .unwrap_or("active");
+    let password_hash = hash_admin_password(&request.password)?;
+
+    let result = sqlx::query(
+        r#"
+INSERT INTO admin_users (
+  username,
+  display_name,
+  password_hash,
+  role,
+  status,
+  created_at,
+  updated_at
+) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(&username)
+    .bind(&display_name)
+    .bind(&password_hash)
+    .bind(role)
+    .bind(status)
+    .execute(pool)
+    .await;
+
+    let result = match result {
+        Ok(result) => result,
+        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("1062") => {
+            return Err(AppError::conflict(
+                "admin_user_exists",
+                "admin username already exists",
+            ))
+        }
+        Err(error) => return Err(AppError::database(error)),
+    };
+
+    select_admin_user(pool, result.last_insert_id())
+        .await?
+        .ok_or_else(|| AppError::internal(anyhow::anyhow!("created admin user is missing")))
+}
+
+async fn update_admin_user(
+    pool: &MySqlPool,
+    user_id: u64,
+    request: AdminUpdateUserRequest,
+) -> Result<AdminUserRow, AppError> {
+    let existing = select_admin_user(pool, user_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("admin_user_not_found", "admin user does not exist"))?;
+    let display_name = match request.display_name {
+        Some(value) => normalize_admin_display_name(Some(&value))?,
+        None => existing.display_name,
+    };
+    let role = match request.role {
+        Some(value) => validate_admin_role(&value)?.to_string(),
+        None => existing.role,
+    };
+    let status = match request.status {
+        Some(value) => validate_admin_user_status(&value)?.to_string(),
+        None => existing.status,
+    };
+    let password_hash = match request.password {
+        Some(value) if !value.trim().is_empty() => hash_admin_password(&value)?,
+        _ => existing.password_hash,
+    };
+
+    sqlx::query(
+        r#"
+UPDATE admin_users
+SET
+  display_name = ?,
+  password_hash = ?,
+  role = ?,
+  status = ?,
+  updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+"#,
+    )
+    .bind(&display_name)
+    .bind(&password_hash)
+    .bind(&role)
+    .bind(&status)
+    .bind(user_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+
+    select_admin_user(pool, user_id)
+        .await?
+        .ok_or_else(|| AppError::internal(anyhow::anyhow!("updated admin user is missing")))
+}
+
+async fn disable_admin_user(pool: &MySqlPool, user_id: u64) -> Result<AdminUserRow, AppError> {
+    sqlx::query(
+        r#"
+UPDATE admin_users
+SET status = 'disabled', updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+"#,
+    )
+    .bind(user_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+
+    select_admin_user(pool, user_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("admin_user_not_found", "admin user does not exist"))
+}
+
+async fn mark_admin_user_login(pool: &MySqlPool, user_id: u64) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+UPDATE admin_users
+SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+"#,
+    )
+    .bind(user_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+    Ok(())
+}
+
 async fn insert_operation_task(
     pool: &MySqlPool,
     node_id: u64,
@@ -4928,6 +5436,7 @@ async fn insert_admin_node_task(
     node_id: u64,
     task_type: &str,
     message: Option<&str>,
+    actor: &AdminActor,
 ) -> Result<NodeTaskRow, AppError> {
     ensure_admin_node_exists(pool, node_id).await?;
     let mut tx = pool.begin().await.map_err(AppError::database)?;
@@ -4967,10 +5476,12 @@ INSERT INTO node_audit_logs (
   action,
   detail_json,
   created_at
-) VALUES (?, 'admin_api', NULL, 'node.task.create', ?, CURRENT_TIMESTAMP)
+) VALUES (?, ?, ?, 'node.task.create', ?, CURRENT_TIMESTAMP)
 "#,
     )
     .bind(node_id)
+    .bind(actor.audit_actor_type())
+    .bind(actor.id)
     .bind(detail_json.to_string())
     .execute(&mut *tx)
     .await
@@ -4987,6 +5498,7 @@ async fn upsert_ssh_credential(
     credential: &NormalizedSshCredential,
     password_ciphertext: &str,
     password_nonce: &str,
+    actor: &AdminActor,
 ) -> Result<SshCredentialRow, AppError> {
     ensure_admin_node_exists(pool, node_id).await?;
     let mut tx = pool.begin().await.map_err(AppError::database)?;
@@ -5042,10 +5554,12 @@ INSERT INTO node_audit_logs (
   action,
   detail_json,
   created_at
-) VALUES (?, 'admin_api', NULL, 'node.ssh_credential.upsert', ?, CURRENT_TIMESTAMP)
+) VALUES (?, ?, ?, 'node.ssh_credential.upsert', ?, CURRENT_TIMESTAMP)
 "#,
     )
     .bind(node_id)
+    .bind(actor.audit_actor_type())
+    .bind(actor.id)
     .bind(detail_json.to_string())
     .execute(&mut *tx)
     .await
@@ -5057,7 +5571,11 @@ INSERT INTO node_audit_logs (
         .ok_or_else(|| AppError::not_found("ssh_not_found", "ssh credential was not stored"))
 }
 
-async fn delete_ssh_credential(pool: &MySqlPool, node_id: u64) -> Result<bool, AppError> {
+async fn delete_ssh_credential(
+    pool: &MySqlPool,
+    node_id: u64,
+    actor: &AdminActor,
+) -> Result<bool, AppError> {
     let mut tx = pool.begin().await.map_err(AppError::database)?;
     let result = sqlx::query(
         r#"
@@ -5081,10 +5599,12 @@ INSERT INTO node_audit_logs (
   action,
   detail_json,
   created_at
-) VALUES (?, 'admin_api', NULL, 'node.ssh_credential.delete', NULL, CURRENT_TIMESTAMP)
+) VALUES (?, ?, ?, 'node.ssh_credential.delete', NULL, CURRENT_TIMESTAMP)
 "#,
         )
         .bind(node_id)
+        .bind(actor.audit_actor_type())
+        .bind(actor.id)
         .execute(&mut *tx)
         .await
         .map_err(AppError::database)?;
@@ -5316,6 +5836,7 @@ async fn update_admin_node_status(
     node_id: u64,
     next_status: &str,
     reason: Option<&str>,
+    actor: &AdminActor,
 ) -> Result<String, AppError> {
     let mut tx = pool.begin().await.map_err(AppError::database)?;
     let previous_status = sqlx::query_scalar::<_, String>(
@@ -5360,10 +5881,12 @@ INSERT INTO node_audit_logs (
   action,
   detail_json,
   created_at
-) VALUES (?, 'admin_api', NULL, 'node.status.update', ?, CURRENT_TIMESTAMP)
+) VALUES (?, ?, ?, 'node.status.update', ?, CURRENT_TIMESTAMP)
 "#,
     )
     .bind(node_id)
+    .bind(actor.audit_actor_type())
+    .bind(actor.id)
     .bind(detail_json.to_string())
     .execute(&mut *tx)
     .await
@@ -5489,6 +6012,7 @@ async fn insert_node_audit_log(
     pool: &MySqlPool,
     node_id: u64,
     actor_type: &str,
+    actor_id: Option<u64>,
     action: &str,
     detail_json: Value,
 ) -> Result<(), AppError> {
@@ -5501,11 +6025,12 @@ INSERT INTO node_audit_logs (
   action,
   detail_json,
   created_at
-) VALUES (?, ?, NULL, ?, ?, CURRENT_TIMESTAMP)
+) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 "#,
     )
     .bind(node_id)
     .bind(actor_type)
+    .bind(actor_id)
     .bind(action)
     .bind(detail_json.to_string())
     .execute(pool)
@@ -7039,7 +7564,7 @@ fn bool_i8(value: bool) -> i8 {
     }
 }
 
-fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<AdminActor, AppError> {
     let configured = state.admin_token.as_deref().ok_or_else(|| {
         AppError::service_unavailable(
             "admin_disabled",
@@ -7050,11 +7575,37 @@ fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> 
         .ok_or_else(|| AppError::unauthorized("admin_auth_required", "admin token is required"))?;
 
     if constant_time_eq(configured.as_bytes(), provided.as_bytes()) {
-        Ok(())
+        Ok(AdminActor::bootstrap())
+    } else if provided.starts_with(&format!("{ADMIN_SESSION_PREFIX}.{ADMIN_SESSION_VERSION}.")) {
+        verify_admin_session_token(configured, provided)
     } else {
         Err(AppError::unauthorized(
             "admin_auth_failed",
             "admin token is invalid",
+        ))
+    }
+}
+
+fn require_admin_write(state: &AppState, headers: &HeaderMap) -> Result<AdminActor, AppError> {
+    let actor = require_admin(state, headers)?;
+    if actor.can_write() {
+        Ok(actor)
+    } else {
+        Err(AppError::forbidden(
+            "permission_denied",
+            "current admin role can only view data",
+        ))
+    }
+}
+
+fn require_admin_super(state: &AppState, headers: &HeaderMap) -> Result<AdminActor, AppError> {
+    let actor = require_admin(state, headers)?;
+    if actor.is_super_admin() {
+        Ok(actor)
+    } else {
+        Err(AppError::forbidden(
+            "permission_denied",
+            "this operation requires super admin role",
         ))
     }
 }
@@ -7081,6 +7632,69 @@ fn require_business_sync(state: &AppState, headers: &HeaderMap) -> Result<(), Ap
             "business sync token is invalid",
         ))
     }
+}
+
+fn create_admin_session_token(
+    signing_secret: &str,
+    user: &AdminUserRow,
+) -> Result<(String, u64), AppError> {
+    let expires_at = now_unix() + ADMIN_SESSION_TTL_SEC;
+    let claims = AdminSessionClaims {
+        user_id: user.id,
+        username: user.username.clone(),
+        display_name: user.display_name.clone(),
+        role: user.role.clone(),
+        exp: expires_at,
+        nonce: random_url_token(18),
+    };
+    let payload =
+        serde_json::to_vec(&claims).map_err(|error| AppError::internal(anyhow::anyhow!(error)))?;
+    let payload = URL_SAFE_NO_PAD.encode(payload);
+    let signing_input = format!("{ADMIN_SESSION_PREFIX}.{ADMIN_SESSION_VERSION}.{payload}");
+    let signature = hmac_sha256_base64(signing_secret, signing_input.as_bytes())?;
+    Ok((format!("{signing_input}.{signature}"), expires_at))
+}
+
+fn verify_admin_session_token(signing_secret: &str, token: &str) -> Result<AdminActor, AppError> {
+    let mut parts = token.split('.');
+    let prefix = parts.next().unwrap_or_default();
+    let version = parts.next().unwrap_or_default();
+    let payload = parts.next().unwrap_or_default();
+    let signature = parts.next().unwrap_or_default();
+    if parts.next().is_some() || prefix != ADMIN_SESSION_PREFIX || version != ADMIN_SESSION_VERSION
+    {
+        return Err(AppError::unauthorized(
+            "admin_auth_failed",
+            "admin session token is invalid",
+        ));
+    }
+    let signing_input = format!("{prefix}.{version}.{payload}");
+    let expected = hmac_sha256_base64(signing_secret, signing_input.as_bytes())?;
+    if !constant_time_eq(expected.as_bytes(), signature.as_bytes()) {
+        return Err(AppError::unauthorized(
+            "admin_auth_failed",
+            "admin session signature is invalid",
+        ));
+    }
+    let payload = URL_SAFE_NO_PAD.decode(payload).map_err(|_| {
+        AppError::unauthorized("admin_auth_failed", "admin session payload is invalid")
+    })?;
+    let claims = serde_json::from_slice::<AdminSessionClaims>(&payload).map_err(|_| {
+        AppError::unauthorized("admin_auth_failed", "admin session payload is invalid")
+    })?;
+    if claims.exp < now_unix() {
+        return Err(AppError::unauthorized(
+            "admin_session_expired",
+            "admin session has expired",
+        ));
+    }
+    Ok(AdminActor {
+        id: Some(claims.user_id),
+        username: claims.username,
+        display_name: claims.display_name,
+        role: claims.role,
+        auth_type: "password".to_string(),
+    })
 }
 
 fn admin_token_from_headers(headers: &HeaderMap) -> Option<&str> {
@@ -7196,6 +7810,58 @@ fn normalize_command_arg(value: &str) -> Result<String, AppError> {
     Ok(value.to_string())
 }
 
+fn normalize_admin_username(value: &str) -> Result<String, AppError> {
+    let value = normalize_required_text(value, "username", 64)?.to_lowercase();
+    if value.len() < 3
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+    {
+        return Err(AppError::bad_request(
+            "invalid_username",
+            "username must be 3-64 characters and may only contain letters, numbers, dot, underscore, or dash",
+        ));
+    }
+    Ok(value)
+}
+
+fn normalize_admin_display_name(value: Option<&str>) -> Result<Option<String>, AppError> {
+    normalize_optional_text(value, 128)
+}
+
+fn validate_admin_password(value: &str) -> Result<(), AppError> {
+    if value.chars().count() < 8 || value.chars().count() > 128 {
+        return Err(AppError::bad_request(
+            "invalid_password",
+            "password must be 8-128 characters",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_admin_role(value: &str) -> Result<&'static str, AppError> {
+    match value.trim() {
+        "super_admin" => Ok("super_admin"),
+        "operator" => Ok("operator"),
+        "viewer" => Ok("viewer"),
+        _ => Err(AppError::bad_request(
+            "invalid_admin_role",
+            "admin role must be super_admin, operator, or viewer",
+        )),
+    }
+}
+
+fn validate_admin_user_status(value: &str) -> Result<&'static str, AppError> {
+    match value.trim() {
+        "active" => Ok("active"),
+        "disabled" => Ok("disabled"),
+        _ => Err(AppError::bad_request(
+            "invalid_admin_status",
+            "admin user status must be active or disabled",
+        )),
+    }
+}
+
 fn trim_trailing_slash(value: &str) -> String {
     value.trim_end_matches('/').to_string()
 }
@@ -7225,6 +7891,85 @@ fn hash_bootstrap_token(token: &str) -> String {
         "sha256:{}",
         URL_SAFE_NO_PAD.encode(Sha256::digest(token.trim()))
     )
+}
+
+fn random_url_token(bytes_len: usize) -> String {
+    let mut bytes = vec![0_u8; bytes_len];
+    OsRng.fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn hmac_sha256_base64(secret: &str, data: &[u8]) -> Result<String, AppError> {
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(secret.as_bytes())
+        .map_err(|error| AppError::internal(anyhow::anyhow!(error)))?;
+    mac.update(data);
+    Ok(URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()))
+}
+
+fn hash_admin_password(password: &str) -> Result<String, AppError> {
+    validate_admin_password(password)?;
+    let mut salt = [0_u8; 16];
+    OsRng.fill_bytes(&mut salt);
+    let derived = pbkdf2_hmac_sha256(password.as_bytes(), &salt, ADMIN_PASSWORD_ITERATIONS, 32)?;
+    Ok(format!(
+        "{ADMIN_PASSWORD_SCHEME}${ADMIN_PASSWORD_ITERATIONS}${}${}",
+        URL_SAFE_NO_PAD.encode(salt),
+        URL_SAFE_NO_PAD.encode(derived)
+    ))
+}
+
+fn verify_admin_password(password: &str, encoded: &str) -> Result<bool, AppError> {
+    let parts = encoded.split('$').collect::<Vec<_>>();
+    if parts.len() != 4 || parts[0] != ADMIN_PASSWORD_SCHEME {
+        return Ok(false);
+    }
+    let iterations = parts[1]
+        .parse::<u32>()
+        .map_err(|_| AppError::internal(anyhow::anyhow!("invalid admin password hash")))?;
+    let salt = URL_SAFE_NO_PAD
+        .decode(parts[2])
+        .map_err(|_| AppError::internal(anyhow::anyhow!("invalid admin password salt")))?;
+    let expected = URL_SAFE_NO_PAD
+        .decode(parts[3])
+        .map_err(|_| AppError::internal(anyhow::anyhow!("invalid admin password digest")))?;
+    let actual = pbkdf2_hmac_sha256(password.as_bytes(), &salt, iterations, expected.len())?;
+    Ok(constant_time_eq(&actual, &expected))
+}
+
+fn pbkdf2_hmac_sha256(
+    password: &[u8],
+    salt: &[u8],
+    iterations: u32,
+    output_len: usize,
+) -> Result<Vec<u8>, AppError> {
+    if iterations == 0 || output_len == 0 {
+        return Err(AppError::internal(anyhow::anyhow!(
+            "invalid pbkdf2 parameters"
+        )));
+    }
+    let mut output = Vec::with_capacity(output_len);
+    let blocks = output_len.div_ceil(32);
+    for block_index in 1..=blocks {
+        let mut mac = <HmacSha256 as Mac>::new_from_slice(password)
+            .map_err(|error| AppError::internal(anyhow::anyhow!(error)))?;
+        mac.update(salt);
+        mac.update(&(block_index as u32).to_be_bytes());
+        let mut u = mac.finalize().into_bytes().to_vec();
+        let mut block = u.clone();
+
+        for _ in 1..iterations {
+            let mut mac = <HmacSha256 as Mac>::new_from_slice(password)
+                .map_err(|error| AppError::internal(anyhow::anyhow!(error)))?;
+            mac.update(&u);
+            u = mac.finalize().into_bytes().to_vec();
+            for (left, right) in block.iter_mut().zip(u.iter()) {
+                *left ^= *right;
+            }
+        }
+        output.extend_from_slice(&block);
+    }
+    output.truncate(output_len);
+    Ok(output)
 }
 
 fn build_bootstrap_install_command(
@@ -7310,6 +8055,10 @@ impl AppError {
 
     fn unauthorized(code: &'static str, message: impl Into<String>) -> Self {
         Self::new(StatusCode::UNAUTHORIZED, code, message)
+    }
+
+    fn forbidden(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(StatusCode::FORBIDDEN, code, message)
     }
 
     fn not_found(code: &'static str, message: impl Into<String>) -> Self {
@@ -7454,6 +8203,59 @@ impl AdminOperationTaskSummary {
             created_at: row.created_at,
             started_at: row.started_at,
             finished_at: row.finished_at,
+        }
+    }
+}
+
+impl AdminUserSummary {
+    fn from_row(row: AdminUserRow) -> Self {
+        Self {
+            id: row.id,
+            username: row.username,
+            display_name: row.display_name,
+            role: row.role,
+            status: row.status,
+            last_login_at: row.last_login_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
+impl AdminActor {
+    fn bootstrap() -> Self {
+        Self {
+            id: None,
+            username: "admin-token".to_string(),
+            display_name: Some("控制面令牌".to_string()),
+            role: "super_admin".to_string(),
+            auth_type: "admin_token".to_string(),
+        }
+    }
+
+    fn can_write(&self) -> bool {
+        self.role == "super_admin" || self.role == "operator"
+    }
+
+    fn is_super_admin(&self) -> bool {
+        self.role == "super_admin"
+    }
+
+    fn audit_actor_type(&self) -> &'static str {
+        if self.id.is_some() {
+            "admin_user"
+        } else {
+            "admin_api"
+        }
+    }
+
+    fn current_user(&self) -> AdminCurrentUser {
+        AdminCurrentUser {
+            id: self.id,
+            username: self.username.clone(),
+            display_name: self.display_name.clone(),
+            role: self.role.clone(),
+            auth_type: self.auth_type.clone(),
         }
     }
 }
@@ -8214,6 +9016,57 @@ mod tests {
     }
 
     #[test]
+    fn hashes_and_verifies_admin_passwords() {
+        let hash = hash_admin_password("strong-password-2026").expect("password hashes");
+
+        assert!(verify_admin_password("strong-password-2026", &hash).expect("password verifies"));
+        assert!(!verify_admin_password("wrong-password", &hash).expect("wrong password rejects"));
+
+        let error = hash_admin_password("short").unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_password");
+    }
+
+    #[test]
+    fn creates_and_verifies_admin_session_tokens() {
+        let user = AdminUserRow {
+            id: 42,
+            username: "ops-admin".to_string(),
+            display_name: Some("运维管理员".to_string()),
+            password_hash: "hash".to_string(),
+            role: "operator".to_string(),
+            status: "active".to_string(),
+            last_login_at: None,
+            created_at: Some(1_779_500_000),
+            updated_at: Some(1_779_500_000),
+        };
+
+        let (token, expires_at) =
+            create_admin_session_token("signing-secret", &user).expect("token is created");
+        assert!(token.starts_with("xas.v1."));
+        assert!(expires_at > now_unix());
+
+        let actor = verify_admin_session_token("signing-secret", &token).expect("token verifies");
+        assert_eq!(actor.id, Some(42));
+        assert_eq!(actor.username, "ops-admin");
+        assert_eq!(actor.role, "operator");
+        assert!(actor.can_write());
+        assert!(!actor.is_super_admin());
+
+        let error = verify_admin_session_token("other-secret", &token).unwrap_err();
+        assert_eq!(error.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(error.code, "admin_auth_failed");
+    }
+
+    #[test]
+    fn dashboard_contains_admin_login_and_permissions_ui() {
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/login"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("loginUsernameInput"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("权限管理"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/admin-users"));
+    }
+
+    #[test]
     fn reads_business_sync_token_header() {
         let mut headers = HeaderMap::new();
         headers.insert("X-Business-Sync-Token", "sync-secret".parse().unwrap());
@@ -8337,7 +9190,7 @@ mod tests {
     #[test]
     fn embeds_admin_dashboard_html() {
         assert!(ADMIN_DASHBOARD_HTML.contains("XAccel 控制台"));
-        assert!(ADMIN_DASHBOARD_HTML.contains("登录节点后台"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("登录节点控制台"));
         assert!(ADMIN_DASHBOARD_HTML.contains("新增节点"));
         assert!(ADMIN_DASHBOARD_HTML.contains("编辑配置"));
         assert!(ADMIN_DASHBOARD_HTML.contains("控制总览"));

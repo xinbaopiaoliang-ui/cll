@@ -133,6 +133,20 @@ CREATE TABLE connect_intents (
     ON DELETE CASCADE
 );
 
+CREATE TABLE admin_users (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  username VARCHAR(64) NOT NULL,
+  display_name VARCHAR(128) NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  role ENUM('super_admin', 'operator', 'viewer') NOT NULL DEFAULT 'viewer',
+  status ENUM('active', 'disabled') NOT NULL DEFAULT 'active',
+  last_login_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_admin_username (username),
+  INDEX idx_role_status (role, status)
+);
+
 CREATE TABLE node_bootstrap_tokens (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   node_id BIGINT UNSIGNED NOT NULL,
