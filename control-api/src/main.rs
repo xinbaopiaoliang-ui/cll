@@ -9197,6 +9197,11 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("游戏管理"));
         assert!(ADMIN_DASHBOARD_HTML.contains("游戏路由"));
         assert!(ADMIN_DASHBOARD_HTML.contains("操作日志"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("canWrite()"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("readonlyActionsCell"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("assertCanWrite"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-write-action"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("只读账号不能"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-view=\"audit\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("auditRows"));
         assert!(ADMIN_DASHBOARD_HTML.contains("loadAuditLogs"));

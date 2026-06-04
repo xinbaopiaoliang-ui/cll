@@ -129,6 +129,31 @@
         transform: none;
       }
 
+      .readonly-pill {
+        display: inline-flex;
+        min-height: 30px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface-soft);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 760;
+        padding: 0 12px;
+        white-space: nowrap;
+      }
+
+      .permission-note {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(243, 248, 247, 0.78));
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.65;
+        padding: 14px 16px;
+      }
+
       input,
       select,
       textarea {
@@ -521,11 +546,13 @@
         max-width: 230px;
       }
 
-      button.taxonomy-chip {
+      .taxonomy-chip {
+        display: inline-flex;
+        align-items: center;
         min-height: 24px;
         padding: 0 8px;
         gap: 5px;
-        border-color: var(--line);
+        border: 1px solid var(--line);
         border-radius: 999px;
         background: rgba(255, 255, 255, 0.7);
         box-shadow: none;
@@ -1730,7 +1757,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.39.0</span>
+          <span class="mono">v0.39.1</span>
         </div>
       </aside>
 
@@ -1741,9 +1768,9 @@
             <h1 class="page-title" id="pageTitle">控制总览</h1>
           </div>
           <div class="top-actions">
-            <button id="openCreateNode" class="primary" type="button">新增节点</button>
-            <button id="openGame" type="button">新增游戏</button>
-            <button id="openRouteRule" type="button">新增规则</button>
+            <button id="openCreateNode" class="primary" type="button" data-write-action>新增节点</button>
+            <button id="openGame" type="button" data-write-action>新增游戏</button>
+            <button id="openRouteRule" type="button" data-write-action>新增规则</button>
             <button id="refreshNow" type="button">立即刷新</button>
             <button id="toggleAuto" type="button">自动刷新：开</button>
             <button id="logoutButton" class="danger" type="button">退出</button>
@@ -2088,17 +2115,17 @@
                     <div class="operation-title">新增节点</div>
                     <div class="message">创建节点记录后生成一键安装命令，部署到 Linux 节点服务器。</div>
                     <div class="form-actions">
-                      <button class="primary" type="button" data-open-node>新增节点</button>
+                      <button class="primary" type="button" data-open-node data-write-action>新增节点</button>
                     </div>
                   </div>
                   <div class="operation-card">
                     <div class="operation-title">新增路由</div>
                     <div class="message">为游戏名称和 ID 绑定节点及目标 UDP 地址，客户端 connect-intent 会按优先级调度。</div>
                     <div class="form-actions">
-                      <button class="primary" type="button" data-open-route>新增规则</button>
+                      <button class="primary" type="button" data-open-route data-write-action>新增规则</button>
                     </div>
                   </div>
-                  <div class="operation-card">
+                  <div class="operation-card" data-write-action>
                     <div class="operation-title">升级控制面</div>
                     <div class="message">在控制面板服务器执行，命令会自动使用当前页面访问地址作为 public-base-url。</div>
                     <textarea id="controlUpgradeCommand" readonly></textarea>
@@ -2764,6 +2791,34 @@
         return state.currentAdmin?.role === "super_admin";
       }
 
+      function canWrite() {
+        return state.currentAdmin?.role === "super_admin" || state.currentAdmin?.role === "operator";
+      }
+
+      function canDeleteCoreData() {
+        return isSuperAdmin();
+      }
+
+      function isReadOnlyAdmin() {
+        return state.currentAdmin?.role === "viewer";
+      }
+
+      function readonlyActionsCell() {
+        return `<span class="readonly-pill" title="只读账号只能查看，不能执行运维或修改配置">只读</span>`;
+      }
+
+      function assertCanWrite(action = "执行这个操作") {
+        if (canWrite()) return true;
+        showError(new Error(`只读账号不能${action}，请切换运维或超级管理员账号。`));
+        return false;
+      }
+
+      function assertCanDelete(action = "删除数据") {
+        if (canDeleteCoreData()) return true;
+        showError(new Error(`只有超级管理员才能${action}。`));
+        return false;
+      }
+
       function renderAdminIdentity() {
         const admin = state.currentAdmin;
         const label = admin
@@ -2772,6 +2827,9 @@
         els.currentAdminLabel.textContent = label;
         document.querySelectorAll("[data-super-only]").forEach((item) => {
           item.classList.toggle("hidden", Boolean(admin) && !isSuperAdmin());
+        });
+        document.querySelectorAll("[data-write-action]").forEach((item) => {
+          item.classList.toggle("hidden", Boolean(admin) && !canWrite());
         });
         if (admin && state.activeView === "admins" && !isSuperAdmin()) {
           setActiveView("overview");
@@ -2854,6 +2912,7 @@
       }
 
       function openCreateNodeModal() {
+        if (!assertCanWrite("新增节点")) return;
         clearInlineError(els.createNodeError);
         els.createNodeForm.reset();
         setCreateNodeDefaults();
@@ -2865,6 +2924,7 @@
       }
 
       async function openEditNodeModal(nodeId, focusField = "name") {
+        if (!assertCanWrite("修改节点")) return;
         const id = Number(nodeId);
         if (!id) return;
         clearInlineError(els.createNodeError);
@@ -2918,6 +2978,7 @@
       }
 
       async function openDeployNodeModal(nodeId) {
+        if (!assertCanWrite("部署或升级节点")) return;
         const id = Number(nodeId);
         if (!id) return;
         clearInlineError(els.deployNodeError);
@@ -2954,6 +3015,7 @@
       }
 
       function openGameModal(game = null) {
+        if (!assertCanWrite(game ? "编辑游戏" : "新增游戏")) return;
         clearInlineError(els.gameError);
         els.gameForm.reset();
         els.gameForm.elements.original_game_id.value = game?.game_id || "";
@@ -3005,6 +3067,7 @@
       }
 
       function openRouteRuleModal(rule = null) {
+        if (!assertCanWrite(rule ? "编辑路由规则" : "新增路由规则")) return;
         clearInlineError(els.routeRuleError);
         els.routeRuleForm.reset();
         populateRouteNodeOptions(rule?.node_id || state.selectedId || state.nodes[0]?.id);
@@ -3349,6 +3412,20 @@
       function renderTaxonomyCell(node) {
         const area = nodeAreaValue(node);
         const tag = nodeTagValue(node);
+        if (!canWrite()) {
+          return `
+          <div class="taxonomy-cell">
+            <span class="taxonomy-chip ${area ? "" : "empty"}">
+              <span class="taxonomy-prefix">区域</span>
+              <span class="taxonomy-text">${escapeHtml(area || "未分区")}</span>
+            </span>
+            <span class="taxonomy-chip ${tag ? "" : "empty"}">
+              <span class="taxonomy-prefix">标签</span>
+              <span class="taxonomy-text">${escapeHtml(tag || "未设置")}</span>
+            </span>
+          </div>
+        `;
+        }
         return `
           <div class="taxonomy-cell">
             <button class="taxonomy-chip ${area ? "" : "empty"}" type="button" data-node-action="edit-area" data-node-id="${node.id}" title="修改区域">
@@ -3595,6 +3672,23 @@
             const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
             const resumeEnabled = canResumeScheduling(node);
             const canRestart = node.status === "online";
+            const actionCell = canWrite()
+              ? `
+                    <button type="button" data-node-action="deploy" data-node-id="${node.id}">部署</button>
+                    <button type="button" data-node-action="restart" data-node-id="${node.id}" ${canRestart ? "" : "disabled title=\"节点在线后才能远程重启\""}>重启</button>
+                    <button type="button" data-node-action="edit" data-node-id="${node.id}">修改</button>
+                    ${
+                      resumeEnabled
+                        ? `<button type="button" data-resume-node="${node.id}">恢复调度</button>`
+                        : ""
+                    }
+                    ${
+                      canDeleteCoreData()
+                        ? `<button class="danger" type="button" data-node-action="delete" data-node-id="${node.id}">删除</button>`
+                        : ""
+                    }
+              `
+              : readonlyActionsCell();
             return `
               <tr class="${selected}" data-node-id="${node.id}">
                 <td>
@@ -3619,15 +3713,7 @@
                 <td class="mono">${report.active_sessions || 0}</td>
                 <td>
                   <div class="row-actions">
-                    <button type="button" data-node-action="deploy" data-node-id="${node.id}">部署</button>
-                    <button type="button" data-node-action="restart" data-node-id="${node.id}" ${canRestart ? "" : "disabled title=\"节点在线后才能远程重启\""}>重启</button>
-                    <button type="button" data-node-action="edit" data-node-id="${node.id}">修改</button>
-                    ${
-                      resumeEnabled
-                        ? `<button type="button" data-resume-node="${node.id}">恢复调度</button>`
-                        : ""
-                    }
-                    <button class="danger" type="button" data-node-action="delete" data-node-id="${node.id}">删除</button>
+                    ${actionCell}
                   </div>
                 </td>
               </tr>
@@ -3654,6 +3740,18 @@
           .map((game) => {
             const enabled = game.status === "enabled";
             const nextStatus = enabled ? "disabled" : "enabled";
+            const actionCell = canWrite()
+              ? `
+                    <button type="button" data-game-action="route" data-game-id="${game.game_id}">配路由</button>
+                    <button type="button" data-game-action="edit" data-game-id="${game.game_id}">编辑</button>
+                    <button type="button" data-game-action="toggle" data-game-status="${nextStatus}" data-game-id="${game.game_id}">${enabled ? "禁用" : "启用"}</button>
+                    ${
+                      canDeleteCoreData()
+                        ? `<button class="danger" type="button" data-game-action="delete" data-game-id="${game.game_id}">删除</button>`
+                        : ""
+                    }
+              `
+              : readonlyActionsCell();
             return `
               <tr data-game-id="${game.game_id}">
                 <td>
@@ -3675,10 +3773,7 @@
                 </td>
                 <td>
                   <div class="row-actions">
-                    <button type="button" data-game-action="route" data-game-id="${game.game_id}">配路由</button>
-                    <button type="button" data-game-action="edit" data-game-id="${game.game_id}">编辑</button>
-                    <button type="button" data-game-action="toggle" data-game-status="${nextStatus}" data-game-id="${game.game_id}">${enabled ? "禁用" : "启用"}</button>
-                    <button class="danger" type="button" data-game-action="delete" data-game-id="${game.game_id}">删除</button>
+                    ${actionCell}
                   </div>
                 </td>
               </tr>
@@ -3708,6 +3803,17 @@
             const endpoint = rule.node_endpoint || node?.endpoint || "";
             const nextStatus = enabled ? "disabled" : "enabled";
             const label = gameLabel(rule);
+            const actionCell = canWrite()
+              ? `
+                    <button type="button" data-route-action="edit" data-route-id="${rule.id}">编辑</button>
+                    <button type="button" data-route-action="toggle" data-route-status="${nextStatus}" data-route-id="${rule.id}">${enabled ? "禁用" : "启用"}</button>
+                    ${
+                      canDeleteCoreData()
+                        ? `<button class="danger" type="button" data-route-action="delete" data-route-id="${rule.id}">删除</button>`
+                        : ""
+                    }
+              `
+              : readonlyActionsCell();
             return `
               <tr data-route-id="${rule.id}">
                 <td>
@@ -3728,9 +3834,7 @@
                 <td><span class="chip ${enabled ? "ok" : "bad"}">${escapeHtml(routeStatusText(rule.status))}</span></td>
                 <td>
                   <div class="row-actions">
-                    <button type="button" data-route-action="edit" data-route-id="${rule.id}">编辑</button>
-                    <button type="button" data-route-action="toggle" data-route-status="${nextStatus}" data-route-id="${rule.id}">${enabled ? "禁用" : "启用"}</button>
-                    <button class="danger" type="button" data-route-action="delete" data-route-id="${rule.id}">删除</button>
+                    ${actionCell}
                   </div>
                 </td>
               </tr>
@@ -3977,7 +4081,12 @@
             </div>
           </div>
           <div class="detail-ops-grid">
-            <div class="detail-section">
+            ${
+              isReadOnlyAdmin()
+                ? `<div class="detail-section permission-note">当前账号是只读权限，只能查看节点状态、上报、任务和日志；部署、重启、改配置、SSH 控制等操作已关闭。</div>`
+                : ""
+            }
+            <div class="detail-section" data-write-action>
               <div class="section-title">节点操作</div>
               <div class="action-grid node-actions-grid">
               <div class="operation-card">
@@ -4230,6 +4339,7 @@
             </details>
           </div>
         `;
+        renderAdminIdentity();
         renderOps();
       }
 
@@ -4612,6 +4722,7 @@
       }
 
       async function saveNode(form) {
+        if (!assertCanWrite("保存节点")) return;
         clearInlineError(els.createNodeError);
         const nodeId = numberOrNull(form.elements.node_id.value);
         const isCreate = !nodeId;
@@ -4637,6 +4748,7 @@
       }
 
       async function deleteNode(nodeId) {
+        if (!assertCanDelete("删除节点")) return;
         const id = Number(nodeId);
         if (!id) return;
         const node = state.nodes.find((item) => Number(item.id) === id);
@@ -4657,6 +4769,7 @@
       }
 
       async function saveGame(form) {
+        if (!assertCanWrite("保存游戏")) return;
         clearInlineError(els.gameError);
         const originalGameId = numberOrNull(form.elements.original_game_id.value);
         const payload = gamePayloadFromForm(form);
@@ -4674,6 +4787,7 @@
       }
 
       async function setGameStatus(game, status) {
+        if (!assertCanWrite("调整游戏状态")) return;
         const payload = {
           game_id: game.game_id,
           name: game.name,
@@ -4692,6 +4806,7 @@
       }
 
       async function deleteGame(gameId) {
+        if (!assertCanDelete("删除游戏")) return;
         await api(`/api/admin/v1/games/${gameId}`, {
           method: "DELETE",
         });
@@ -4709,6 +4824,7 @@
       }
 
       async function saveRouteRule(form) {
+        if (!assertCanWrite("保存路由规则")) return;
         clearInlineError(els.routeRuleError);
         const ruleId = numberOrNull(form.elements.rule_id.value);
         const payload = routeRulePayloadFromForm(form);
@@ -4726,6 +4842,7 @@
       }
 
       async function setRouteRuleStatus(rule, status) {
+        if (!assertCanWrite("调整路由规则状态")) return;
         const payload = {
           game_id: rule.game_id,
           game_name: gameLabel(rule),
@@ -4746,6 +4863,7 @@
       }
 
       async function deleteRouteRule(ruleId) {
+        if (!assertCanDelete("删除路由规则")) return;
         await api(`/api/admin/v1/game-route-rules/${ruleId}`, {
           method: "DELETE",
         });
@@ -4828,6 +4946,7 @@
       }
 
       async function updateNodeConfig(form) {
+        if (!assertCanWrite("保存节点配置")) return;
         if (!state.selectedId) return;
         const payload = nodePayloadFromForm(form);
         const data = await api(`/api/admin/v1/nodes/${state.selectedId}`, {
@@ -4840,6 +4959,7 @@
       }
 
       async function updateNodeStatus(form) {
+        if (!assertCanWrite("调整节点状态")) return;
         if (!state.selectedId) return;
         const payload = {
           status: form.elements.status.value,
@@ -4856,6 +4976,7 @@
       }
 
       async function resumeNodeScheduling(nodeId = state.selectedId) {
+        if (!assertCanWrite("恢复节点调度")) return;
         const id = Number(nodeId);
         if (!id) return;
         const node = state.nodes.find((item) => item.id === id);
@@ -4878,6 +4999,7 @@
       }
 
       async function createNodeTask(nodeId, taskType, message) {
+        if (!assertCanWrite("创建节点任务")) return null;
         const data = await api(`/api/admin/v1/nodes/${nodeId}/tasks`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -4890,6 +5012,7 @@
       }
 
       async function restartNode(nodeId = state.selectedId) {
+        if (!assertCanWrite("重启节点")) return;
         const id = Number(nodeId);
         if (!id) return;
         const node = state.nodes.find((item) => Number(item.id) === id);
@@ -4901,12 +5024,14 @@
 
         state.selectedId = id;
         const task = await createNodeTask(id, "restart_node", "控制面手动重启节点");
+        if (!task) return;
         await loadNodes();
         await loadDetail(id);
         els.statusLine.textContent = `已创建节点 ${id} 重启任务 #${task.id}，等待节点领取`;
       }
 
       async function saveSshCredential(form) {
+        if (!assertCanWrite("保存 SSH 凭据")) return;
         if (!state.selectedId) return;
         const payload = {
           host: textOrNull(form.elements.host.value),
@@ -4930,6 +5055,7 @@
       }
 
       async function deleteSshCredential(nodeId = state.selectedId) {
+        if (!assertCanWrite("删除 SSH 凭据")) return;
         const id = Number(nodeId);
         if (!id) return;
         const confirmed = window.confirm("确定删除这个节点保存的 SSH 账号密码吗？删除后将无法通过账号密码直控服务器。");
@@ -4943,6 +5069,7 @@
       }
 
       async function runSshAction(nodeId, action, button) {
+        if (!assertCanWrite("执行 SSH 操作")) return;
         const id = Number(nodeId);
         if (!id || !action) return;
         const node = state.nodes.find((item) => Number(item.id) === id);
@@ -4984,6 +5111,7 @@
       }
 
       async function createBootstrapCommand(form) {
+        if (!assertCanWrite("生成安装命令")) return;
         const nodeId = numberOrNull(form.elements.node_id?.value) || state.selectedId;
         if (!nodeId) return;
         const payload = {
@@ -5009,6 +5137,7 @@
       }
 
       async function deployNodeViaSsh(form) {
+        if (!assertCanWrite("一键部署节点")) return;
         const nodeId = numberOrNull(form.elements.node_id?.value) || state.selectedId;
         if (!nodeId) return;
         const password = form.elements.ssh_password.value;
@@ -5155,6 +5284,7 @@
       });
 
       document.querySelector("[data-copy-control-upgrade]").addEventListener("click", (event) => {
+        if (!assertCanWrite("复制控制面升级命令")) return;
         refreshControlUpgradeCommand();
         copyToClipboard(els.controlUpgradeCommand.value, event.currentTarget);
       });
