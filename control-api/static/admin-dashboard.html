@@ -546,16 +546,26 @@
         max-width: 230px;
       }
 
-      .taxonomy-chip {
-        display: inline-flex;
-        align-items: center;
+      button.taxonomy-chip {
         min-height: 24px;
         padding: 0 8px;
         gap: 5px;
-        border: 1px solid var(--line);
+        border-color: var(--line);
         border-radius: 999px;
         background: rgba(255, 255, 255, 0.7);
         box-shadow: none;
+      }
+
+      .readonly-taxonomy-chip {
+        display: inline-flex;
+        min-height: 26px;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.72);
+        padding: 0 9px;
+        white-space: nowrap;
       }
 
       button.taxonomy-chip:hover {
@@ -1757,7 +1767,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.39.1</span>
+          <span class="mono">v0.39.2</span>
         </div>
       </aside>
 
@@ -3415,11 +3425,11 @@
         if (!canWrite()) {
           return `
           <div class="taxonomy-cell">
-            <span class="taxonomy-chip ${area ? "" : "empty"}">
+            <span class="readonly-taxonomy-chip ${area ? "" : "empty"}">
               <span class="taxonomy-prefix">区域</span>
               <span class="taxonomy-text">${escapeHtml(area || "未分区")}</span>
             </span>
-            <span class="taxonomy-chip ${tag ? "" : "empty"}">
+            <span class="readonly-taxonomy-chip ${tag ? "" : "empty"}">
               <span class="taxonomy-prefix">标签</span>
               <span class="taxonomy-text">${escapeHtml(tag || "未设置")}</span>
             </span>
