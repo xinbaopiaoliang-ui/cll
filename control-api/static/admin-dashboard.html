@@ -320,6 +320,157 @@
         font-weight: 760;
       }
 
+      .permission-layout {
+        display: grid;
+        gap: 14px;
+      }
+
+      .permission-overview {
+        display: grid;
+        grid-template-columns: minmax(280px, 0.85fr) minmax(420px, 1.15fr);
+        gap: 14px;
+        padding: 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .permission-current {
+        min-height: 156px;
+        display: grid;
+        align-content: space-between;
+        gap: 14px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, rgba(247, 250, 249, 0.94), rgba(255, 255, 255, 0.78)),
+          var(--surface);
+      }
+
+      .permission-label,
+      .permission-capability-title {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 780;
+      }
+
+      .permission-role {
+        margin-top: 8px;
+        color: var(--ink);
+        font-size: 24px;
+        font-weight: 820;
+        line-height: 1.1;
+      }
+
+      .permission-summary {
+        max-width: 46ch;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.62;
+      }
+
+      .permission-rules {
+        display: grid;
+        gap: 8px;
+        align-content: start;
+      }
+
+      .permission-rule-row {
+        display: grid;
+        grid-template-columns: 92px 1fr;
+        gap: 12px;
+        align-items: start;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .permission-rule-row:last-child {
+        border-bottom: 0;
+      }
+
+      .permission-rule-row strong {
+        color: var(--ink);
+        font-size: 13px;
+      }
+
+      .permission-rule-row span {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .permission-matrix {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .permission-role-card {
+        display: grid;
+        gap: 12px;
+        align-content: start;
+        padding: 16px;
+        border-right: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.52);
+      }
+
+      .permission-role-card:last-child {
+        border-right: 0;
+      }
+
+      .permission-role-card.active {
+        background:
+          linear-gradient(180deg, rgba(23, 120, 111, 0.08), rgba(255, 255, 255, 0.72)),
+          var(--surface);
+      }
+
+      .permission-role-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .permission-role-head strong {
+        color: var(--ink);
+        font-size: 15px;
+      }
+
+      .permission-capability-list {
+        display: grid;
+        gap: 7px;
+      }
+
+      .permission-capability {
+        display: grid;
+        grid-template-columns: 18px 1fr;
+        gap: 8px;
+        align-items: start;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .permission-capability::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        margin-top: 6px;
+        border-radius: 999px;
+        background: var(--ok);
+        box-shadow: 0 0 0 3px rgba(19, 131, 95, 0.1);
+      }
+
+      .permission-capability.locked::before {
+        background: var(--bad);
+        box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.08);
+      }
+
+      .permission-note-panel {
+        padding: 14px 16px;
+        border-top: 1px solid var(--line);
+      }
+
       .login-card h2 {
         font-size: 20px;
       }
@@ -1638,8 +1789,20 @@
         .node-detail-panel .counter-grid,
         .node-actions-grid,
         .deploy-layout,
+        .permission-overview,
+        .permission-matrix,
         .topbar {
           grid-template-columns: 1fr;
+        }
+
+        .permission-role-card,
+        .permission-role-card:last-child {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .permission-role-card:last-child {
+          border-bottom: 0;
         }
 
         .top-actions {
@@ -1767,14 +1930,14 @@
             <span class="nav-icon"></span>
             <span>操作日志</span>
           </button>
-          <button class="nav-item" type="button" data-view="admins" data-super-only>
+          <button class="nav-item" type="button" data-view="admins">
             <span class="nav-icon"></span>
             <span>权限管理</span>
           </button>
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.39.3</span>
+          <span class="mono">v0.40.0</span>
         </div>
       </aside>
 
@@ -2265,20 +2428,54 @@
         </section>
 
         <section class="view hidden" id="viewAdmins" data-view-panel="admins">
-          <div class="panel">
+          <div class="panel permission-panel">
             <div class="panel-head">
               <div>
                 <div class="panel-title">权限管理</div>
+                <div class="panel-meta">当前账号权限、角色边界和可执行操作范围</div>
+              </div>
+            </div>
+            <div class="permission-layout">
+              <div class="permission-overview">
+                <div class="permission-current">
+                  <div>
+                    <div class="permission-label">当前账号</div>
+                    <div class="permission-role" id="permissionCurrentRole">--</div>
+                  </div>
+                  <div class="permission-summary" id="permissionCurrentSummary">登录后会显示当前账号的操作范围。</div>
+                </div>
+                <div class="permission-rules">
+                  <div class="permission-rule-row">
+                    <strong>超级管理员</strong>
+                    <span>可以管理账号、删除核心数据、部署和远程运维节点，适合少数负责人使用。</span>
+                  </div>
+                  <div class="permission-rule-row">
+                    <strong>运维人员</strong>
+                    <span>可以维护节点、游戏、路由和 SSH 运维动作，但不能删除核心数据或管理账号。</span>
+                  </div>
+                  <div class="permission-rule-row">
+                    <strong>只读账号</strong>
+                    <span>只用于查看状态、任务和日志；页面会隐藏高风险按钮，误点也不会破坏当前列表。</span>
+                  </div>
+                </div>
+              </div>
+              <div class="permission-matrix" id="permissionMatrix"></div>
+            </div>
+          </div>
+
+          <div class="panel permission-note-panel" id="adminAccountNotice">
+            <div class="message">账号管理只对超级管理员开放。当前账号可以查看权限说明，但不能新增、修改或停用管理员账号。</div>
+          </div>
+
+          <div class="panel" id="adminAccountPanel" data-super-only>
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">账号管理</div>
                 <div class="panel-meta" id="adminUserMeta">管理员账号、角色和启停状态</div>
               </div>
               <div class="inline-actions">
                 <button class="primary" type="button" id="openAdminUser">新增账号</button>
                 <button type="button" id="refreshAdminUsers">刷新账号</button>
-              </div>
-            </div>
-            <div class="panel-body">
-              <div class="message">
-                超级管理员可以管理账号；运维人员可以操作节点但不能删除核心数据；只读账号只能查看状态、日志和报表。
               </div>
             </div>
             <div class="table-wrap">
@@ -2693,6 +2890,30 @@
         timer: null,
       };
 
+      const ROLE_PERMISSION_MATRIX = [
+        {
+          role: "super_admin",
+          title: "超级管理员",
+          summary: "完整控制权限，负责账号、核心数据和高风险运维动作。",
+          allow: ["账号管理", "节点部署 / 升级 / 重启", "游戏和路由维护", "删除节点 / 游戏 / 路由", "查看任务和日志"],
+          deny: [],
+        },
+        {
+          role: "operator",
+          title: "运维人员",
+          summary: "负责日常运维，可以处理节点和路由，但不能碰账号和核心删除动作。",
+          allow: ["新增和修改节点", "一键部署 / 升级节点", "维护游戏和路由", "保存 SSH 凭据", "查看任务和日志"],
+          deny: ["账号管理", "删除核心数据"],
+        },
+        {
+          role: "viewer",
+          title: "只读账号",
+          summary: "用于巡检和交接查看，只能看状态、任务、日志和配置结果。",
+          allow: ["查看控制总览", "查看节点状态", "查看游戏和路由", "查看运维任务", "查看操作日志"],
+          deny: ["部署 / 重启 / 升级", "新增 / 修改 / 删除", "保存 SSH 凭据", "管理账号"],
+        },
+      ];
+
       const els = {
         loginScreen: document.getElementById("loginScreen"),
         appShell: document.getElementById("appShell"),
@@ -2780,6 +3001,11 @@
         auditLimitFilter: document.getElementById("auditLimitFilter"),
         applyAuditFilter: document.getElementById("applyAuditFilter"),
         refreshAuditLogs: document.getElementById("refreshAuditLogs"),
+        permissionCurrentRole: document.getElementById("permissionCurrentRole"),
+        permissionCurrentSummary: document.getElementById("permissionCurrentSummary"),
+        permissionMatrix: document.getElementById("permissionMatrix"),
+        adminAccountNotice: document.getElementById("adminAccountNotice"),
+        adminAccountPanel: document.getElementById("adminAccountPanel"),
         adminUserMeta: document.getElementById("adminUserMeta"),
         adminUserRows: document.getElementById("adminUserRows"),
         openAdminUser: document.getElementById("openAdminUser"),
@@ -2824,15 +3050,70 @@
         return `<span class="readonly-pill" title="只读账号只能查看，不能执行运维或修改配置">只读</span>`;
       }
 
+      function renderPermissionMatrix() {
+        if (!els.permissionMatrix) return;
+        const admin = state.currentAdmin;
+        const currentRole = admin?.role || "";
+        const current = ROLE_PERMISSION_MATRIX.find((item) => item.role === currentRole);
+        els.permissionCurrentRole.textContent = admin ? adminRoleText(currentRole) : "--";
+        els.permissionCurrentSummary.textContent = admin
+          ? `${admin.display_name || admin.username} / ${admin.username}。${current?.summary || "当前角色没有匹配到固定权限模板。"}`
+          : "登录后会显示当前账号的操作范围。";
+        els.adminAccountNotice?.classList.toggle("hidden", !admin || isSuperAdmin());
+
+        els.permissionMatrix.innerHTML = ROLE_PERMISSION_MATRIX.map((item) => {
+          const allow = item.allow
+            .map((text) => `<div class="permission-capability">${escapeHtml(text)}</div>`)
+            .join("");
+          const deny = item.deny
+            .map((text) => `<div class="permission-capability locked">${escapeHtml(text)}</div>`)
+            .join("");
+          return `
+            <div class="permission-role-card ${item.role === currentRole ? "active" : ""}">
+              <div class="permission-role-head">
+                <strong>${escapeHtml(item.title)}</strong>
+                <span class="role-badge">${item.role === currentRole ? "当前角色" : "角色模板"}</span>
+              </div>
+              <div class="permission-summary">${escapeHtml(item.summary)}</div>
+              <div>
+                <div class="permission-capability-title">可以执行</div>
+                <div class="permission-capability-list">${allow}</div>
+              </div>
+              ${
+                deny
+                  ? `<div><div class="permission-capability-title">禁止执行</div><div class="permission-capability-list">${deny}</div></div>`
+                  : ""
+              }
+            </div>
+          `;
+        }).join("");
+      }
+
+      function showStatusError(message) {
+        els.statusLine.textContent = message;
+        els.statusLine.classList.add("error-state");
+        els.statusLine.classList.remove("connected");
+      }
+
+      function showPermissionError(action, requiredRole) {
+        showStatusError(`当前账号不能${action}，需要${requiredRole}权限。`);
+      }
+
       function assertCanWrite(action = "执行这个操作") {
         if (canWrite()) return true;
-        showError(new Error(`只读账号不能${action}，请切换运维或超级管理员账号。`));
+        showPermissionError(action, "运维人员或超级管理员");
         return false;
       }
 
       function assertCanDelete(action = "删除数据") {
         if (canDeleteCoreData()) return true;
-        showError(new Error(`只有超级管理员才能${action}。`));
+        showPermissionError(action, "超级管理员");
+        return false;
+      }
+
+      function assertSuperAdmin(action = "管理账号") {
+        if (isSuperAdmin()) return true;
+        showPermissionError(action, "超级管理员");
         return false;
       }
 
@@ -2848,9 +3129,7 @@
         document.querySelectorAll("[data-write-action]").forEach((item) => {
           item.classList.toggle("hidden", Boolean(admin) && !canWrite());
         });
-        if (admin && state.activeView === "admins" && !isSuperAdmin()) {
-          setActiveView("overview");
-        }
+        renderPermissionMatrix();
       }
 
       function setActiveView(view) {
@@ -2864,6 +3143,9 @@
         els.pageTitle.textContent = PAGE_TITLES[state.activeView];
         if (state.activeView === "audit" && state.token) {
           loadAuditLogs({ silent: true }).catch(showError);
+        }
+        if (state.activeView === "admins") {
+          renderPermissionMatrix();
         }
         if (state.activeView === "admins" && state.token && isSuperAdmin()) {
           loadAdminUsers({ silent: true }).catch(showError);
@@ -3555,7 +3837,11 @@
           }
         }
         if (!response.ok) {
-          const message = data?.error?.message || data?.error?.code || response.statusText;
+          const code = data?.error?.code;
+          const message =
+            code === "permission_denied"
+              ? "当前账号权限不足，不能执行这个操作。"
+              : data?.error?.message || code || response.statusText;
           throw new Error(message);
         }
         return data;
@@ -4886,6 +5172,7 @@
       }
 
       function openAdminUserModal(user = null) {
+        if (!assertSuperAdmin("管理账号")) return;
         clearInlineError(els.adminUserError);
         els.adminUserForm.reset();
         const form = els.adminUserForm.elements;
@@ -4925,6 +5212,7 @@
       }
 
       async function saveAdminUser(form) {
+        if (!assertSuperAdmin("保存管理员账号")) return;
         const userId = numberOrNull(form.elements.user_id.value);
         const payload = adminUserPayloadFromForm(form);
         let data;
@@ -4951,6 +5239,7 @@
       }
 
       async function disableAdminUser(userId) {
+        if (!assertSuperAdmin("停用管理员账号")) return;
         const id = Number(userId);
         const user = state.adminUsers.find((item) => Number(item.id) === id);
         const confirmed = window.confirm(`确定停用账号 ${user?.display_name || user?.username || id} 吗？`);

@@ -9200,8 +9200,13 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("canWrite()"));
         assert!(ADMIN_DASHBOARD_HTML.contains("readonlyActionsCell"));
         assert!(ADMIN_DASHBOARD_HTML.contains("assertCanWrite"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("assertSuperAdmin"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("renderPermissionMatrix"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("permissionMatrix"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("账号管理只对超级管理员开放"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("showPermissionError"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-write-action"));
-        assert!(ADMIN_DASHBOARD_HTML.contains("只读账号不能"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("当前账号不能"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-view=\"audit\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("auditRows"));
         assert!(ADMIN_DASHBOARD_HTML.contains("loadAuditLogs"));
