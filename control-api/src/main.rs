@@ -624,10 +624,12 @@ struct AdminSshActionResponse {
     duration_ms: u128,
     #[serde(skip_serializing_if = "Option::is_none")]
     version_check: Option<AdminSshActionVersionCheck>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task: Option<AdminOperationTaskSummary>,
     server_time: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct AdminSshActionVersionCheck {
     before_version: Option<String>,
     after_version: Option<String>,
@@ -637,6 +639,26 @@ struct AdminSshActionVersionCheck {
     after_report_at: Option<u64>,
     waited_ms: u128,
     message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminListOperationTasksQuery {
+    node_id: Option<u64>,
+    status: Option<String>,
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminListOperationTasksResponse {
+    tasks: Vec<AdminOperationTaskSummary>,
+    total: usize,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminOperationTaskResponse {
+    task: AdminOperationTaskSummary,
+    server_time: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -899,6 +921,27 @@ struct AdminNodeTaskSummary {
 }
 
 #[derive(Debug, Serialize)]
+struct AdminOperationTaskSummary {
+    id: u64,
+    node_id: u64,
+    node_name: String,
+    node_endpoint: String,
+    action: String,
+    action_label: String,
+    executor: String,
+    status: String,
+    command_label: String,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
+    output: Option<String>,
+    error_message: Option<String>,
+    version_check: Option<AdminSshActionVersionCheck>,
+    created_at: Option<u64>,
+    started_at: Option<u64>,
+    finished_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
 struct AdminSshCredentialSummary {
     configured: bool,
     host: Option<String>,
@@ -1097,6 +1140,27 @@ struct NodeTaskRow {
     error_message: Option<String>,
     created_at: Option<u64>,
     claimed_at: Option<u64>,
+    started_at: Option<u64>,
+    finished_at: Option<u64>,
+}
+
+#[derive(Debug, FromRow)]
+struct OperationTaskRow {
+    id: u64,
+    node_id: u64,
+    node_name: String,
+    node_server_ip: String,
+    node_server_port: u32,
+    action: String,
+    executor: String,
+    status: String,
+    command_label: String,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
+    output: Option<String>,
+    error_message: Option<String>,
+    version_check_json: Option<String>,
+    created_at: Option<u64>,
     started_at: Option<u64>,
     finished_at: Option<u64>,
 }
@@ -1383,6 +1447,14 @@ async fn main() -> anyhow::Result<()> {
             post(admin_run_ssh_action),
         )
         .route(
+            "/api/admin/v1/operation-tasks",
+            get(admin_list_operation_tasks),
+        )
+        .route(
+            "/api/admin/v1/operation-tasks/:task_id",
+            get(admin_get_operation_task),
+        )
+        .route(
             "/api/admin/v1/connectivity-diagnostic",
             post(admin_connectivity_diagnostic),
         )
@@ -1429,6 +1501,7 @@ async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
     ensure_connect_intent_region_column(pool).await?;
     ensure_node_remote_tasks_table(pool).await?;
     ensure_node_ssh_credentials_table(pool).await?;
+    ensure_node_operation_tasks_table(pool).await?;
     seed_game_catalog_from_routes(pool).await?;
     Ok(())
 }
@@ -1737,6 +1810,40 @@ CREATE TABLE IF NOT EXISTS node_ssh_credentials (
     .execute(pool)
     .await
     .context("failed to create node_ssh_credentials")?;
+    Ok(())
+}
+
+async fn ensure_node_operation_tasks_table(pool: &MySqlPool) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+CREATE TABLE IF NOT EXISTS node_operation_tasks (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  node_id BIGINT UNSIGNED NOT NULL,
+  action VARCHAR(64) NOT NULL,
+  executor VARCHAR(32) NOT NULL DEFAULT 'control_ssh',
+  status ENUM('running', 'succeeded', 'failed') NOT NULL DEFAULT 'running',
+  command_label VARCHAR(128) NOT NULL,
+  exit_code INT NULL,
+  duration_ms BIGINT UNSIGNED NULL,
+  output MEDIUMTEXT NULL,
+  error_message TEXT NULL,
+  version_check_json JSON NULL,
+  started_at TIMESTAMP NULL,
+  finished_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_node_created (node_id, created_at),
+  INDEX idx_status_created (status, created_at),
+  INDEX idx_action_created (action, created_at),
+  CONSTRAINT fk_operation_task_node
+    FOREIGN KEY (node_id) REFERENCES accel_nodes(id)
+    ON DELETE CASCADE
+)
+"#,
+    )
+    .execute(pool)
+    .await
+    .context("failed to create node_operation_tasks")?;
     Ok(())
 }
 
@@ -2258,6 +2365,56 @@ async fn admin_create_node_task(
     }))
 }
 
+async fn admin_list_operation_tasks(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<AdminListOperationTasksQuery>,
+) -> Result<Json<AdminListOperationTasksResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let status = query
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(validate_operation_task_status)
+        .transpose()?;
+    let rows = select_operation_tasks(
+        &state.pool,
+        query.node_id,
+        status,
+        clamp_limit(query.limit, 100, 300),
+    )
+    .await?;
+    let tasks = rows
+        .into_iter()
+        .map(AdminOperationTaskSummary::from_row)
+        .collect::<Vec<_>>();
+
+    Ok(Json(AdminListOperationTasksResponse {
+        total: tasks.len(),
+        tasks,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_get_operation_task(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(task_id): Path<u64>,
+) -> Result<Json<AdminOperationTaskResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let task = select_operation_task(&state.pool, task_id)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found("operation_task_not_found", "operation task does not exist")
+        })?;
+
+    Ok(Json(AdminOperationTaskResponse {
+        task: AdminOperationTaskSummary::from_row(task),
+        server_time: now_unix(),
+    }))
+}
+
 async fn admin_upsert_ssh_credential(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -2343,9 +2500,13 @@ async fn admin_run_ssh_action(
         public_base_url.as_deref(),
     )
     .await?;
+    let command_label = plan.command_label.clone();
+    let operation_task =
+        insert_operation_task(&state.pool, node_id, action, &command_label).await?;
     let started = Instant::now();
     let result = run_ssh_command(&credential, &password, &plan).await;
     let duration_ms = started.elapsed().as_millis();
+    let duration_ms_u64 = duration_ms_to_u64(duration_ms);
 
     match result {
         Ok(output) => {
@@ -2354,6 +2515,17 @@ async fn admin_run_ssh_action(
             } else {
                 None
             };
+            let task = finish_operation_task(
+                &state.pool,
+                operation_task.id,
+                "succeeded",
+                output.exit_code,
+                duration_ms_u64,
+                Some(&output.combined),
+                None,
+                version_check.as_ref(),
+            )
+            .await?;
             update_ssh_credential_status(&state.pool, node_id, "ok", None).await?;
             insert_node_audit_log(
                 &state.pool,
@@ -2361,8 +2533,9 @@ async fn admin_run_ssh_action(
                 "admin_api",
                 "node.ssh_action",
                 serde_json::json!({
+                    "operation_task_id": operation_task.id,
                     "action": action,
-                    "command_label": plan.command_label,
+                    "command_label": command_label,
                     "exit_code": output.exit_code,
                     "duration_ms": duration_ms,
                     "version_check": &version_check,
@@ -2374,16 +2547,28 @@ async fn admin_run_ssh_action(
                 status: "ok",
                 node_id,
                 action: action.to_string(),
-                command_label: plan.command_label,
+                command_label,
                 exit_code: output.exit_code,
                 output: output.combined,
                 duration_ms,
                 version_check,
+                task: Some(AdminOperationTaskSummary::from_row(task)),
                 server_time: now_unix(),
             }))
         }
         Err(error) => {
             let message = trim_for_log(&error.message, 512);
+            let task = finish_operation_task(
+                &state.pool,
+                operation_task.id,
+                "failed",
+                error.exit_code,
+                duration_ms_u64,
+                None,
+                Some(&message),
+                None,
+            )
+            .await?;
             update_ssh_credential_status(&state.pool, node_id, "failed", Some(&message)).await?;
             insert_node_audit_log(
                 &state.pool,
@@ -2391,15 +2576,27 @@ async fn admin_run_ssh_action(
                 "admin_api",
                 "node.ssh_action_failed",
                 serde_json::json!({
+                    "operation_task_id": operation_task.id,
                     "action": action,
-                    "command_label": plan.command_label,
+                    "command_label": command_label,
                     "exit_code": error.exit_code,
                     "error": message,
                     "duration_ms": duration_ms,
                 }),
             )
             .await?;
-            Err(AppError::service_unavailable("ssh_action_failed", message))
+            Ok(Json(AdminSshActionResponse {
+                status: "failed",
+                node_id,
+                action: action.to_string(),
+                command_label,
+                exit_code: error.exit_code,
+                output: message,
+                duration_ms,
+                version_check: None,
+                task: Some(AdminOperationTaskSummary::from_row(task)),
+                server_time: now_unix(),
+            }))
         }
     }
 }
@@ -3578,6 +3775,150 @@ LIMIT ?
     .fetch_all(pool)
     .await
     .map_err(AppError::database)
+}
+
+async fn select_operation_tasks(
+    pool: &MySqlPool,
+    node_id: Option<u64>,
+    status: Option<&str>,
+    limit: u32,
+) -> Result<Vec<OperationTaskRow>, AppError> {
+    let mut builder = QueryBuilder::<MySql>::new(operation_task_select_sql());
+    if let Some(node_id) = node_id {
+        builder.push(" AND t.node_id = ");
+        builder.push_bind(node_id);
+    }
+    if let Some(status) = status {
+        builder.push(" AND t.status = ");
+        builder.push_bind(status);
+    }
+    builder.push(" ORDER BY t.id DESC LIMIT ");
+    builder.push_bind(limit);
+
+    builder
+        .build_query_as::<OperationTaskRow>()
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::database)
+}
+
+async fn select_operation_task(
+    pool: &MySqlPool,
+    task_id: u64,
+) -> Result<Option<OperationTaskRow>, AppError> {
+    let mut builder = QueryBuilder::<MySql>::new(operation_task_select_sql());
+    builder.push(" AND t.id = ");
+    builder.push_bind(task_id);
+    builder.push(" LIMIT 1");
+
+    builder
+        .build_query_as::<OperationTaskRow>()
+        .fetch_optional(pool)
+        .await
+        .map_err(AppError::database)
+}
+
+async fn insert_operation_task(
+    pool: &MySqlPool,
+    node_id: u64,
+    action: &str,
+    command_label: &str,
+) -> Result<OperationTaskRow, AppError> {
+    let result = sqlx::query(
+        r#"
+INSERT INTO node_operation_tasks (
+  node_id,
+  action,
+  executor,
+  status,
+  command_label,
+  started_at,
+  created_at,
+  updated_at
+) VALUES (?, ?, 'control_ssh', 'running', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(node_id)
+    .bind(action)
+    .bind(command_label)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+
+    select_operation_task(pool, result.last_insert_id())
+        .await?
+        .ok_or_else(|| AppError::internal(anyhow::anyhow!("created operation task is missing")))
+}
+
+async fn finish_operation_task(
+    pool: &MySqlPool,
+    task_id: u64,
+    status: &str,
+    exit_code: Option<i32>,
+    duration_ms: u64,
+    output: Option<&str>,
+    error_message: Option<&str>,
+    version_check: Option<&AdminSshActionVersionCheck>,
+) -> Result<OperationTaskRow, AppError> {
+    let version_check_json = version_check
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| AppError::internal(anyhow::anyhow!(error)))?;
+    sqlx::query(
+        r#"
+UPDATE node_operation_tasks
+SET
+  status = ?,
+  exit_code = ?,
+  duration_ms = ?,
+  output = ?,
+  error_message = ?,
+  version_check_json = ?,
+  finished_at = CURRENT_TIMESTAMP,
+  updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+"#,
+    )
+    .bind(status)
+    .bind(exit_code)
+    .bind(duration_ms)
+    .bind(output)
+    .bind(error_message)
+    .bind(version_check_json)
+    .bind(task_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+
+    select_operation_task(pool, task_id)
+        .await?
+        .ok_or_else(|| AppError::internal(anyhow::anyhow!("finished operation task is missing")))
+}
+
+fn operation_task_select_sql() -> &'static str {
+    r#"
+SELECT
+  t.id,
+  t.node_id,
+  n.name AS node_name,
+  n.server_ip AS node_server_ip,
+  n.server_port AS node_server_port,
+  t.action,
+  t.executor,
+  t.status,
+  t.command_label,
+  t.exit_code,
+  t.duration_ms,
+  t.output,
+  t.error_message,
+  CAST(t.version_check_json AS CHAR) AS version_check_json,
+  CAST(UNIX_TIMESTAMP(t.created_at) AS UNSIGNED) AS created_at,
+  CAST(UNIX_TIMESTAMP(t.started_at) AS UNSIGNED) AS started_at,
+  CAST(UNIX_TIMESTAMP(t.finished_at) AS UNSIGNED) AS finished_at
+FROM node_operation_tasks t
+JOIN accel_nodes n ON n.id = t.node_id
+WHERE 1 = 1
+"#
 }
 
 async fn select_ssh_credential(
@@ -5617,6 +5958,18 @@ fn validate_admin_node_task_type(task_type: &str) -> Result<&'static str, AppErr
     }
 }
 
+fn validate_operation_task_status(status: &str) -> Result<&'static str, AppError> {
+    match status.trim() {
+        "running" => Ok("running"),
+        "succeeded" => Ok("succeeded"),
+        "failed" => Ok("failed"),
+        _ => Err(AppError::bad_request(
+            "invalid_operation_task_status",
+            "operation task status must be running, succeeded, or failed",
+        )),
+    }
+}
+
 fn validate_ssh_action(action: &str) -> Result<&'static str, AppError> {
     match action.trim() {
         "test_connection" => Ok("test_connection"),
@@ -5628,6 +5981,20 @@ fn validate_ssh_action(action: &str) -> Result<&'static str, AppError> {
             "ssh action must be test_connection, restart_node_service, upgrade_node, or reboot_server",
         )),
     }
+}
+
+fn operation_action_label(action: &str) -> &'static str {
+    match action {
+        "test_connection" => "测试 SSH 连接",
+        "restart_node_service" => "重启节点服务",
+        "upgrade_node" => "升级节点内核",
+        "reboot_server" => "重启服务器",
+        _ => "远程运维",
+    }
+}
+
+fn duration_ms_to_u64(value: u128) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
 }
 
 fn normalize_ssh_credential_request(
@@ -6769,6 +7136,34 @@ impl AdminNodeTaskSummary {
     }
 }
 
+impl AdminOperationTaskSummary {
+    fn from_row(row: OperationTaskRow) -> Self {
+        let version_check = row
+            .version_check_json
+            .as_deref()
+            .and_then(|value| serde_json::from_str::<AdminSshActionVersionCheck>(value).ok());
+        Self {
+            id: row.id,
+            node_id: row.node_id,
+            node_name: row.node_name,
+            node_endpoint: format!("{}:{}", row.node_server_ip, row.node_server_port),
+            action_label: operation_action_label(&row.action).to_string(),
+            action: row.action,
+            executor: row.executor,
+            status: row.status,
+            command_label: row.command_label,
+            exit_code: row.exit_code,
+            duration_ms: row.duration_ms,
+            output: row.output,
+            error_message: row.error_message,
+            version_check,
+            created_at: row.created_at,
+            started_at: row.started_at,
+            finished_at: row.finished_at,
+        }
+    }
+}
+
 impl NodeTaskItem {
     fn from_row(row: NodeTaskRow) -> Self {
         Self {
@@ -7286,6 +7681,70 @@ mod tests {
     }
 
     #[test]
+    fn validates_operation_task_status() {
+        for status in ["running", "succeeded", "failed"] {
+            assert_eq!(
+                validate_operation_task_status(status).expect("operation task status"),
+                status
+            );
+        }
+
+        let error = validate_operation_task_status("pending").unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_operation_task_status");
+    }
+
+    #[test]
+    fn parses_operation_task_version_check_summary() {
+        let row = OperationTaskRow {
+            id: 7,
+            node_id: 2,
+            node_name: "香港节点".to_string(),
+            node_server_ip: "47.83.160.126".to_string(),
+            node_server_port: 666,
+            action: "upgrade_node".to_string(),
+            executor: "control_ssh".to_string(),
+            status: "succeeded".to_string(),
+            command_label: "升级节点内核".to_string(),
+            exit_code: Some(0),
+            duration_ms: Some(5151),
+            output: Some("installed".to_string()),
+            error_message: None,
+            version_check_json: Some(
+                serde_json::json!({
+                    "before_version": "0.35.0",
+                    "after_version": "0.36.0",
+                    "version_changed": true,
+                    "report_refreshed": true,
+                    "before_report_at": 1779500000_u64,
+                    "after_report_at": 1779500030_u64,
+                    "waited_ms": 3000_u128,
+                    "message": "节点版本已更新"
+                })
+                .to_string(),
+            ),
+            created_at: Some(1779500000),
+            started_at: Some(1779500000),
+            finished_at: Some(1779500005),
+        };
+
+        let summary = AdminOperationTaskSummary::from_row(row);
+        assert_eq!(summary.id, 7);
+        assert_eq!(summary.node_endpoint, "47.83.160.126:666");
+        assert_eq!(summary.action_label, "升级节点内核");
+        assert_eq!(
+            summary
+                .version_check
+                .as_ref()
+                .unwrap()
+                .after_version
+                .as_deref(),
+            Some("0.36.0")
+        );
+        assert!(summary.version_check.unwrap().version_changed);
+    }
+
+    #[test]
     fn normalizes_ssh_credential_request() {
         let node = valid_admin_node_row();
         let credential = normalize_ssh_credential_request(
@@ -7611,6 +8070,11 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("ssh-actions"));
         assert!(ADMIN_DASHBOARD_HTML.contains("版本检查"));
         assert!(ADMIN_DASHBOARD_HTML.contains("sshVersionCheckLines"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("运维任务中心"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("opsTaskRows"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("operationStatusText"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("operationTaskSummary"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/operation-tasks"));
         assert!(ADMIN_DASHBOARD_HTML.contains("createNodeMeta"));
         assert!(ADMIN_DASHBOARD_HTML.contains("submitCreateNode"));
         assert!(ADMIN_DASHBOARD_HTML.contains("openEditNodeModal"));

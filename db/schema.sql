@@ -244,6 +244,30 @@ CREATE TABLE node_ssh_credentials (
     ON DELETE CASCADE
 );
 
+CREATE TABLE node_operation_tasks (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  node_id BIGINT UNSIGNED NOT NULL,
+  action VARCHAR(64) NOT NULL,
+  executor VARCHAR(32) NOT NULL DEFAULT 'control_ssh',
+  status ENUM('running', 'succeeded', 'failed') NOT NULL DEFAULT 'running',
+  command_label VARCHAR(128) NOT NULL,
+  exit_code INT NULL,
+  duration_ms BIGINT UNSIGNED NULL,
+  output MEDIUMTEXT NULL,
+  error_message TEXT NULL,
+  version_check_json JSON NULL,
+  started_at TIMESTAMP NULL,
+  finished_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_node_created (node_id, created_at),
+  INDEX idx_status_created (status, created_at),
+  INDEX idx_action_created (action, created_at),
+  CONSTRAINT fk_operation_task_node
+    FOREIGN KEY (node_id) REFERENCES accel_nodes(id)
+    ON DELETE CASCADE
+);
+
 CREATE TABLE node_audit_logs (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   node_id BIGINT UNSIGNED NOT NULL,

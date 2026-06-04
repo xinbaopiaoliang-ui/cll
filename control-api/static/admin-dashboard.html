@@ -1239,6 +1239,21 @@
         grid-column: 1 / -1;
       }
 
+      .ops-task-panel {
+        grid-column: 1 / -1;
+      }
+
+      .task-output-preview {
+        max-width: 520px;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
       .command-output {
         margin-top: 12px;
       }
@@ -1630,7 +1645,7 @@
         </nav>
         <div class="sidebar-foot">
           <span>当前版本</span>
-          <span class="mono">v0.35.0</span>
+          <span class="mono">v0.36.0</span>
         </div>
       </aside>
 
@@ -2020,6 +2035,36 @@
                 <div class="empty">在节点管理里选择节点后，可以在详情中生成安装命令和调整状态。</div>
               </div>
             </div>
+            <div class="panel ops-task-panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">运维任务中心</div>
+                  <div class="panel-meta" id="opsTaskMeta">最近 100 条远程任务</div>
+                </div>
+                <div class="inline-actions">
+                  <button type="button" id="refreshOpsTasks">刷新任务</button>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>任务</th>
+                      <th>节点</th>
+                      <th>状态</th>
+                      <th>耗时</th>
+                      <th>时间</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="opsTaskRows">
+                    <tr>
+                      <td colspan="6"><span class="skeleton"></span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </section>
         </section>
       </section>
@@ -2316,6 +2361,7 @@
         nodes: [],
         games: [],
         routeRules: [],
+        operationTasks: [],
         selectedId: null,
         serverTime: null,
         autoRefresh: true,
@@ -2396,6 +2442,9 @@
         diagnosticResult: document.getElementById("diagnosticResult"),
         opsMeta: document.getElementById("opsMeta"),
         opsBody: document.getElementById("opsBody"),
+        opsTaskMeta: document.getElementById("opsTaskMeta"),
+        opsTaskRows: document.getElementById("opsTaskRows"),
+        refreshOpsTasks: document.getElementById("refreshOpsTasks"),
         controlUpgradeCommand: document.getElementById("controlUpgradeCommand"),
       };
 
@@ -2762,6 +2811,34 @@
         if (status === "succeeded") return "ok";
         if (status === "pending" || status === "running") return "warn";
         return "bad";
+      }
+
+      function operationStatusText(status) {
+        if (status === "running") return "执行中";
+        if (status === "succeeded") return "成功";
+        if (status === "failed") return "失败";
+        return status || "未知";
+      }
+
+      function operationStatusClass(status) {
+        if (status === "succeeded") return "ok";
+        if (status === "running") return "warn";
+        return "bad";
+      }
+
+      function operationTaskSummary(task) {
+        if (!task) return "--";
+        if (task.version_check?.message) return task.version_check.message;
+        if (task.error_message) return task.error_message;
+        if (task.output) return task.output;
+        if (task.status === "running") return "任务正在执行，等待 SSH 返回结果";
+        return "暂无输出";
+      }
+
+      function operationTaskDuration(task) {
+        if (task?.duration_ms === null || task?.duration_ms === undefined) return "--";
+        if (task.duration_ms >= 1000) return `${(task.duration_ms / 1000).toFixed(1)}s`;
+        return `${task.duration_ms}ms`;
       }
 
       function sshStatusText(status) {
@@ -3296,6 +3373,48 @@
         `;
       }
 
+      function renderOperationTasks(serverTime = state.serverTime) {
+        const tasks = state.operationTasks || [];
+        els.opsTaskMeta.textContent = tasks.length
+          ? `${tasks.length} 条 / 刷新 ${formatClock(serverTime)}`
+          : "最近 100 条远程任务";
+        if (!tasks.length) {
+          els.opsTaskRows.innerHTML = `<tr><td colspan="6" class="empty">暂无远程运维任务，先在节点详情里执行 SSH 测试、升级或重启。</td></tr>`;
+          return;
+        }
+
+        els.opsTaskRows.innerHTML = tasks
+          .map((task) => {
+            const eventTime = task.finished_at || task.started_at || task.created_at;
+            const summary = operationTaskSummary(task);
+            return `
+              <tr>
+                <td>
+                  <span class="strong">#${task.id} ${escapeHtml(task.action_label || sshActionText(task.action))}</span>
+                  <div class="cell-note mono">${escapeHtml(task.command_label || "--")}</div>
+                  <div class="task-output-preview" title="${escapeHtml(summary)}">${escapeHtml(summary)}</div>
+                </td>
+                <td>
+                  <span class="strong">${escapeHtml(task.node_name || `节点 ${task.node_id}`)}</span>
+                  <div class="cell-note mono">${escapeHtml(task.node_endpoint || "--")} / ID ${task.node_id}</div>
+                </td>
+                <td><span class="status ${operationStatusClass(task.status)}"><span class="dot"></span>${escapeHtml(operationStatusText(task.status))}</span></td>
+                <td class="mono">${escapeHtml(operationTaskDuration(task))}</td>
+                <td>
+                  <div class="mono age ${ageClass(eventTime)}">${escapeHtml(ageText(eventTime))}</div>
+                  <div class="cell-note">${escapeHtml(formatTime(eventTime))}</div>
+                </td>
+                <td>
+                  <div class="row-actions">
+                    <button type="button" data-task-node="${task.node_id}">查看节点</button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
       function renderDetail(data) {
         const node = data.node;
         const report = data.recent_reports?.[0];
@@ -3626,6 +3745,7 @@
         }
         await loadGames({ silent: true });
         await loadRouteRules({ silent: true });
+        await loadOperationTasks({ silent: true });
         const latestReport = state.nodes.reduce(
           (max, node) => Math.max(max, node.last_report_at || 0),
           0,
@@ -3690,6 +3810,15 @@
         renderOverviewTables();
       }
 
+      async function loadOperationTasks({ silent = false } = {}) {
+        if (!silent) {
+          els.opsTaskRows.innerHTML = `<tr><td colspan="6"><span class="skeleton"></span></td></tr>`;
+        }
+        const data = await api("/api/admin/v1/operation-tasks?limit=100");
+        state.operationTasks = data.tasks || [];
+        renderOperationTasks(data.server_time);
+      }
+
       function showError(error) {
         els.statusLine.textContent = error.message;
         els.statusLine.classList.add("error-state");
@@ -3723,6 +3852,7 @@
         state.nodes = [];
         state.games = [];
         state.routeRules = [];
+        state.operationTasks = [];
         state.selectedId = null;
         clearInterval(state.timer);
         state.timer = null;
@@ -4189,16 +4319,23 @@
           body: JSON.stringify({ action }),
         });
         const resultText = [
+          data.task ? `任务 #${data.task.id} / ${operationStatusText(data.task.status)}` : "",
           `${data.command_label} / exit ${data.exit_code ?? "--"} / ${data.duration_ms}ms`,
           ...sshVersionCheckLines(data.version_check),
           "",
           data.output || "命令已执行，没有输出。",
-        ].join("\n");
+        ].filter(Boolean).join("\n");
         await loadNodes();
+        await loadOperationTasks({ silent: true });
         await loadDetail(id);
         const refreshedOutput = els.detailBody.querySelector("[data-ssh-output]");
         if (refreshedOutput) refreshedOutput.textContent = resultText;
-        els.statusLine.textContent = `SSH ${actionLabel} 已完成 / 节点 ${id}`;
+        els.statusLine.textContent =
+          data.status === "failed"
+            ? `SSH ${actionLabel} 执行失败 / 节点 ${id}`
+            : `SSH ${actionLabel} 已完成 / 节点 ${id}`;
+        els.statusLine.classList.toggle("error-state", data.status === "failed");
+        els.statusLine.classList.toggle("connected", data.status !== "failed");
       }
 
       async function createBootstrapCommand(form) {
@@ -4499,6 +4636,17 @@
         if (!button) return;
         setActiveView("nodes");
         loadDetail(button.dataset.jumpNode).catch(showError);
+      });
+
+      els.refreshOpsTasks.addEventListener("click", () => {
+        loadOperationTasks().catch(showError);
+      });
+
+      els.opsTaskRows.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-task-node]");
+        if (!button) return;
+        setActiveView("nodes");
+        loadDetail(button.dataset.taskNode).catch(showError);
       });
 
       setActiveView("overview");
