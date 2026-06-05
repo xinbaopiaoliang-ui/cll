@@ -9235,6 +9235,12 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("data-ssh-action=\"upgrade_node\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-ssh-action=\"reboot_server\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-delete-ssh"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("批量升级节点"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("batchUpgradeModal"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("batchSelectAllNodes"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("selectUpgradeableNodes"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("startBatchUpgrade"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("nodeUpgradeEligibility"));
         assert!(ADMIN_DASHBOARD_HTML.contains("ssh-credential"));
         assert!(ADMIN_DASHBOARD_HTML.contains("ssh-actions"));
         assert!(ADMIN_DASHBOARD_HTML.contains("版本检查"));
