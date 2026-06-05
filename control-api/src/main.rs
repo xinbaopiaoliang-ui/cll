@@ -103,6 +103,7 @@ struct Cli {
 #[derive(Clone)]
 struct AppState {
     pool: MySqlPool,
+    listen: SocketAddr,
     token_ttl_sec: u64,
     admin_token: Option<String>,
     public_base_url: Option<String>,
@@ -414,6 +415,37 @@ struct HealthResponse {
     status: &'static str,
     version: &'static str,
     database: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminSystemDiagnosticsResponse {
+    status: &'static str,
+    version: &'static str,
+    listen_addr: String,
+    public_base_url: Option<String>,
+    generated_at: u64,
+    counts: AdminSystemDiagnosticCounts,
+    checks: Vec<AdminSystemDiagnosticCheck>,
+    server_time: u64,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct AdminSystemDiagnosticCounts {
+    nodes_total: u64,
+    nodes_online: u64,
+    nodes_reporting: u64,
+    games_enabled: u64,
+    routes_enabled: u64,
+    active_alerts: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminSystemDiagnosticCheck {
+    key: &'static str,
+    title: &'static str,
+    status: &'static str,
+    message: String,
+    suggestion: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1621,6 +1653,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState {
         pool,
+        listen: cli.listen,
         token_ttl_sec: cli.token_ttl_sec.max(1),
         admin_token: cli
             .admin_token
@@ -1719,6 +1752,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/admin/v1/connectivity-diagnostic",
             post(admin_connectivity_diagnostic),
+        )
+        .route(
+            "/api/admin/v1/system/diagnostics",
+            get(admin_system_diagnostics),
         )
         .route(
             "/api/admin/v1/games",
@@ -2406,6 +2443,272 @@ async fn health(State(state): State<Arc<AppState>>) -> Response {
     .into_response()
 }
 
+async fn build_system_diagnostics(state: &AppState) -> AdminSystemDiagnosticsResponse {
+    let mut checks = Vec::new();
+    let mut counts = AdminSystemDiagnosticCounts::default();
+
+    match sqlx::query("SELECT 1").execute(&state.pool).await {
+        Ok(_) => push_system_check(
+            &mut checks,
+            "database",
+            "MySQL 连接",
+            "ok",
+            "数据库连接正常，控制面可以读写数据。",
+            None,
+        ),
+        Err(error) => {
+            error!(error = %error, "system diagnostics database ping failed");
+            push_system_check(
+                &mut checks,
+                "database",
+                "MySQL 连接",
+                "critical",
+                "数据库连接失败，控制面服务会降级或不可用。",
+                Some("检查 DATABASE_URL、MySQL 用户授权和 mysql 服务状态。"),
+            );
+        }
+    }
+
+    match system_count(
+        &state.pool,
+        r#"
+SELECT CAST(COUNT(*) AS UNSIGNED)
+FROM information_schema.tables
+WHERE table_schema = DATABASE()
+  AND table_name IN (
+    'accel_nodes',
+    'accel_games',
+    'game_route_rules',
+    'node_runtime_reports',
+    'node_health_alerts',
+    'operation_tasks'
+  )
+"#,
+    )
+    .await
+    {
+        Ok(6) => push_system_check(
+            &mut checks,
+            "schema",
+            "核心数据表",
+            "ok",
+            "节点、游戏、路由、上报和运维任务表都已存在。",
+            None,
+        ),
+        Ok(found) => push_system_check(
+            &mut checks,
+            "schema",
+            "核心数据表",
+            "critical",
+            format!("只检测到 {found}/6 个核心表，数据库结构不完整。"),
+            Some("重新运行控制面安装脚本，或导入 db/schema.sql 后再重启服务。"),
+        ),
+        Err(error) => {
+            error!(error = %error, "system diagnostics schema check failed");
+            push_system_check(
+                &mut checks,
+                "schema",
+                "核心数据表",
+                "critical",
+                "无法检查数据库结构。",
+                Some("先修复 MySQL 连接，再查看控制面日志。"),
+            );
+        }
+    }
+
+    counts.nodes_total = system_count(
+        &state.pool,
+        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM accel_nodes",
+    )
+    .await
+    .unwrap_or_default();
+    counts.nodes_online = system_count(
+        &state.pool,
+        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM accel_nodes WHERE status = 'online'",
+    )
+    .await
+    .unwrap_or_default();
+    counts.nodes_reporting = system_count(
+        &state.pool,
+        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM accel_nodes WHERE last_report_at >= DATE_SUB(NOW(), INTERVAL 120 SECOND)",
+    )
+    .await
+    .unwrap_or_default();
+    counts.games_enabled = system_count(
+        &state.pool,
+        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM accel_games WHERE status = 'enabled'",
+    )
+    .await
+    .unwrap_or_default();
+    counts.routes_enabled = system_count(
+        &state.pool,
+        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM game_route_rules WHERE status = 'enabled'",
+    )
+    .await
+    .unwrap_or_default();
+    counts.active_alerts = system_count(
+        &state.pool,
+        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM node_health_alerts WHERE status IN ('open', 'acknowledged')",
+    )
+    .await
+    .unwrap_or_default();
+
+    if counts.nodes_total == 0 {
+        push_system_check(
+            &mut checks,
+            "nodes",
+            "节点上报",
+            "warning",
+            "还没有节点记录。",
+            Some("先在节点管理新增节点，然后用一键部署接入 Linux 节点。"),
+        );
+    } else if counts.nodes_reporting == 0 {
+        push_system_check(
+            &mut checks,
+            "nodes",
+            "节点上报",
+            "critical",
+            format!(
+                "{} 台节点里没有最近 120 秒内上报的节点。",
+                counts.nodes_total
+            ),
+            Some("检查节点服务器 xaccel-node 服务、控制面地址和防火墙。"),
+        );
+    } else {
+        push_system_check(
+            &mut checks,
+            "nodes",
+            "节点上报",
+            "ok",
+            format!(
+                "{} 台节点在线，{} 台最近 120 秒内有上报。",
+                counts.nodes_online, counts.nodes_reporting
+            ),
+            None,
+        );
+    }
+
+    if counts.routes_enabled == 0 {
+        push_system_check(
+            &mut checks,
+            "routes",
+            "游戏路由",
+            "warning",
+            "当前没有启用中的游戏路由。",
+            Some("在游戏路由里给游戏绑定节点和目标地址，否则客户端拿不到可用线路。"),
+        );
+    } else {
+        push_system_check(
+            &mut checks,
+            "routes",
+            "游戏路由",
+            "ok",
+            format!("已启用 {} 条游戏路由。", counts.routes_enabled),
+            None,
+        );
+    }
+
+    if counts.active_alerts > 0 {
+        push_system_check(
+            &mut checks,
+            "alerts",
+            "健康告警",
+            "warning",
+            format!("还有 {} 条告警需要查看。", counts.active_alerts),
+            Some("打开健康告警页面，确认或处理节点异常。"),
+        );
+    } else {
+        push_system_check(
+            &mut checks,
+            "alerts",
+            "健康告警",
+            "ok",
+            "当前没有待处理健康告警。",
+            None,
+        );
+    }
+
+    if state.public_base_url.is_some() {
+        push_system_check(
+            &mut checks,
+            "public_base_url",
+            "公网访问地址",
+            "ok",
+            "控制面已配置公网地址，节点安装令牌会使用这个地址回连。",
+            None,
+        );
+    } else {
+        push_system_check(
+            &mut checks,
+            "public_base_url",
+            "公网访问地址",
+            "warning",
+            "控制面没有配置 public-base-url，会根据请求 Host 推断地址。",
+            Some("生产环境建议安装时传入 --public-base-url。"),
+        );
+    }
+
+    if state.credential_key.is_some() {
+        push_system_check(
+            &mut checks,
+            "credential_key",
+            "SSH 凭据加密",
+            "ok",
+            "已配置凭据加密密钥，可以保存节点 SSH 密码。",
+            None,
+        );
+    } else {
+        push_system_check(
+            &mut checks,
+            "credential_key",
+            "SSH 凭据加密",
+            "warning",
+            "未配置凭据加密密钥，SSH 密码保存功能不可用。",
+            Some("重新运行控制面安装脚本，它会自动生成 XACCEL_CREDENTIAL_KEY。"),
+        );
+    }
+
+    let status = if checks.iter().any(|item| item.status == "critical") {
+        "critical"
+    } else if checks.iter().any(|item| item.status == "warning") {
+        "warning"
+    } else {
+        "ok"
+    };
+    let now = now_unix();
+    AdminSystemDiagnosticsResponse {
+        status,
+        version: VERSION,
+        listen_addr: state.listen.to_string(),
+        public_base_url: state.public_base_url.clone(),
+        generated_at: now,
+        counts,
+        checks,
+        server_time: now,
+    }
+}
+
+async fn system_count(pool: &MySqlPool, sql: &str) -> Result<u64, sqlx::Error> {
+    sqlx::query_scalar::<_, u64>(sql).fetch_one(pool).await
+}
+
+fn push_system_check(
+    checks: &mut Vec<AdminSystemDiagnosticCheck>,
+    key: &'static str,
+    title: &'static str,
+    status: &'static str,
+    message: impl Into<String>,
+    suggestion: Option<&str>,
+) {
+    checks.push(AdminSystemDiagnosticCheck {
+        key,
+        title,
+        status,
+        message: message.into(),
+        suggestion: suggestion.map(ToOwned::to_owned),
+    });
+}
+
 async fn connect_intent(
     State(state): State<Arc<AppState>>,
     Json(request): Json<ConnectIntentRequest>,
@@ -2435,6 +2738,14 @@ async fn admin_connectivity_diagnostic(
     validate_connectivity_diagnostic_request(&request)?;
     let response = run_connectivity_diagnostic(&state, request).await?;
     Ok(Json(response))
+}
+
+async fn admin_system_diagnostics(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<AdminSystemDiagnosticsResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    Ok(Json(build_system_diagnostics(&state).await))
 }
 
 async fn node_bootstrap(
@@ -9980,6 +10291,9 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("control-api-uninstall.sh"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-copy-system-command"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-readonly-only"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("控制面自检"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("runSystemDiagnostics"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/system/diagnostics"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/games"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/game-route-rules"));

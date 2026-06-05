@@ -1768,6 +1768,133 @@
         font-weight: 820;
       }
 
+      .system-diagnostic-layout {
+        display: grid;
+        grid-template-columns: minmax(260px, 0.82fr) minmax(0, 1.8fr);
+        gap: 14px;
+        padding: 18px;
+      }
+
+      .system-diagnostic-summary {
+        display: grid;
+        gap: 12px;
+        align-content: start;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background:
+          linear-gradient(135deg, rgba(23, 120, 111, 0.1), transparent 62%),
+          rgba(255, 255, 255, 0.8);
+      }
+
+      .system-diagnostic-status {
+        display: grid;
+        gap: 6px;
+      }
+
+      .system-diagnostic-status .label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 780;
+      }
+
+      .system-diagnostic-status .value {
+        font-size: 25px;
+        font-weight: 860;
+      }
+
+      .system-diagnostic-status.ok .value {
+        color: var(--ok);
+      }
+
+      .system-diagnostic-status.warn .value {
+        color: var(--warn);
+      }
+
+      .system-diagnostic-status.bad .value {
+        color: var(--bad);
+      }
+
+      .system-diagnostic-counts {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .system-count {
+        min-height: 70px;
+        display: grid;
+        gap: 5px;
+        padding: 10px;
+        border: 1px solid rgba(205, 218, 225, 0.78);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.74);
+      }
+
+      .system-count span {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .system-count strong {
+        font-family: var(--mono);
+        font-size: 20px;
+      }
+
+      .system-diagnostic-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .system-check {
+        display: grid;
+        grid-template-columns: minmax(120px, 0.32fr) minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+        padding: 13px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .system-check.ok {
+        border-color: rgba(18, 130, 95, 0.18);
+        background: rgba(245, 252, 249, 0.76);
+      }
+
+      .system-check.warn {
+        border-color: rgba(166, 101, 18, 0.24);
+        background: rgba(255, 250, 241, 0.74);
+      }
+
+      .system-check.bad {
+        border-color: rgba(180, 35, 24, 0.24);
+        background: rgba(255, 247, 245, 0.76);
+      }
+
+      .system-check-title {
+        display: grid;
+        gap: 8px;
+      }
+
+      .system-check-title strong {
+        font-size: 13px;
+      }
+
+      .system-check-body {
+        min-width: 0;
+        color: var(--ink);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .system-check-suggestion {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
       .diagnostic-result {
         margin-top: 14px;
         text-align: left;
@@ -2210,6 +2337,7 @@
         .deploy-layout,
         .batch-upgrade-layout,
         .batch-upgrade-item,
+        .system-diagnostic-layout,
         .permission-overview,
         .permission-matrix,
         .topbar {
@@ -2281,6 +2409,8 @@
         .catalog-toolbar,
         .audit-toolbar,
         .deploy-status-grid,
+        .system-diagnostic-counts,
+        .system-check,
         .form-grid {
           grid-template-columns: 1fr;
         }
@@ -2384,7 +2514,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.47.0</span>
+          <span class="mono">v0.48.0</span>
         </div>
       </aside>
 
@@ -3057,7 +3187,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.47.0</div>
+              <div class="insight-value">0.48.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -3069,6 +3199,45 @@
               <h3>健康检查</h3>
               <div class="insight-value small" id="systemHealthUrl">--</div>
               <div class="insight-note">服务启动后应返回 ready 和 database ok。</div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">控制面自检</div>
+                <div class="panel-meta" id="systemDiagnosticsMeta">检查数据库、节点上报、路由和关键配置</div>
+              </div>
+              <button id="runSystemDiagnostics" type="button">立即自检</button>
+            </div>
+            <div class="system-diagnostic-layout">
+              <div class="system-diagnostic-summary">
+                <div class="system-diagnostic-status" id="systemDiagnosticsStatus">
+                  <span class="label">当前状态</span>
+                  <span class="value">未检查</span>
+                </div>
+                <div class="system-diagnostic-counts">
+                  <div class="system-count">
+                    <span>节点</span>
+                    <strong id="systemCountNodes">--</strong>
+                  </div>
+                  <div class="system-count">
+                    <span>上报</span>
+                    <strong id="systemCountReports">--</strong>
+                  </div>
+                  <div class="system-count">
+                    <span>路由</span>
+                    <strong id="systemCountRoutes">--</strong>
+                  </div>
+                  <div class="system-count">
+                    <span>告警</span>
+                    <strong id="systemCountAlerts">--</strong>
+                  </div>
+                </div>
+              </div>
+              <div class="system-diagnostic-list" id="systemDiagnosticRows">
+                <div class="empty">点击立即自检后，会列出控制面当前需要处理的地方。</div>
+              </div>
             </div>
           </section>
 
@@ -3582,6 +3751,7 @@
         operationTasks: [],
         auditLogs: [],
         adminUsers: [],
+        systemDiagnostics: null,
         selectedId: null,
         batchSelectedNodeIds: new Set(),
         batchUpgradeResults: {},
@@ -3775,6 +3945,14 @@
         systemInstallMysqlCommand: document.getElementById("systemInstallMysqlCommand"),
         systemUninstallCommand: document.getElementById("systemUninstallCommand"),
         systemPurgeCommand: document.getElementById("systemPurgeCommand"),
+        runSystemDiagnostics: document.getElementById("runSystemDiagnostics"),
+        systemDiagnosticsMeta: document.getElementById("systemDiagnosticsMeta"),
+        systemDiagnosticsStatus: document.getElementById("systemDiagnosticsStatus"),
+        systemDiagnosticRows: document.getElementById("systemDiagnosticRows"),
+        systemCountNodes: document.getElementById("systemCountNodes"),
+        systemCountReports: document.getElementById("systemCountReports"),
+        systemCountRoutes: document.getElementById("systemCountRoutes"),
+        systemCountAlerts: document.getElementById("systemCountAlerts"),
       };
 
       els.loginTokenInput.value = state.token;
@@ -4034,6 +4212,7 @@
         }
         if (state.activeView === "settings") {
           renderSystemSettings();
+          loadSystemDiagnostics({ silent: Boolean(state.systemDiagnostics) }).catch(showError);
         }
       }
 
@@ -5051,6 +5230,63 @@
         if (els.systemInstallMysqlCommand) els.systemInstallMysqlCommand.value = controlPanelInstallWithMysqlCommand();
         if (els.systemUninstallCommand) els.systemUninstallCommand.value = controlPanelUninstallCommand();
         if (els.systemPurgeCommand) els.systemPurgeCommand.value = controlPanelPurgeCommand();
+      }
+
+      function systemStatusText(status) {
+        if (status === "ok") return "正常";
+        if (status === "warning") return "有提醒";
+        if (status === "critical") return "需处理";
+        return "未检查";
+      }
+
+      function systemStatusClass(status) {
+        if (status === "ok") return "ok";
+        if (status === "warning") return "warn";
+        if (status === "critical") return "bad";
+        return "";
+      }
+
+      function renderSystemDiagnostics() {
+        const data = state.systemDiagnostics;
+        if (!data) {
+          els.systemDiagnosticsMeta.textContent = "检查数据库、节点上报、路由和关键配置";
+          els.systemDiagnosticsStatus.className = "system-diagnostic-status";
+          els.systemDiagnosticsStatus.innerHTML = `<span class="label">当前状态</span><span class="value">未检查</span>`;
+          els.systemDiagnosticRows.innerHTML = `<div class="empty">点击立即自检后，会列出控制面当前需要处理的地方。</div>`;
+          return;
+        }
+
+        const counts = data.counts || {};
+        const className = systemStatusClass(data.status);
+        els.systemDiagnosticsStatus.className = `system-diagnostic-status ${className}`;
+        els.systemDiagnosticsStatus.innerHTML = `
+          <span class="label">当前状态</span>
+          <span class="value">${escapeHtml(systemStatusText(data.status))}</span>
+        `;
+        els.systemDiagnosticsMeta.textContent = `刷新 ${formatClock(data.server_time)} / 监听 ${data.listen_addr || "--"}`;
+        els.systemCountNodes.textContent = `${counts.nodes_online || 0}/${counts.nodes_total || 0}`;
+        els.systemCountReports.textContent = counts.nodes_reporting ?? 0;
+        els.systemCountRoutes.textContent = counts.routes_enabled ?? 0;
+        els.systemCountAlerts.textContent = counts.active_alerts ?? 0;
+
+        const checks = data.checks || [];
+        els.systemDiagnosticRows.innerHTML = checks.length
+          ? checks.map((item) => {
+              const itemClass = systemStatusClass(item.status);
+              return `
+                <div class="system-check ${itemClass}">
+                  <div class="system-check-title">
+                    <strong>${escapeHtml(item.title || item.key || "--")}</strong>
+                    <span class="chip ${itemClass}">${escapeHtml(systemStatusText(item.status))}</span>
+                  </div>
+                  <div class="system-check-body">
+                    <div>${escapeHtml(item.message || "--")}</div>
+                    ${item.suggestion ? `<div class="system-check-suggestion">${escapeHtml(item.suggestion)}</div>` : ""}
+                  </div>
+                </div>
+              `;
+            }).join("")
+          : `<div class="empty">没有自检结果。</div>`;
       }
 
       function nodeEndpoint(node) {
@@ -6388,6 +6624,29 @@
         renderSummary({ server_time: state.serverTime || data.server_time });
       }
 
+      async function loadSystemDiagnostics({ silent = false } = {}) {
+        if (!silent && els.systemDiagnosticRows) {
+          els.systemDiagnosticRows.innerHTML = `<div class="loading"><span class="skeleton"></span></div>`;
+        }
+        if (els.runSystemDiagnostics) {
+          els.runSystemDiagnostics.disabled = true;
+          els.runSystemDiagnostics.textContent = "检查中...";
+        }
+        try {
+          const data = await api("/api/admin/v1/system/diagnostics");
+          state.systemDiagnostics = data;
+          renderSystemDiagnostics();
+          els.statusLine.textContent = `系统自检完成：${systemStatusText(data.status)}`;
+          els.statusLine.classList.toggle("error-state", data.status === "critical");
+          els.statusLine.classList.toggle("connected", data.status !== "critical");
+        } finally {
+          if (els.runSystemDiagnostics) {
+            els.runSystemDiagnostics.disabled = false;
+            els.runSystemDiagnostics.textContent = "立即自检";
+          }
+        }
+      }
+
       async function updateHealthAlert(alertId, status) {
         if (!assertCanWrite("处理健康告警")) return;
         const data = await api(`/api/admin/v1/health-alerts/${alertId}`, {
@@ -7565,6 +7824,10 @@
 
       els.refreshHealthAlerts.addEventListener("click", () => {
         loadHealthAlerts().catch(showError);
+      });
+
+      els.runSystemDiagnostics.addEventListener("click", () => {
+        loadSystemDiagnostics().catch(showError);
       });
 
       els.applyHealthAlertFilter.addEventListener("click", () => {
