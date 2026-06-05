@@ -1085,6 +1085,18 @@
         text-overflow: ellipsis;
       }
 
+      .summary-note.ok {
+        color: var(--ok);
+      }
+
+      .summary-note.warn {
+        color: var(--warn);
+      }
+
+      .summary-note.bad {
+        color: var(--bad);
+      }
+
       .grid-2 {
         display: grid;
         grid-template-columns: minmax(0, 1.38fr) minmax(360px, 0.82fr);
@@ -1228,6 +1240,145 @@
         color: var(--muted);
         font-size: 13px;
         line-height: 1.6;
+      }
+
+      .alert-panel {
+        border-color: rgba(23, 120, 111, 0.22);
+      }
+
+      .alert-panel .panel-head {
+        background:
+          linear-gradient(135deg, rgba(23, 120, 111, 0.1), rgba(255, 255, 255, 0.72)),
+          var(--surface-soft);
+      }
+
+      .alert-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+      }
+
+      .alert-stats {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(118px, 1fr));
+        gap: 10px;
+        padding: 14px 18px 0;
+      }
+
+      .alert-stat {
+        min-height: 74px;
+        display: grid;
+        align-content: center;
+        gap: 6px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .alert-stat-label {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 780;
+      }
+
+      .alert-stat-value {
+        font-family: var(--mono);
+        font-size: 22px;
+        font-weight: 840;
+      }
+
+      .alert-stat.critical .alert-stat-value {
+        color: var(--bad);
+      }
+
+      .alert-stat.warning .alert-stat-value {
+        color: var(--warn);
+      }
+
+      .alert-filter-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .alert-filter-bar button.active {
+        border-color: var(--accent);
+        background: rgba(23, 120, 111, 0.12);
+        color: var(--accent-strong);
+      }
+
+      .alert-list {
+        display: grid;
+        gap: 10px;
+        padding: 14px 18px 18px;
+      }
+
+      .alert-row {
+        display: grid;
+        grid-template-columns: 104px minmax(0, 1fr) minmax(190px, 0.42fr) auto;
+        gap: 14px;
+        align-items: center;
+        min-height: 84px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-left: 4px solid var(--accent);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.78);
+      }
+
+      .alert-row.critical {
+        border-left-color: var(--bad);
+      }
+
+      .alert-row.warning {
+        border-left-color: var(--warn);
+      }
+
+      .alert-severity {
+        width: max-content;
+      }
+
+      .alert-copy {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .alert-title {
+        font-weight: 840;
+      }
+
+      .alert-message {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .alert-node {
+        min-width: 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .alert-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .alert-empty {
+        min-height: 116px;
+        display: grid;
+        place-items: center;
+        border: 1px dashed var(--line);
+        border-radius: 8px;
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.54);
+        text-align: center;
       }
 
       .table-wrap {
@@ -2045,6 +2196,7 @@
         .summary,
         .grid-2,
         .grid-3,
+        .alert-row,
         .node-detail-panel .detail-overview,
         .node-detail-panel .detail-ops-grid,
         .node-detail-panel .counter-grid,
@@ -2076,6 +2228,10 @@
         .top-actions {
           justify-content: flex-start;
         }
+
+        .alert-actions {
+          justify-content: flex-start;
+        }
       }
 
       @media (max-width: 700px) {
@@ -2101,6 +2257,15 @@
 
         .summary-cell:last-child {
           border-bottom: 0;
+        }
+
+        .alert-toolbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .alert-stats {
+          grid-template-columns: 1fr;
         }
 
         .detail-grid,
@@ -2205,7 +2370,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.44.0</span>
+          <span class="mono">v0.45.0</span>
         </div>
       </aside>
 
@@ -2269,6 +2434,37 @@
               <h3>运维节奏</h3>
               <div class="insight-value">30 秒</div>
               <div class="insight-note">自动刷新开启后，每 30 秒同步节点和路由状态。</div>
+            </div>
+          </section>
+
+          <section class="panel alert-panel">
+            <div class="panel-head alert-toolbar">
+              <div>
+                <div class="panel-title">健康告警</div>
+                <div class="panel-meta" id="overviewAlertMeta">等待节点上报</div>
+              </div>
+              <div class="alert-filter-bar" id="overviewAlertFilters" aria-label="健康告警筛选">
+                <button class="active" type="button" data-alert-filter="all">全部</button>
+                <button type="button" data-alert-filter="critical">严重</button>
+                <button type="button" data-alert-filter="warning">提醒</button>
+              </div>
+            </div>
+            <div class="alert-stats" id="overviewAlertStats">
+              <div class="alert-stat">
+                <div class="alert-stat-label">告警总数</div>
+                <div class="alert-stat-value">--</div>
+              </div>
+              <div class="alert-stat critical">
+                <div class="alert-stat-label">严重</div>
+                <div class="alert-stat-value">--</div>
+              </div>
+              <div class="alert-stat warning">
+                <div class="alert-stat-label">提醒</div>
+                <div class="alert-stat-value">--</div>
+              </div>
+            </div>
+            <div class="alert-list" id="overviewAlertRows">
+              <div class="alert-empty">节点加载后会自动识别上报中断、监听异常、版本落后和 SSH 问题。</div>
             </div>
           </section>
 
@@ -3225,6 +3421,8 @@
         admins: "权限管理",
       };
 
+      const CONTROL_DASHBOARD_VERSION = "0.45.0";
+
       const state = {
         token: localStorage.getItem("xaccel_admin_token") || "",
         currentAdmin: (() => {
@@ -3244,6 +3442,7 @@
         batchSelectedNodeIds: new Set(),
         batchUpgradeResults: {},
         batchUpgradeFilter: "all",
+        alertFilter: "all",
         batchTaskAction: "upgrade_node",
         batchUpgradeRunning: false,
         pagination: {
@@ -3346,6 +3545,10 @@
         statusLine: document.getElementById("statusLine"),
         summary: document.getElementById("summary"),
         overviewCards: document.getElementById("overviewCards"),
+        overviewAlertMeta: document.getElementById("overviewAlertMeta"),
+        overviewAlertStats: document.getElementById("overviewAlertStats"),
+        overviewAlertFilters: document.getElementById("overviewAlertFilters"),
+        overviewAlertRows: document.getElementById("overviewAlertRows"),
         overviewNodeMeta: document.getElementById("overviewNodeMeta"),
         overviewNodeRows: document.getElementById("overviewNodeRows"),
         overviewRouteMeta: document.getElementById("overviewRouteMeta"),
@@ -4690,6 +4893,213 @@
         return value ? "checked" : "";
       }
 
+      function latestHealth(node) {
+        return node?.latest_report?.raw?.health || {};
+      }
+
+      function parseVersionParts(value) {
+        const text = String(value || "").trim().replace(/^v/i, "");
+        const match = text.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+        if (!match) return null;
+        return [
+          Number(match[1] || 0),
+          Number(match[2] || 0),
+          Number(match[3] || 0),
+        ];
+      }
+
+      function compareVersion(left, right) {
+        const leftParts = parseVersionParts(left);
+        const rightParts = parseVersionParts(right);
+        if (!leftParts || !rightParts) return null;
+        for (let index = 0; index < 3; index += 1) {
+          if (leftParts[index] > rightParts[index]) return 1;
+          if (leftParts[index] < rightParts[index]) return -1;
+        }
+        return 0;
+      }
+
+      function alertSeverityText(severity) {
+        return severity === "critical" ? "严重" : "提醒";
+      }
+
+      function nodeHealthAlerts(nodes = state.nodes) {
+        const alerts = [];
+        const now = state.serverTime || Math.floor(Date.now() / 1000);
+
+        nodes.forEach((node) => {
+          const endpoint = nodeEndpoint(node);
+          const reportAge = node.last_report_at ? Math.max(0, now - node.last_report_at) : null;
+          const base = {
+            nodeId: Number(node.id),
+            nodeName: node.name,
+            endpoint,
+            lastReportAt: node.last_report_at,
+            reportAge,
+          };
+
+          if (node.status !== "online") {
+            const plannedOffline = ["pending_install", "disabled", "draining"].includes(node.status);
+            alerts.push({
+              ...base,
+              severity: plannedOffline ? "warning" : "critical",
+              code: "node_status",
+              title: "节点未在线",
+              message: `${nodeStatusValueText(node.status)}，调度会避开这个节点。`,
+            });
+          }
+
+          if (!node.last_report_at) {
+            const plannedMissingReport = ["pending_install", "disabled", "draining"].includes(node.status);
+            alerts.push({
+              ...base,
+              severity: plannedMissingReport ? "warning" : "critical",
+              code: "report_missing",
+              title: "还没有健康上报",
+              message: "节点没有上报运行数据，先确认内核服务和控制面地址。",
+            });
+          } else if (reportAge > 180) {
+            alerts.push({
+              ...base,
+              severity: "critical",
+              code: "report_stale",
+              title: "健康上报中断",
+              message: `最近一次上报在 ${ageText(node.last_report_at)} 前，可能是节点掉线或控制面不可达。`,
+            });
+          } else if (reportAge > 90) {
+            alerts.push({
+              ...base,
+              severity: "warning",
+              code: "report_slow",
+              title: "健康上报延迟",
+              message: `最近一次上报在 ${ageText(node.last_report_at)} 前，建议观察网络和节点负载。`,
+            });
+          }
+
+          const listeners = latestHealth(node).listeners;
+          if (listeners && node.status === "online") {
+            const udpDown = listeners.udp_listening === false;
+            const tcpDown = listeners.tcp_listening === false;
+            if (udpDown || tcpDown) {
+              alerts.push({
+                ...base,
+                severity: "critical",
+                code: "listener_down",
+                title: "监听异常",
+                message: `监听状态：${listenText(listeners)}，客户端可能无法接入。`,
+              });
+            }
+          }
+
+          const ssh = node.ssh_credential || {};
+          if (ssh.configured && ssh.auth_status === "failed") {
+            alerts.push({
+              ...base,
+              severity: "warning",
+              code: "ssh_failed",
+              title: "SSH 连接失败",
+              message: ssh.last_error || "服务器账号密码或端口可能不对，一键升级会失败。",
+            });
+          }
+
+          const versionCompare = compareVersion(node.kernel_version, CONTROL_DASHBOARD_VERSION);
+          if (node.kernel_version && versionCompare !== null && versionCompare < 0) {
+            alerts.push({
+              ...base,
+              severity: "warning",
+              code: "version_lag",
+              title: "节点版本落后",
+              message: `当前节点 ${node.kernel_version}，控制面 ${CONTROL_DASHBOARD_VERSION}，建议安排升级。`,
+            });
+          }
+        });
+
+        return alerts.sort((left, right) => {
+          const rank = { critical: 0, warning: 1 };
+          return (
+            (rank[left.severity] ?? 2) - (rank[right.severity] ?? 2) ||
+            (right.reportAge ?? 0) - (left.reportAge ?? 0) ||
+            left.nodeId - right.nodeId ||
+            left.code.localeCompare(right.code)
+          );
+        });
+      }
+
+      function renderHealthAlerts() {
+        if (!els.overviewAlertRows) return;
+        const alerts = nodeHealthAlerts();
+        const critical = alerts.filter((item) => item.severity === "critical").length;
+        const warning = alerts.filter((item) => item.severity === "warning").length;
+        const affectedNodes = new Set(alerts.map((item) => item.nodeId)).size;
+        const filtered = alerts.filter((item) => state.alertFilter === "all" || item.severity === state.alertFilter);
+
+        els.overviewAlertMeta.textContent = alerts.length
+          ? `${alerts.length} 条 / 覆盖 ${affectedNodes} 台节点`
+          : "当前没有需要处理的告警";
+        els.overviewAlertStats.innerHTML = `
+          <div class="alert-stat">
+            <div class="alert-stat-label">告警总数</div>
+            <div class="alert-stat-value">${alerts.length}</div>
+          </div>
+          <div class="alert-stat critical">
+            <div class="alert-stat-label">严重</div>
+            <div class="alert-stat-value">${critical}</div>
+          </div>
+          <div class="alert-stat warning">
+            <div class="alert-stat-label">提醒</div>
+            <div class="alert-stat-value">${warning}</div>
+          </div>
+        `;
+
+        [...els.overviewAlertFilters.querySelectorAll("[data-alert-filter]")].forEach((button) => {
+          button.classList.toggle("active", button.dataset.alertFilter === state.alertFilter);
+        });
+
+        if (!alerts.length) {
+          els.overviewAlertRows.innerHTML = `
+            <div class="alert-empty">
+              <div>
+                <div class="strong">节点状态干净</div>
+                <div class="cell-note">没有发现上报中断、监听异常、版本落后或 SSH 失败。</div>
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        if (!filtered.length) {
+          els.overviewAlertRows.innerHTML = `<div class="alert-empty">当前筛选下没有告警。</div>`;
+          return;
+        }
+
+        els.overviewAlertRows.innerHTML = filtered
+          .map((item) => `
+            <div class="alert-row ${item.severity}" data-alert-code="${escapeHtml(item.code)}">
+              <span class="status ${item.severity === "critical" ? "bad" : "warn"} alert-severity">
+                <span class="dot"></span>${escapeHtml(alertSeverityText(item.severity))}
+              </span>
+              <div class="alert-copy">
+                <div class="alert-title">${escapeHtml(item.title)}</div>
+                <div class="alert-message">${escapeHtml(item.message)}</div>
+              </div>
+              <div class="alert-node">
+                <div class="strong">${escapeHtml(item.nodeName || `节点 ${item.nodeId}`)}</div>
+                <div class="mono endpoint">${escapeHtml(item.endpoint)}</div>
+                <div class="cell-note">${item.lastReportAt ? `上报 ${escapeHtml(ageText(item.lastReportAt))}` : "没有上报"}</div>
+              </div>
+              <div class="alert-actions">
+                <button type="button" data-alert-node="${item.nodeId}">查看节点</button>
+                ${
+                  item.code === "ssh_failed" && canWrite()
+                    ? `<button type="button" data-alert-ssh-test="${item.nodeId}">测试 SSH</button>`
+                    : ""
+                }
+              </div>
+            </div>
+          `)
+          .join("");
+      }
+
       async function api(path, options = {}) {
         if (!state.token) {
           throw new Error("管理员令牌未设置");
@@ -4730,12 +5140,17 @@
           (max, node) => Math.max(max, node.last_report_at || 0),
           0,
         );
+        const alerts = nodeHealthAlerts(nodes);
+        const criticalAlerts = alerts.filter((item) => item.severity === "critical").length;
+        const warningAlerts = alerts.filter((item) => item.severity === "warning").length;
+        const healthLabel = criticalAlerts ? "需处理" : warningAlerts ? "有提醒" : "正常";
+        const healthClass = criticalAlerts ? "bad" : warningAlerts ? "warn" : "ok";
 
         els.summary.innerHTML = `
           <div class="summary-cell">
-            <div class="summary-label">连接状态</div>
-            <div class="summary-value text">正常</div>
-            <div class="summary-note">刷新于 ${escapeHtml(formatClock(data.server_time || state.serverTime))}</div>
+            <div class="summary-label">健康状态</div>
+            <div class="summary-value text">${healthLabel}</div>
+            <div class="summary-note ${healthClass}">严重 ${criticalAlerts} / 提醒 ${warningAlerts}</div>
           </div>
           <div class="summary-cell">
             <div class="summary-label">节点总数</div>
@@ -4745,7 +5160,7 @@
           <div class="summary-cell">
             <div class="summary-label">在线节点</div>
             <div class="summary-value">${online}</div>
-            <div class="summary-note">${stale} 个上报延迟</div>
+            <div class="summary-note">${stale} 个上报延迟 / 刷新 ${escapeHtml(formatClock(data.server_time || state.serverTime))}</div>
           </div>
           <div class="summary-cell">
             <div class="summary-label">路由规则</div>
@@ -4759,13 +5174,13 @@
           </div>
         `;
 
-        const quality = nodes.length && online === nodes.length ? "优" : online > 0 ? "稳" : "--";
+        const quality = criticalAlerts ? "险" : warningAlerts ? "稳" : nodes.length && online === nodes.length ? "优" : online > 0 ? "稳" : "--";
         const games = new Set(routes.map((rule) => rule.game_id)).size;
         els.overviewCards.innerHTML = `
           <div class="insight-card">
             <h3>调度健康</h3>
             <div class="insight-value">${quality}</div>
-            <div class="insight-note">${online}/${nodes.length} 个节点在线，调度会优先选择在线且未禁用 QUIC 的节点。</div>
+            <div class="insight-note">${online}/${nodes.length} 个节点在线，当前有 ${alerts.length} 条健康告警需要巡检。</div>
           </div>
           <div class="insight-card">
             <h3>路由覆盖</h3>
@@ -4778,6 +5193,8 @@
             <div class="insight-note">自动刷新开启后，每 30 秒同步节点上报和路由规则。</div>
           </div>
         `;
+
+        renderHealthAlerts();
       }
 
       function renderOverviewTables() {
@@ -6575,6 +6992,26 @@
         state.autoRefresh = !state.autoRefresh;
         resetTimer();
         renderSummary({ server_time: state.serverTime });
+      });
+
+      els.overviewAlertFilters.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-alert-filter]");
+        if (!button) return;
+        state.alertFilter = button.dataset.alertFilter || "all";
+        renderHealthAlerts();
+      });
+
+      els.overviewAlertRows.addEventListener("click", (event) => {
+        const sshButton = event.target.closest("[data-alert-ssh-test]");
+        if (sshButton) {
+          runSshAction(sshButton.dataset.alertSshTest, "test_connection", sshButton).catch(showError);
+          return;
+        }
+
+        const nodeButton = event.target.closest("[data-alert-node]");
+        if (!nodeButton) return;
+        setActiveView("nodes");
+        loadDetail(nodeButton.dataset.alertNode).catch(showError);
       });
 
       els.selectUpgradeableNodes.addEventListener("click", selectUpgradeableNodes);

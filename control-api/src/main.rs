@@ -9203,6 +9203,10 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("assertSuperAdmin"));
         assert!(ADMIN_DASHBOARD_HTML.contains("renderPermissionMatrix"));
         assert!(ADMIN_DASHBOARD_HTML.contains("permissionMatrix"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("overviewAlertRows"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("nodeHealthAlerts"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-alert-filter=\"critical\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("CONTROL_DASHBOARD_VERSION"));
         assert!(ADMIN_DASHBOARD_HTML.contains("账号管理只对超级管理员开放"));
         assert!(ADMIN_DASHBOARD_HTML.contains("showPermissionError"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-write-action"));
