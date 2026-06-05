@@ -9240,6 +9240,10 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("batchSelectAllNodes"));
         assert!(ADMIN_DASHBOARD_HTML.contains("selectUpgradeableNodes"));
         assert!(ADMIN_DASHBOARD_HTML.contains("startBatchUpgrade"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("batchUpgradeFilter"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("batchUpgradeFilters"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("retryBatchUpgradeNode"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-batch-retry"));
         assert!(ADMIN_DASHBOARD_HTML.contains("nodeUpgradeEligibility"));
         assert!(ADMIN_DASHBOARD_HTML.contains("ssh-credential"));
         assert!(ADMIN_DASHBOARD_HTML.contains("ssh-actions"));
@@ -9250,6 +9254,15 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("operationStatusText"));
         assert!(ADMIN_DASHBOARD_HTML.contains("operationTaskSummary"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/operation-tasks"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("renderPager"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("paginatedItems"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("nodePager"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("gamePager"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("routePager"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("opsTaskPager"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("auditPager"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("adminUserPager"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-page-action"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes/${nodeId}/deploy"));
         assert!(ADMIN_DASHBOARD_HTML.contains("deployNodeViaSsh"));
         assert!(ADMIN_DASHBOARD_HTML.contains("deploySshHost"));

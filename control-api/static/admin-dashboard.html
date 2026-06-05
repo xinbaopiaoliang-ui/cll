@@ -703,7 +703,7 @@
 
       .batch-upgrade-layout {
         display: grid;
-        grid-template-columns: minmax(260px, 0.72fr) minmax(520px, 1.28fr);
+        grid-template-columns: minmax(250px, 0.42fr) minmax(0, 1fr);
         gap: 16px;
         align-items: start;
       }
@@ -740,12 +740,88 @@
         font-weight: 820;
       }
 
-      .batch-upgrade-table td {
-        vertical-align: top;
+      .batch-upgrade-results {
+        min-width: 0;
+        display: grid;
+        gap: 12px;
+      }
+
+      .batch-filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(247, 250, 249, 0.78);
+      }
+
+      .batch-filter-bar button {
+        min-height: 30px;
+        padding: 0 10px;
+      }
+
+      .batch-filter-bar button.active {
+        border-color: rgba(23, 120, 111, 0.28);
+        background: rgba(23, 120, 111, 0.12);
+        color: var(--accent-strong);
+      }
+
+      .batch-upgrade-list {
+        min-width: 0;
+        max-height: min(58vh, 620px);
+        display: grid;
+        gap: 10px;
+        overflow: auto;
+        padding-right: 2px;
+      }
+
+      .batch-upgrade-item {
+        min-width: 0;
+        display: grid;
+        grid-template-columns: minmax(190px, 0.86fr) minmax(120px, 0.48fr) minmax(150px, 0.56fr) minmax(150px, 0.56fr) minmax(220px, 1fr);
+        gap: 12px;
+        align-items: start;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .batch-upgrade-item[data-result-status="failed"] {
+        border-color: rgba(180, 35, 24, 0.22);
+        background: rgba(255, 247, 245, 0.74);
+      }
+
+      .batch-upgrade-item[data-result-status="succeeded"] {
+        border-color: rgba(19, 131, 95, 0.18);
+        background: rgba(245, 252, 249, 0.78);
+      }
+
+      .batch-upgrade-cell {
+        min-width: 0;
+        display: grid;
+        gap: 5px;
+        color: var(--ink);
+      }
+
+      .batch-upgrade-label {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .batch-result-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin-top: 8px;
       }
 
       .batch-result {
-        min-width: 190px;
+        min-width: 0;
         color: var(--muted);
         font-size: 12px;
         line-height: 1.5;
@@ -756,6 +832,56 @@
         color: var(--ink);
         font-size: 13px;
         margin-bottom: 3px;
+      }
+
+      .pager {
+        min-height: 52px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .pager.hidden {
+        display: none;
+      }
+
+      .pager-info {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .pager-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        justify-content: flex-end;
+      }
+
+      .pager select {
+        min-height: 32px;
+        width: auto;
+        padding: 0 32px 0 10px;
+      }
+
+      .pager button {
+        min-height: 32px;
+        padding: 0 10px;
+      }
+
+      .pager-page {
+        min-width: 58px;
+        color: var(--ink);
+        font-family: var(--mono);
+        text-align: center;
       }
 
       .taxonomy-cell {
@@ -1859,6 +1985,7 @@
         .node-actions-grid,
         .deploy-layout,
         .batch-upgrade-layout,
+        .batch-upgrade-item,
         .permission-overview,
         .permission-matrix,
         .topbar {
@@ -2007,7 +2134,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.41.0</span>
+          <span class="mono">v0.42.0</span>
         </div>
       </aside>
 
@@ -2165,6 +2292,7 @@
                   </tbody>
                 </table>
               </div>
+              <div class="pager hidden" id="nodePager"></div>
             </div>
 
             <aside class="panel node-detail-panel">
@@ -2237,6 +2365,7 @@
                 </tbody>
               </table>
             </div>
+            <div class="pager hidden" id="gamePager"></div>
           </div>
         </section>
 
@@ -2271,6 +2400,7 @@
                 </tbody>
               </table>
             </div>
+            <div class="pager hidden" id="routePager"></div>
           </div>
         </section>
 
@@ -2433,6 +2563,7 @@
                   </tbody>
                 </table>
               </div>
+              <div class="pager hidden" id="opsTaskPager"></div>
             </div>
           </section>
         </section>
@@ -2501,6 +2632,7 @@
                 </tbody>
               </table>
             </div>
+            <div class="pager hidden" id="auditPager"></div>
           </div>
         </section>
 
@@ -2574,6 +2706,7 @@
                 </tbody>
               </table>
             </div>
+            <div class="pager hidden" id="adminUserPager"></div>
           </div>
         </section>
       </section>
@@ -2793,23 +2926,15 @@
                 <button class="primary" id="startBatchUpgrade" type="button">开始批量升级</button>
               </div>
             </div>
-            <div class="table-wrap">
-              <table class="batch-upgrade-table">
-                <thead>
-                  <tr>
-                    <th>节点</th>
-                    <th>版本</th>
-                    <th>SSH</th>
-                    <th>预检</th>
-                    <th>执行结果</th>
-                  </tr>
-                </thead>
-                <tbody id="batchUpgradeRows">
-                  <tr>
-                    <td colspan="5" class="empty">还没有选择节点。</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div class="batch-upgrade-results">
+              <div class="batch-filter-bar" id="batchUpgradeFilters" aria-label="批量升级结果筛选">
+                <button type="button" class="active" data-batch-filter="all">全部</button>
+                <button type="button" data-batch-filter="succeeded">成功</button>
+                <button type="button" data-batch-filter="failed">失败</button>
+              </div>
+              <div class="batch-upgrade-list" id="batchUpgradeRows">
+                <div class="empty">还没有选择节点。</div>
+              </div>
             </div>
           </div>
         </div>
@@ -3025,7 +3150,16 @@
         selectedId: null,
         batchSelectedNodeIds: new Set(),
         batchUpgradeResults: {},
+        batchUpgradeFilter: "all",
         batchUpgradeRunning: false,
+        pagination: {
+          nodes: { page: 1, pageSize: 10 },
+          games: { page: 1, pageSize: 10 },
+          routes: { page: 1, pageSize: 10 },
+          opsTasks: { page: 1, pageSize: 10 },
+          audit: { page: 1, pageSize: 10 },
+          admins: { page: 1, pageSize: 10 },
+        },
         serverTime: null,
         autoRefresh: true,
         activeView: "overview",
@@ -3100,6 +3234,7 @@
         gameError: document.getElementById("gameError"),
         gameMeta: document.getElementById("gameMeta"),
         gameRows: document.getElementById("gameRows"),
+        gamePager: document.getElementById("gamePager"),
         gameKeyword: document.getElementById("gameKeyword"),
         gamePlatformFilter: document.getElementById("gamePlatformFilter"),
         gameStatusFilter: document.getElementById("gameStatusFilter"),
@@ -3123,6 +3258,7 @@
         overviewRouteRows: document.getElementById("overviewRouteRows"),
         listMeta: document.getElementById("listMeta"),
         nodeRows: document.getElementById("nodeRows"),
+        nodePager: document.getElementById("nodePager"),
         batchSelectAllNodes: document.getElementById("batchSelectAllNodes"),
         selectUpgradeableNodes: document.getElementById("selectUpgradeableNodes"),
         openBatchUpgrade: document.getElementById("openBatchUpgrade"),
@@ -3131,6 +3267,7 @@
         cancelBatchUpgrade: document.getElementById("cancelBatchUpgrade"),
         startBatchUpgrade: document.getElementById("startBatchUpgrade"),
         batchUpgradeMeta: document.getElementById("batchUpgradeMeta"),
+        batchUpgradeFilters: document.getElementById("batchUpgradeFilters"),
         batchUpgradeRows: document.getElementById("batchUpgradeRows"),
         batchSelectedCount: document.getElementById("batchSelectedCount"),
         batchReadyCount: document.getElementById("batchReadyCount"),
@@ -3139,6 +3276,7 @@
         batchUpgradeError: document.getElementById("batchUpgradeError"),
         routeMeta: document.getElementById("routeMeta"),
         routeRows: document.getElementById("routeRows"),
+        routePager: document.getElementById("routePager"),
         detailTitle: document.getElementById("detailTitle"),
         detailMeta: document.getElementById("detailMeta"),
         detailBody: document.getElementById("detailBody"),
@@ -3149,9 +3287,11 @@
         opsBody: document.getElementById("opsBody"),
         opsTaskMeta: document.getElementById("opsTaskMeta"),
         opsTaskRows: document.getElementById("opsTaskRows"),
+        opsTaskPager: document.getElementById("opsTaskPager"),
         refreshOpsTasks: document.getElementById("refreshOpsTasks"),
         auditMeta: document.getElementById("auditMeta"),
         auditRows: document.getElementById("auditRows"),
+        auditPager: document.getElementById("auditPager"),
         auditNodeFilter: document.getElementById("auditNodeFilter"),
         auditActionFilter: document.getElementById("auditActionFilter"),
         auditLimitFilter: document.getElementById("auditLimitFilter"),
@@ -3164,6 +3304,7 @@
         adminAccountPanel: document.getElementById("adminAccountPanel"),
         adminUserMeta: document.getElementById("adminUserMeta"),
         adminUserRows: document.getElementById("adminUserRows"),
+        adminUserPager: document.getElementById("adminUserPager"),
         openAdminUser: document.getElementById("openAdminUser"),
         refreshAdminUsers: document.getElementById("refreshAdminUsers"),
         adminUserModal: document.getElementById("adminUserModal"),
@@ -3204,6 +3345,83 @@
 
       function readonlyActionsCell() {
         return `<span class="readonly-pill" title="只读账号只能查看，不能执行运维或修改配置">只读</span>`;
+      }
+
+      const PAGE_SIZE_OPTIONS = [10, 20, 50];
+      const PAGE_LABELS = {
+        nodes: "节点",
+        games: "游戏",
+        routes: "规则",
+        opsTasks: "任务",
+        audit: "日志",
+        admins: "账号",
+      };
+
+      function paginationState(key) {
+        if (!state.pagination[key]) {
+          state.pagination[key] = { page: 1, pageSize: 10 };
+        }
+        const pageState = state.pagination[key];
+        pageState.pageSize = PAGE_SIZE_OPTIONS.includes(Number(pageState.pageSize))
+          ? Number(pageState.pageSize)
+          : 10;
+        pageState.page = Math.max(1, Number(pageState.page) || 1);
+        return pageState;
+      }
+
+      function resetPagination(key) {
+        paginationState(key).page = 1;
+      }
+
+      function normalizePagination(key, total) {
+        const pageState = paginationState(key);
+        const pageCount = Math.max(1, Math.ceil(total / pageState.pageSize));
+        pageState.page = Math.min(Math.max(1, pageState.page), pageCount);
+        return { ...pageState, pageCount };
+      }
+
+      function paginatedItems(key, items) {
+        const { page, pageSize } = normalizePagination(key, items.length);
+        const start = (page - 1) * pageSize;
+        return items.slice(start, start + pageSize);
+      }
+
+      function renderPager(key, total, element) {
+        if (!element) return;
+        if (!total) {
+          element.classList.add("hidden");
+          element.innerHTML = "";
+          return;
+        }
+        const { page, pageSize, pageCount } = normalizePagination(key, total);
+        const start = (page - 1) * pageSize + 1;
+        const end = Math.min(total, page * pageSize);
+        const label = PAGE_LABELS[key] || "条";
+        element.classList.remove("hidden");
+        element.innerHTML = `
+          <div class="pager-info">
+            <span>显示 ${start}-${end}</span>
+            <span>/ 共 ${total} ${escapeHtml(label)}</span>
+          </div>
+          <div class="pager-actions">
+            <span>每页</span>
+            <select data-page-size-for="${escapeHtml(key)}" aria-label="每页显示数量">
+              ${PAGE_SIZE_OPTIONS.map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`).join("")}
+            </select>
+            <button type="button" data-page-key="${escapeHtml(key)}" data-page-action="prev" ${page <= 1 ? "disabled" : ""}>上一页</button>
+            <span class="pager-page">${page} / ${pageCount}</span>
+            <button type="button" data-page-key="${escapeHtml(key)}" data-page-action="next" ${page >= pageCount ? "disabled" : ""}>下一页</button>
+          </div>
+        `;
+      }
+
+      function renderPagedList(key) {
+        if (key === "nodes") renderNodes();
+        if (key === "games") renderGames();
+        if (key === "routes") renderRouteRules();
+        if (key === "opsTasks") renderOperationTasks();
+        if (key === "audit") renderAuditLogs();
+        if (key === "admins") renderAdminUsers();
       }
 
       function renderPermissionMatrix() {
@@ -3978,7 +4196,46 @@
         return state.batchUpgradeResults[Number(nodeId)] || { status: "waiting", message: "等待执行" };
       }
 
-      function renderBatchResult(result) {
+      function batchResultVisible(result) {
+        return state.batchUpgradeFilter === "all" || result.status === state.batchUpgradeFilter;
+      }
+
+      function batchUpgradeMessage(data) {
+        const versionLine = sshVersionCheckLines(data.version_check).join(" / ");
+        return [
+          data.task ? `任务 #${data.task.id}` : "",
+          `${data.command_label} / exit ${data.exit_code ?? "--"} / ${data.duration_ms}ms`,
+          versionLine,
+        ].filter(Boolean).join(" / ");
+      }
+
+      async function runBatchUpgradeNode(node) {
+        const data = await api(`/api/admin/v1/nodes/${node.id}/ssh-actions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "upgrade_node" }),
+        });
+        state.batchUpgradeResults[node.id] = {
+          status: data.status === "failed" ? "failed" : "succeeded",
+          message: batchUpgradeMessage(data),
+        };
+      }
+
+      async function upgradeBatchNode(node) {
+        state.batchUpgradeResults[node.id] = { status: "running", message: "正在通过 SSH 执行升级命令" };
+        renderBatchUpgradeModal();
+        try {
+          await runBatchUpgradeNode(node);
+        } catch (error) {
+          state.batchUpgradeResults[node.id] = {
+            status: "failed",
+            message: error.message || "升级失败",
+          };
+        }
+        renderBatchUpgradeModal();
+      }
+
+      function renderBatchResult(result, node) {
         const statusClassName =
           result.status === "succeeded" ? "ok" :
           result.status === "failed" ? "bad" :
@@ -3989,10 +4246,15 @@
           result.status === "failed" ? "失败" :
           result.status === "running" ? "执行中" :
           "等待";
+        const retryButton =
+          result.status === "failed" && canWrite() && !state.batchUpgradeRunning && nodeUpgradeEligibility(node).eligible
+            ? `<button type="button" data-batch-retry="${node.id}">重试</button>`
+            : "";
         return `
           <div class="batch-result">
             <span class="chip ${statusClassName}">${statusText}</span>
             <div>${escapeHtml(result.message || "--")}</div>
+            ${retryButton ? `<div class="batch-result-actions">${retryButton}</div>` : ""}
           </div>
         `;
       }
@@ -4010,32 +4272,48 @@
         els.batchUpgradeMeta.textContent = `${ready.length} 台可升级 / ${selected.length - ready.length} 台会跳过`;
         els.startBatchUpgrade.disabled = state.batchUpgradeRunning || ready.length === 0;
         els.startBatchUpgrade.textContent = state.batchUpgradeRunning ? "升级中..." : "开始批量升级";
+        if (els.batchUpgradeFilters) {
+          [...els.batchUpgradeFilters.querySelectorAll("[data-batch-filter]")].forEach((button) => {
+            button.classList.toggle("active", button.dataset.batchFilter === state.batchUpgradeFilter);
+          });
+        }
 
-        els.batchUpgradeRows.innerHTML = selected.length
-          ? selected.map((node) => {
+        const visibleNodes = selected.filter((node) => batchResultVisible(batchResult(node.id)));
+        els.batchUpgradeRows.innerHTML = visibleNodes.length
+          ? visibleNodes.map((node) => {
               const eligibility = nodeUpgradeEligibility(node);
+              const result = batchResult(node.id);
               return `
-                <tr>
-                  <td>
+                <div class="batch-upgrade-item" data-node-id="${node.id}" data-result-status="${escapeHtml(result.status)}">
+                  <div class="batch-upgrade-cell">
+                    <div class="batch-upgrade-label">节点</div>
                     <span class="strong">${escapeHtml(node.name)}</span>
                     <div class="cell-note mono">${escapeHtml(nodeEndpoint(node))} / ID ${node.id}</div>
-                  </td>
-                  <td class="mono">${escapeHtml(node.kernel_version || "--")}</td>
-                  <td>
+                  </div>
+                  <div class="batch-upgrade-cell">
+                    <div class="batch-upgrade-label">版本</div>
+                    <span class="mono">${escapeHtml(node.kernel_version || "--")}</span>
+                  </div>
+                  <div class="batch-upgrade-cell">
+                    <div class="batch-upgrade-label">SSH</div>
                     <span class="chip ${node.ssh_credential?.configured ? sshStatusClass(node.ssh_credential.auth_status) : "warn"}">
                       ${escapeHtml(node.ssh_credential?.configured ? sshStatusText(node.ssh_credential.auth_status) : "未配置")}
                     </span>
                     <div class="cell-note mono">${escapeHtml(nodeSshSummary(node))}</div>
-                  </td>
-                  <td>
+                  </div>
+                  <div class="batch-upgrade-cell">
+                    <div class="batch-upgrade-label">预检</div>
                     <span class="chip ${eligibility.className}">${escapeHtml(eligibility.label)}</span>
                     <div class="cell-note">${escapeHtml(eligibility.reason)}</div>
-                  </td>
-                  <td>${renderBatchResult(batchResult(node.id))}</td>
-                </tr>
+                  </div>
+                  <div class="batch-upgrade-cell">
+                    <div class="batch-upgrade-label">执行结果</div>
+                    ${renderBatchResult(result, node)}
+                  </div>
+                </div>
               `;
             }).join("")
-          : `<tr><td colspan="5" class="empty">还没有选择节点。</td></tr>`;
+          : `<div class="empty">${selected.length ? "当前筛选下没有节点结果。" : "还没有选择节点。"}</div>`;
       }
 
       function openBatchUpgradeModal() {
@@ -4047,6 +4325,7 @@
         }
         clearInlineError(els.batchUpgradeError);
         state.batchUpgradeResults = {};
+        state.batchUpgradeFilter = "all";
         renderBatchUpgradeModal();
         els.batchUpgradeModal.classList.remove("hidden");
       }
@@ -4072,30 +4351,7 @@
         renderBatchUpgradeModal();
 
         for (const node of nodes) {
-          state.batchUpgradeResults[node.id] = { status: "running", message: "正在通过 SSH 执行升级命令" };
-          renderBatchUpgradeModal();
-          try {
-            const data = await api(`/api/admin/v1/nodes/${node.id}/ssh-actions`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "upgrade_node" }),
-            });
-            const versionLine = sshVersionCheckLines(data.version_check).join(" / ");
-            state.batchUpgradeResults[node.id] = {
-              status: data.status === "failed" ? "failed" : "succeeded",
-              message: [
-                data.task ? `任务 #${data.task.id}` : "",
-                `${data.command_label} / exit ${data.exit_code ?? "--"} / ${data.duration_ms}ms`,
-                versionLine,
-              ].filter(Boolean).join(" / "),
-            };
-          } catch (error) {
-            state.batchUpgradeResults[node.id] = {
-              status: "failed",
-              message: error.message || "升级失败",
-            };
-          }
-          renderBatchUpgradeModal();
+          await upgradeBatchNode(node);
         }
 
         state.batchUpgradeRunning = false;
@@ -4112,6 +4368,28 @@
           : `批量升级完成，${results.length} 台全部成功`;
         els.statusLine.classList.toggle("error-state", failed > 0);
         els.statusLine.classList.toggle("connected", failed === 0);
+      }
+
+      async function retryBatchUpgradeNode(nodeId) {
+        if (!assertCanWrite("重试批量升级节点")) return;
+        if (state.batchUpgradeRunning) return;
+        const node = state.nodes.find((item) => Number(item.id) === Number(nodeId));
+        if (!node) return;
+        const eligibility = nodeUpgradeEligibility(node);
+        if (!eligibility.eligible) {
+          showInlineError(els.batchUpgradeError, eligibility.reason);
+          return;
+        }
+        clearInlineError(els.batchUpgradeError);
+        state.batchUpgradeRunning = true;
+        await upgradeBatchNode(node);
+        state.batchUpgradeRunning = false;
+        await loadNodes({ silent: true });
+        await loadOperationTasks({ silent: true });
+        if (state.selectedId) {
+          await loadDetail(state.selectedId, { silent: true });
+        }
+        renderBatchUpgradeModal();
       }
 
       function gameLabel(rule) {
@@ -4333,6 +4611,7 @@
         syncBatchSelection();
         if (!state.nodes.length) {
           els.nodeRows.innerHTML = `<tr><td colspan="9" class="empty">暂无节点</td></tr>`;
+          renderPager("nodes", 0, els.nodePager);
           updateBatchUpgradeControls();
           return;
         }
@@ -4345,7 +4624,8 @@
           );
         });
 
-        els.nodeRows.innerHTML = sortedNodes
+        const visibleNodes = paginatedItems("nodes", sortedNodes);
+        els.nodeRows.innerHTML = visibleNodes
           .map((node) => {
             const selected = node.id === state.selectedId ? "selected" : "";
             const report = node.latest_report || {};
@@ -4410,12 +4690,14 @@
             `;
           })
           .join("");
+        renderPager("nodes", sortedNodes.length, els.nodePager);
         updateBatchUpgradeControls();
       }
 
       function renderGames() {
         if (!state.games.length) {
           els.gameRows.innerHTML = `<tr><td colspan="7" class="empty">暂无游戏，请先新增一个游戏再配置路由。</td></tr>`;
+          renderPager("games", 0, els.gamePager);
           return;
         }
 
@@ -4427,7 +4709,8 @@
           );
         });
 
-        els.gameRows.innerHTML = sortedGames
+        const visibleGames = paginatedItems("games", sortedGames);
+        els.gameRows.innerHTML = visibleGames
           .map((game) => {
             const enabled = game.status === "enabled";
             const nextStatus = enabled ? "disabled" : "enabled";
@@ -4471,11 +4754,13 @@
             `;
           })
           .join("");
+        renderPager("games", sortedGames.length, els.gamePager);
       }
 
       function renderRouteRules() {
         if (!state.routeRules.length) {
           els.routeRows.innerHTML = `<tr><td colspan="7" class="empty">暂无路由规则，先新增一条游戏到节点的绑定。</td></tr>`;
+          renderPager("routes", 0, els.routePager);
           return;
         }
 
@@ -4487,7 +4772,8 @@
           );
         });
 
-        els.routeRows.innerHTML = sortedRules
+        const visibleRules = paginatedItems("routes", sortedRules);
+        els.routeRows.innerHTML = visibleRules
           .map((rule) => {
             const enabled = rule.status === "enabled";
             const node = state.nodes.find((item) => item.id === rule.node_id);
@@ -4532,6 +4818,7 @@
             `;
           })
           .join("");
+        renderPager("routes", sortedRules.length, els.routePager);
       }
 
       function metric(label, value) {
@@ -4572,10 +4859,12 @@
           : "最近 100 条远程任务";
         if (!tasks.length) {
           els.opsTaskRows.innerHTML = `<tr><td colspan="6" class="empty">暂无远程运维任务，先在节点详情里执行 SSH 测试、升级或重启。</td></tr>`;
+          renderPager("opsTasks", 0, els.opsTaskPager);
           return;
         }
 
-        els.opsTaskRows.innerHTML = tasks
+        const visibleTasks = paginatedItems("opsTasks", tasks);
+        els.opsTaskRows.innerHTML = visibleTasks
           .map((task) => {
             const eventTime = task.finished_at || task.started_at || task.created_at;
             const summary = operationTaskSummary(task);
@@ -4605,6 +4894,7 @@
             `;
           })
           .join("");
+        renderPager("opsTasks", tasks.length, els.opsTaskPager);
       }
 
       function populateAuditNodeFilter() {
@@ -4629,10 +4919,12 @@
           : "最近 100 条审计记录";
         if (!logs.length) {
           els.auditRows.innerHTML = `<tr><td colspan="5" class="empty">暂无操作日志。节点部署、SSH 操作、状态调整后会在这里留下记录。</td></tr>`;
+          renderPager("audit", 0, els.auditPager);
           return;
         }
 
-        els.auditRows.innerHTML = logs
+        const visibleLogs = paginatedItems("audit", logs);
+        els.auditRows.innerHTML = visibleLogs
           .map((item) => {
             const summary = auditSummaryText(item);
             const endpoint = item.node_endpoint || "--";
@@ -4669,6 +4961,7 @@
             `;
           })
           .join("");
+        renderPager("audit", logs.length, els.auditPager);
       }
 
       function renderAdminUsers(serverTime = state.serverTime) {
@@ -4678,10 +4971,12 @@
           : "暂无管理员账号";
         if (!users.length) {
           els.adminUserRows.innerHTML = `<tr><td colspan="6" class="empty">暂无管理员账号。可以先用管理员令牌创建第一个超级管理员账号。</td></tr>`;
+          renderPager("admins", 0, els.adminUserPager);
           return;
         }
 
-        els.adminUserRows.innerHTML = users
+        const visibleUsers = paginatedItems("admins", users);
+        els.adminUserRows.innerHTML = visibleUsers
           .map((user) => {
             const isSelf = state.currentAdmin?.id && Number(state.currentAdmin.id) === Number(user.id);
             return `
@@ -4712,6 +5007,7 @@
             `;
           })
           .join("");
+        renderPager("admins", users.length, els.adminUserPager);
       }
 
       function renderDetail(data) {
@@ -5983,6 +6279,30 @@
         copyToClipboard(els.controlUpgradeCommand.value, event.currentTarget);
       });
 
+      document.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-page-action]");
+        if (!button || button.disabled) return;
+        const key = button.dataset.pageKey;
+        const pageState = paginationState(key);
+        if (button.dataset.pageAction === "prev") {
+          pageState.page -= 1;
+        }
+        if (button.dataset.pageAction === "next") {
+          pageState.page += 1;
+        }
+        renderPagedList(key);
+      });
+
+      document.addEventListener("change", (event) => {
+        const select = event.target.closest("[data-page-size-for]");
+        if (!select) return;
+        const key = select.dataset.pageSizeFor;
+        const pageState = paginationState(key);
+        pageState.pageSize = Number(select.value) || 10;
+        pageState.page = 1;
+        renderPagedList(key);
+      });
+
       els.gameForm.addEventListener("submit", (event) => {
         event.preventDefault();
         saveGame(els.gameForm).catch((error) => {
@@ -5991,18 +6311,26 @@
       });
 
       els.refreshGames.addEventListener("click", () => {
+        resetPagination("games");
         loadGames().catch(showError);
       });
 
       els.gameKeyword.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
           event.preventDefault();
+          resetPagination("games");
           loadGames().catch(showError);
         }
       });
 
-      els.gamePlatformFilter.addEventListener("change", () => loadGames().catch(showError));
-      els.gameStatusFilter.addEventListener("change", () => loadGames().catch(showError));
+      els.gamePlatformFilter.addEventListener("change", () => {
+        resetPagination("games");
+        loadGames().catch(showError);
+      });
+      els.gameStatusFilter.addEventListener("change", () => {
+        resetPagination("games");
+        loadGames().catch(showError);
+      });
 
       els.routeGameSelect.addEventListener("change", applyRouteGameSelection);
 
@@ -6046,6 +6374,21 @@
       els.cancelBatchUpgrade.addEventListener("click", closeBatchUpgradeModal);
       els.batchUpgradeModal.addEventListener("click", (event) => {
         if (event.target === els.batchUpgradeModal) closeBatchUpgradeModal();
+      });
+      els.batchUpgradeFilters.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-batch-filter]");
+        if (!button) return;
+        state.batchUpgradeFilter = button.dataset.batchFilter || "all";
+        renderBatchUpgradeModal();
+      });
+      els.batchUpgradeRows.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-batch-retry]");
+        if (!button) return;
+        retryBatchUpgradeNode(button.dataset.batchRetry).catch((error) => {
+          state.batchUpgradeRunning = false;
+          showInlineError(els.batchUpgradeError, error.message);
+          renderBatchUpgradeModal();
+        });
       });
       els.startBatchUpgrade.addEventListener("click", () => {
         startBatchUpgrade().catch((error) => {
@@ -6220,18 +6563,22 @@
       });
 
       els.applyAuditFilter.addEventListener("click", () => {
+        resetPagination("audit");
         loadAuditLogs().catch(showError);
       });
 
       els.auditNodeFilter.addEventListener("change", () => {
+        resetPagination("audit");
         loadAuditLogs().catch(showError);
       });
 
       els.auditActionFilter.addEventListener("change", () => {
+        resetPagination("audit");
         loadAuditLogs().catch(showError);
       });
 
       els.auditLimitFilter.addEventListener("change", () => {
+        resetPagination("audit");
         loadAuditLogs().catch(showError);
       });
 
