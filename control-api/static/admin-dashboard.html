@@ -1236,6 +1236,12 @@
         font-weight: 820;
       }
 
+      .insight-value.small {
+        overflow-wrap: anywhere;
+        font-size: 16px;
+        line-height: 1.45;
+      }
+
       .insight-note {
         color: var(--muted);
         font-size: 13px;
@@ -2367,6 +2373,10 @@
             <span class="nav-icon"></span>
             <span>操作日志</span>
           </button>
+          <button class="nav-item" type="button" data-view="settings">
+            <span class="nav-icon"></span>
+            <span>系统设置</span>
+          </button>
           <button class="nav-item" type="button" data-view="admins">
             <span class="nav-icon"></span>
             <span>权限管理</span>
@@ -2374,7 +2384,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.46.0</span>
+          <span class="mono">v0.47.0</span>
         </div>
       </aside>
 
@@ -3042,6 +3052,72 @@
             <div class="pager hidden" id="adminUserPager"></div>
           </div>
         </section>
+
+        <section class="view hidden" id="viewSettings" data-view-panel="settings">
+          <section class="grid-3">
+            <div class="insight-card">
+              <h3>控制面版本</h3>
+              <div class="insight-value">0.47.0</div>
+              <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
+            </div>
+            <div class="insight-card">
+              <h3>访问地址</h3>
+              <div class="insight-value small" id="systemPublicBaseUrl">--</div>
+              <div class="insight-note">节点安装令牌会使用这个地址回连控制面。</div>
+            </div>
+            <div class="insight-card">
+              <h3>健康检查</h3>
+              <div class="insight-value small" id="systemHealthUrl">--</div>
+              <div class="insight-note">服务启动后应返回 ready 和 database ok。</div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">部署和维护命令</div>
+                <div class="panel-meta">控制面服务器执行；复制前确认 MySQL root 密码和公网地址。</div>
+              </div>
+            </div>
+            <div class="message hidden" data-readonly-only>
+              当前账号是只读权限，只能查看系统状态。部署、卸载和清理命令需要运维人员或超级管理员。
+            </div>
+            <div class="action-grid" data-write-action>
+              <div class="operation-card">
+                <div class="operation-title">升级控制面</div>
+                <div class="message">保留现有配置、管理员令牌和数据库，只拉取最新 release 并重启服务。</div>
+                <textarea id="systemUpgradeCommand" readonly></textarea>
+                <div class="form-actions">
+                  <button type="button" data-copy-system-command="systemUpgradeCommand">复制升级命令</button>
+                </div>
+              </div>
+              <div class="operation-card">
+                <div class="operation-title">新服务器一键安装</div>
+                <div class="message">会自动创建 xaccel 数据库和账号，并授权 localhost、127.0.0.1、172.17.0.1、172.17.% 来源。</div>
+                <textarea id="systemInstallMysqlCommand" readonly></textarea>
+                <div class="form-actions">
+                  <button type="button" data-copy-system-command="systemInstallMysqlCommand">复制安装命令</button>
+                </div>
+              </div>
+              <div class="operation-card">
+                <div class="operation-title">卸载控制面</div>
+                <div class="message">默认只删除服务和二进制，保留配置、日志和数据库，方便回滚。</div>
+                <textarea id="systemUninstallCommand" readonly></textarea>
+                <div class="form-actions">
+                  <button type="button" data-copy-system-command="systemUninstallCommand">复制卸载命令</button>
+                </div>
+              </div>
+              <div class="operation-card">
+                <div class="operation-title">完全清理</div>
+                <div class="message">会删除配置、日志、xaccel 数据库和账号。只在确认备份后使用。</div>
+                <textarea id="systemPurgeCommand" readonly></textarea>
+                <div class="form-actions">
+                  <button class="danger" type="button" data-copy-system-command="systemPurgeCommand">复制清理命令</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
       </section>
     </main>
 
@@ -3485,6 +3561,7 @@
         routes: "游戏路由",
         ops: "运维工具",
         audit: "操作日志",
+        settings: "系统设置",
         admins: "权限管理",
       };
 
@@ -3692,10 +3769,17 @@
         adminUserError: document.getElementById("adminUserError"),
         adminPasswordHelp: document.getElementById("adminPasswordHelp"),
         controlUpgradeCommand: document.getElementById("controlUpgradeCommand"),
+        systemPublicBaseUrl: document.getElementById("systemPublicBaseUrl"),
+        systemHealthUrl: document.getElementById("systemHealthUrl"),
+        systemUpgradeCommand: document.getElementById("systemUpgradeCommand"),
+        systemInstallMysqlCommand: document.getElementById("systemInstallMysqlCommand"),
+        systemUninstallCommand: document.getElementById("systemUninstallCommand"),
+        systemPurgeCommand: document.getElementById("systemPurgeCommand"),
       };
 
       els.loginTokenInput.value = state.token;
       refreshControlUpgradeCommand();
+      renderSystemSettings();
 
       function setLoggedIn(loggedIn) {
         els.loginScreen.classList.toggle("hidden", loggedIn);
@@ -3924,6 +4008,9 @@
         document.querySelectorAll("[data-write-action]").forEach((item) => {
           item.classList.toggle("hidden", Boolean(admin) && !canWrite());
         });
+        document.querySelectorAll("[data-readonly-only]").forEach((item) => {
+          item.classList.toggle("hidden", !admin || canWrite());
+        });
         renderPermissionMatrix();
       }
 
@@ -3944,6 +4031,9 @@
         }
         if (state.activeView === "admins" && state.token && isSuperAdmin()) {
           loadAdminUsers({ silent: true }).catch(showError);
+        }
+        if (state.activeView === "settings") {
+          renderSystemSettings();
         }
       }
 
@@ -4927,10 +5017,40 @@
   --public-base-url ${defaultPublicBaseUrl()}`;
       }
 
+      function controlPanelInstallWithMysqlCommand() {
+        return `curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \\
+  --database-url 'mysql://xaccel:xaccel_password@127.0.0.1:3306/xaccel' \\
+  --init-mysql \\
+  --mysql-root-password '替换成你的MySQLRoot密码' \\
+  --listen 0.0.0.0:18080 \\
+  --public-base-url ${defaultPublicBaseUrl()}`;
+      }
+
+      function controlPanelUninstallCommand() {
+        return `curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-uninstall.sh | sudo bash`;
+      }
+
+      function controlPanelPurgeCommand() {
+        return `curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-uninstall.sh | sudo bash -s -- \\
+  --purge \\
+  --purge-db \\
+  --mysql-root-password '替换成你的MySQLRoot密码'`;
+      }
+
       function refreshControlUpgradeCommand() {
         if (els.controlUpgradeCommand) {
           els.controlUpgradeCommand.value = controlPanelUpgradeCommand();
         }
+      }
+
+      function renderSystemSettings() {
+        const publicBaseUrl = defaultPublicBaseUrl();
+        if (els.systemPublicBaseUrl) els.systemPublicBaseUrl.textContent = publicBaseUrl;
+        if (els.systemHealthUrl) els.systemHealthUrl.textContent = `${publicBaseUrl}/health`;
+        if (els.systemUpgradeCommand) els.systemUpgradeCommand.value = controlPanelUpgradeCommand();
+        if (els.systemInstallMysqlCommand) els.systemInstallMysqlCommand.value = controlPanelInstallWithMysqlCommand();
+        if (els.systemUninstallCommand) els.systemUninstallCommand.value = controlPanelUninstallCommand();
+        if (els.systemPurgeCommand) els.systemPurgeCommand.value = controlPanelPurgeCommand();
       }
 
       function nodeEndpoint(node) {
@@ -7120,6 +7240,14 @@
       });
 
       document.addEventListener("click", (event) => {
+        const copyCommandButton = event.target.closest("[data-copy-system-command]");
+        if (copyCommandButton) {
+          renderSystemSettings();
+          const target = document.getElementById(copyCommandButton.dataset.copySystemCommand);
+          copyToClipboard(target?.value || "", copyCommandButton);
+          return;
+        }
+
         const button = event.target.closest("[data-page-action]");
         if (!button || button.disabled) return;
         const key = button.dataset.pageKey;

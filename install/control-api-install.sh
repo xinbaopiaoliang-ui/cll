@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.46.0"
+INSTALLER_VERSION="0.47.0"
 SERVICE_NAME="xaccel-control-api"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-control-api"
@@ -22,6 +22,17 @@ CREDENTIAL_KEY=""
 ARTIFACT_URL=""
 SHA256_URL=""
 DRY_RUN="0"
+INIT_MYSQL="0"
+MYSQL_ROOT_PASSWORD=""
+MYSQL_ROOT_CNF="/root/.xaccel-mysql-root.cnf"
+MYSQL_GRANT_HOSTS=("localhost" "127.0.0.1" "172.17.0.1" "172.17.%")
+SKIP_DB_PREFLIGHT="0"
+
+DB_USER=""
+DB_PASSWORD=""
+DB_HOST=""
+DB_PORT="3306"
+DB_NAME=""
 
 usage() {
   cat <<'USAGE'
@@ -42,7 +53,27 @@ Options:
   --artifact-url URL      Override xaccel-control-api tar.gz download URL.
   --sha256-url URL        Override xaccel-control-api sha256 download URL.
   --dry-run               Run preflight only and print planned actions.
+  --init-mysql            Create database/user and grant local Docker bridge hosts before install.
+  --mysql-root-password P MySQL root password for --init-mysql.
+  --mysql-root-cnf PATH   MySQL root defaults file. Default: /root/.xaccel-mysql-root.cnf.
+  --mysql-grant-host HOST Extra app user grant host. Can be repeated.
+  --skip-db-preflight     Skip mysql client connection check.
   -h, --help              Show this help.
+
+Examples:
+  # Existing database/user already works.
+  control-api-install.sh \
+    --database-url 'mysql://xaccel:xaccel_password@127.0.0.1:3306/xaccel' \
+    --listen 0.0.0.0:18080 \
+    --public-base-url http://103.201.131.99:18080
+
+  # New control-panel server: create DB/user and grant 127.0.0.1 + 172.17.*.
+  control-api-install.sh \
+    --database-url 'mysql://xaccel:xaccel_password@127.0.0.1:3306/xaccel' \
+    --init-mysql \
+    --mysql-root-password 'MysqlRoot_2026' \
+    --listen 0.0.0.0:18080 \
+    --public-base-url http://103.201.131.99:18080
 USAGE
 }
 
@@ -101,6 +132,26 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN="1"
       shift
       ;;
+    --init-mysql)
+      INIT_MYSQL="1"
+      shift
+      ;;
+    --mysql-root-password)
+      MYSQL_ROOT_PASSWORD="${2:-}"
+      shift 2
+      ;;
+    --mysql-root-cnf)
+      MYSQL_ROOT_CNF="${2:-}"
+      shift 2
+      ;;
+    --mysql-grant-host)
+      MYSQL_GRANT_HOSTS+=("${2:-}")
+      shift 2
+      ;;
+    --skip-db-preflight)
+      SKIP_DB_PREFLIGHT="1"
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -115,6 +166,51 @@ require_root() {
   [[ "$(id -u)" == "0" ]] || fail "please run as root"
 }
 
+validate_identifier() {
+  local value="$1" field="$2"
+  [[ -n "$value" ]] || fail "${field} is required"
+  [[ "$value" =~ ^[A-Za-z0-9_]+$ ]] || fail "${field} may only contain letters, numbers, and underscore"
+}
+
+sql_string() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\'/\\\'}"
+  printf "'%s'" "$value"
+}
+
+parse_database_url() {
+  [[ "$DATABASE_URL" == mysql://* ]] || fail "--database-url must start with mysql://"
+
+  local rest credentials host_path host_port
+  rest="${DATABASE_URL#mysql://}"
+  [[ "$rest" == *@* ]] || fail "--database-url must include user:password@host"
+
+  credentials="${rest%%@*}"
+  host_path="${rest#*@}"
+  [[ "$credentials" == *:* ]] || fail "--database-url must include database password"
+
+  DB_USER="${credentials%%:*}"
+  DB_PASSWORD="${credentials#*:}"
+  host_port="${host_path%%/*}"
+  DB_NAME="${host_path#*/}"
+  DB_NAME="${DB_NAME%%\?*}"
+
+  if [[ "$host_port" == *:* ]]; then
+    DB_HOST="${host_port%%:*}"
+    DB_PORT="${host_port##*:}"
+  else
+    DB_HOST="$host_port"
+    DB_PORT="3306"
+  fi
+
+  validate_identifier "$DB_NAME" "database name from --database-url"
+  validate_identifier "$DB_USER" "database user from --database-url"
+  [[ -n "$DB_PASSWORD" ]] || fail "database password from --database-url is empty"
+  [[ -n "$DB_HOST" ]] || fail "database host from --database-url is empty"
+  [[ "$DB_PORT" =~ ^[0-9]+$ ]] || fail "database port from --database-url must be numeric"
+}
+
 detect_arch() {
   case "$(uname -m)" in
     x86_64|amd64) echo "x86_64" ;;
@@ -125,6 +221,7 @@ detect_arch() {
 
 preflight() {
   require_root
+  parse_database_url
   command -v systemctl >/dev/null 2>&1 || fail "systemd is required"
   command -v curl >/dev/null 2>&1 || fail "curl is required"
   command -v tar >/dev/null 2>&1 || fail "tar is required"
@@ -135,6 +232,47 @@ preflight() {
   [[ "$MAX_DB_CONNECTIONS" =~ ^[0-9]+$ ]] || fail "--max-db-connections must be numeric"
   (( TOKEN_TTL_SEC >= 1 )) || fail "--token-ttl-sec must be positive"
   (( MAX_DB_CONNECTIONS >= 1 )) || fail "--max-db-connections must be positive"
+  if [[ "$INIT_MYSQL" == "1" || "$SKIP_DB_PREFLIGHT" != "1" ]]; then
+    command -v mysql >/dev/null 2>&1 || fail "mysql client is required; install mysql-client or rerun with --skip-db-preflight"
+  fi
+}
+
+mysql_root_cmd() {
+  if [[ -n "$MYSQL_ROOT_PASSWORD" ]]; then
+    mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" "$@"
+  elif [[ -f "$MYSQL_ROOT_CNF" ]]; then
+    mysql --defaults-extra-file="$MYSQL_ROOT_CNF" "$@"
+  else
+    mysql -uroot "$@"
+  fi
+}
+
+init_mysql_if_requested() {
+  [[ "$INIT_MYSQL" == "1" ]] || return 0
+
+  log "initialize MySQL database=${DB_NAME} user=${DB_USER}"
+  local db_name_sql db_user_sql db_password_sql grant_host host_sql
+  db_name_sql="\`${DB_NAME}\`"
+  db_user_sql="$(sql_string "$DB_USER")"
+  db_password_sql="$(sql_string "$DB_PASSWORD")"
+
+  {
+    printf 'CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n' "$db_name_sql"
+    for grant_host in "${MYSQL_GRANT_HOSTS[@]}"; do
+      [[ -n "$grant_host" ]] || continue
+      host_sql="$(sql_string "$grant_host")"
+      printf 'CREATE USER IF NOT EXISTS %s@%s IDENTIFIED BY %s;\n' "$db_user_sql" "$host_sql" "$db_password_sql"
+      printf 'ALTER USER %s@%s IDENTIFIED BY %s;\n' "$db_user_sql" "$host_sql" "$db_password_sql"
+      printf 'GRANT ALL PRIVILEGES ON %s.* TO %s@%s;\n' "$db_name_sql" "$db_user_sql" "$host_sql"
+    done
+    printf 'FLUSH PRIVILEGES;\n'
+  } | mysql_root_cmd
+}
+
+test_database_connection() {
+  [[ "$SKIP_DB_PREFLIGHT" == "1" ]] && return 0
+  log "check MySQL connection: ${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+  MYSQL_PWD="$DB_PASSWORD" mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" "$DB_NAME" -e "SELECT 1;" >/dev/null
 }
 
 generate_admin_token_if_needed() {
@@ -344,6 +482,8 @@ main() {
     exit 0
   fi
 
+  init_mysql_if_requested
+  test_database_connection
   install_binary_release
   install_ssh_tools_if_possible
   generate_admin_token_if_needed

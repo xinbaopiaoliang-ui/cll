@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.1.0"
+INSTALLER_VERSION="0.2.0"
 DB_NAME="xaccel"
 DB_USER="xaccel"
 DB_PASSWORD=""
@@ -28,6 +28,7 @@ Options:
   --mysql-root-password PASS  MySQL root password. Generated when MySQL is installed by this script.
   --bind-address ADDR         MySQL bind address. Default: 127.0.0.1.
   --allow-remote-user         Also create DB user at '%' for remote control-api access.
+                              The script always creates localhost, 127.0.0.1, 172.17.0.1 and 172.17.% users.
   --import-sql PATH           Import an existing SQL backup after creating DB and user.
   --skip-schema               Do not load db/schema.sql when --import-sql is not used.
   --schema-url URL            Schema SQL URL. Default: project db/schema.sql from main.
@@ -323,12 +324,21 @@ create_database_user() {
   local db_password_sql
   db_password_sql="$(sql_string "$DB_PASSWORD")"
 
-  log "create database and user: ${DB_NAME}/${DB_USER}@127.0.0.1"
+  log "create database and local users: ${DB_NAME}/${DB_USER}@127.0.0.1,localhost,172.17.0.1,172.17.%"
   mysql_root_cmd <<SQL
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY ${db_password_sql};
+ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY ${db_password_sql};
+GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';
 CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY ${db_password_sql};
 ALTER USER '${DB_USER}'@'127.0.0.1' IDENTIFIED BY ${db_password_sql};
 GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'127.0.0.1';
+CREATE USER IF NOT EXISTS '${DB_USER}'@'172.17.0.1' IDENTIFIED BY ${db_password_sql};
+ALTER USER '${DB_USER}'@'172.17.0.1' IDENTIFIED BY ${db_password_sql};
+GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'172.17.0.1';
+CREATE USER IF NOT EXISTS '${DB_USER}'@'172.17.%' IDENTIFIED BY ${db_password_sql};
+ALTER USER '${DB_USER}'@'172.17.%' IDENTIFIED BY ${db_password_sql};
+GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'172.17.%';
 SQL
 
   if [[ "$ALLOW_REMOTE_USER" == "1" ]]; then

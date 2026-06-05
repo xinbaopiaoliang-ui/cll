@@ -9871,6 +9871,8 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("游戏管理"));
         assert!(ADMIN_DASHBOARD_HTML.contains("游戏路由"));
         assert!(ADMIN_DASHBOARD_HTML.contains("操作日志"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("系统设置"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("部署和维护命令"));
         assert!(ADMIN_DASHBOARD_HTML.contains("canWrite()"));
         assert!(ADMIN_DASHBOARD_HTML.contains("readonlyActionsCell"));
         assert!(ADMIN_DASHBOARD_HTML.contains("assertCanWrite"));
@@ -9971,6 +9973,13 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("deployNodeModal"));
         assert!(ADMIN_DASHBOARD_HTML.contains("openDeployNodeModal"));
         assert!(ADMIN_DASHBOARD_HTML.contains("controlUpgradeCommand"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("systemInstallMysqlCommand"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("systemUninstallCommand"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("systemPurgeCommand"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("--init-mysql"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("control-api-uninstall.sh"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-copy-system-command"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-readonly-only"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/games"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/game-route-rules"));
