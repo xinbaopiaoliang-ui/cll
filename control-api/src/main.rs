@@ -70,6 +70,14 @@ const ADMIN_SESSION_VERSION: &str = "v1";
 const ADMIN_SESSION_TTL_SEC: u64 = 8 * 60 * 60;
 const ADMIN_PASSWORD_SCHEME: &str = "pbkdf2-sha256";
 const ADMIN_PASSWORD_ITERATIONS: u32 = 120_000;
+const SYSTEM_DIAGNOSTIC_CORE_TABLES: [&str; 6] = [
+    "accel_nodes",
+    "accel_games",
+    "game_route_rules",
+    "node_runtime_reports",
+    "node_health_alerts",
+    "node_operation_tasks",
+];
 
 #[derive(Debug, Parser)]
 #[command(name = "xaccel-control-api")]
@@ -2469,25 +2477,8 @@ async fn build_system_diagnostics(state: &AppState) -> AdminSystemDiagnosticsRes
         }
     }
 
-    match system_count(
-        &state.pool,
-        r#"
-SELECT CAST(COUNT(*) AS UNSIGNED)
-FROM information_schema.tables
-WHERE table_schema = DATABASE()
-  AND table_name IN (
-    'accel_nodes',
-    'accel_games',
-    'game_route_rules',
-    'node_runtime_reports',
-    'node_health_alerts',
-    'operation_tasks'
-  )
-"#,
-    )
-    .await
-    {
-        Ok(6) => push_system_check(
+    match system_core_table_count(&state.pool).await {
+        Ok(found) if found == SYSTEM_DIAGNOSTIC_CORE_TABLES.len() as u64 => push_system_check(
             &mut checks,
             "schema",
             "核心数据表",
@@ -2690,6 +2681,18 @@ WHERE table_schema = DATABASE()
 
 async fn system_count(pool: &MySqlPool, sql: &str) -> Result<u64, sqlx::Error> {
     sqlx::query_scalar::<_, u64>(sql).fetch_one(pool).await
+}
+
+async fn system_core_table_count(pool: &MySqlPool) -> Result<u64, sqlx::Error> {
+    let mut query = QueryBuilder::<MySql>::new(
+        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN (",
+    );
+    let mut separated = query.separated(", ");
+    for table in SYSTEM_DIAGNOSTIC_CORE_TABLES {
+        separated.push_bind(table);
+    }
+    separated.push_unseparated(")");
+    query.build_query_scalar::<u64>().fetch_one(pool).await
 }
 
 fn push_system_check(
@@ -10301,6 +10304,13 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("method: \"PATCH\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("method: \"DELETE\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("bootstrap-token"));
+    }
+
+    #[test]
+    fn system_diagnostics_use_current_core_table_names() {
+        assert!(SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"node_operation_tasks"));
+        assert!(!SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"operation_tasks"));
+        assert_eq!(SYSTEM_DIAGNOSTIC_CORE_TABLES.len(), 6);
     }
 
     #[test]
