@@ -703,7 +703,7 @@
 
       .batch-upgrade-layout {
         display: grid;
-        grid-template-columns: minmax(250px, 0.42fr) minmax(0, 1fr);
+        grid-template-columns: minmax(248px, 300px) minmax(0, 1fr);
         gap: 16px;
         align-items: start;
       }
@@ -751,10 +751,18 @@
         flex-wrap: wrap;
         gap: 8px;
         align-items: center;
+        justify-content: space-between;
         padding: 10px;
         border: 1px solid var(--line);
         border-radius: 8px;
         background: rgba(247, 250, 249, 0.78);
+      }
+
+      .batch-filter-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
       }
 
       .batch-filter-bar button {
@@ -773,15 +781,16 @@
         max-height: min(58vh, 620px);
         display: grid;
         gap: 10px;
-        overflow: auto;
-        padding-right: 2px;
+        overflow-x: hidden;
+        overflow-y: auto;
+        padding-right: 4px;
       }
 
       .batch-upgrade-item {
         min-width: 0;
         display: grid;
-        grid-template-columns: minmax(190px, 0.86fr) minmax(120px, 0.48fr) minmax(150px, 0.56fr) minmax(150px, 0.56fr) minmax(220px, 1fr);
-        gap: 12px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
         align-items: start;
         padding: 14px;
         border: 1px solid var(--line);
@@ -804,6 +813,27 @@
         display: grid;
         gap: 5px;
         color: var(--ink);
+        overflow-wrap: anywhere;
+      }
+
+      .batch-upgrade-cell:first-child,
+      .batch-upgrade-cell:last-child {
+        grid-column: 1 / -1;
+      }
+
+      .batch-upgrade-cell:first-child {
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .batch-upgrade-cell:nth-child(2),
+      .batch-upgrade-cell:nth-child(3),
+      .batch-upgrade-cell:nth-child(4) {
+        min-height: 72px;
+        padding: 10px;
+        border: 1px solid rgba(205, 218, 225, 0.72);
+        border-radius: 8px;
+        background: rgba(247, 250, 249, 0.64);
       }
 
       .batch-upgrade-label {
@@ -825,6 +855,7 @@
         color: var(--muted);
         font-size: 12px;
         line-height: 1.5;
+        overflow-wrap: anywhere;
       }
 
       .batch-result strong {
@@ -1992,6 +2023,11 @@
           grid-template-columns: 1fr;
         }
 
+        .batch-upgrade-cell:first-child,
+        .batch-upgrade-cell:last-child {
+          grid-column: auto;
+        }
+
         .permission-role-card,
         .permission-role-card:last-child {
           border-right: 0;
@@ -2134,7 +2170,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.42.0</span>
+          <span class="mono">v0.43.0</span>
         </div>
       </aside>
 
@@ -2928,9 +2964,13 @@
             </div>
             <div class="batch-upgrade-results">
               <div class="batch-filter-bar" id="batchUpgradeFilters" aria-label="批量升级结果筛选">
-                <button type="button" class="active" data-batch-filter="all">全部</button>
-                <button type="button" data-batch-filter="succeeded">成功</button>
-                <button type="button" data-batch-filter="failed">失败</button>
+                <div class="batch-filter-group">
+                  <button type="button" class="active" data-batch-filter="all">全部</button>
+                  <button type="button" data-batch-filter="pending">待执行</button>
+                  <button type="button" data-batch-filter="succeeded">成功</button>
+                  <button type="button" data-batch-filter="failed">失败</button>
+                </div>
+                <button type="button" id="batchCopySummary">复制摘要</button>
               </div>
               <div class="batch-upgrade-list" id="batchUpgradeRows">
                 <div class="empty">还没有选择节点。</div>
@@ -3268,6 +3308,7 @@
         startBatchUpgrade: document.getElementById("startBatchUpgrade"),
         batchUpgradeMeta: document.getElementById("batchUpgradeMeta"),
         batchUpgradeFilters: document.getElementById("batchUpgradeFilters"),
+        batchCopySummary: document.getElementById("batchCopySummary"),
         batchUpgradeRows: document.getElementById("batchUpgradeRows"),
         batchSelectedCount: document.getElementById("batchSelectedCount"),
         batchReadyCount: document.getElementById("batchReadyCount"),
@@ -4196,7 +4237,17 @@
         return state.batchUpgradeResults[Number(nodeId)] || { status: "waiting", message: "等待执行" };
       }
 
+      function batchResultStatusText(status) {
+        if (status === "succeeded") return "成功";
+        if (status === "failed") return "失败";
+        if (status === "running") return "执行中";
+        return "等待";
+      }
+
       function batchResultVisible(result) {
+        if (state.batchUpgradeFilter === "pending") {
+          return result.status === "waiting" || result.status === "running";
+        }
         return state.batchUpgradeFilter === "all" || result.status === state.batchUpgradeFilter;
       }
 
@@ -4242,10 +4293,7 @@
           result.status === "running" ? "warn" :
           "warn";
         const statusText =
-          result.status === "succeeded" ? "成功" :
-          result.status === "failed" ? "失败" :
-          result.status === "running" ? "执行中" :
-          "等待";
+          batchResultStatusText(result.status);
         const retryButton =
           result.status === "failed" && canWrite() && !state.batchUpgradeRunning && nodeUpgradeEligibility(node).eligible
             ? `<button type="button" data-batch-retry="${node.id}">重试</button>`
@@ -4257,6 +4305,22 @@
             ${retryButton ? `<div class="batch-result-actions">${retryButton}</div>` : ""}
           </div>
         `;
+      }
+
+      function batchUpgradeSummaryText() {
+        const selected = selectedBatchNodes();
+        if (!selected.length) return "";
+        const lines = selected.map((node) => {
+          const result = batchResult(node.id);
+          return [
+            `[${batchResultStatusText(result.status)}]`,
+            node.name,
+            nodeEndpoint(node),
+            `ID ${node.id}`,
+            result.message || "--",
+          ].join(" / ");
+        });
+        return [`批量升级节点：${selected.length} 台`, ...lines].join("\n");
       }
 
       function renderBatchUpgradeModal() {
@@ -4272,6 +4336,9 @@
         els.batchUpgradeMeta.textContent = `${ready.length} 台可升级 / ${selected.length - ready.length} 台会跳过`;
         els.startBatchUpgrade.disabled = state.batchUpgradeRunning || ready.length === 0;
         els.startBatchUpgrade.textContent = state.batchUpgradeRunning ? "升级中..." : "开始批量升级";
+        if (els.batchCopySummary) {
+          els.batchCopySummary.disabled = selected.length === 0;
+        }
         if (els.batchUpgradeFilters) {
           [...els.batchUpgradeFilters.querySelectorAll("[data-batch-filter]")].forEach((button) => {
             button.classList.toggle("active", button.dataset.batchFilter === state.batchUpgradeFilter);
@@ -6380,6 +6447,11 @@
         if (!button) return;
         state.batchUpgradeFilter = button.dataset.batchFilter || "all";
         renderBatchUpgradeModal();
+      });
+      els.batchCopySummary.addEventListener("click", (event) => {
+        const summary = batchUpgradeSummaryText();
+        if (!summary) return;
+        copyToClipboard(summary, event.currentTarget, "已复制");
       });
       els.batchUpgradeRows.addEventListener("click", (event) => {
         const button = event.target.closest("[data-batch-retry]");

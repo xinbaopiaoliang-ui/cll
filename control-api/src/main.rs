@@ -9242,6 +9242,9 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("startBatchUpgrade"));
         assert!(ADMIN_DASHBOARD_HTML.contains("batchUpgradeFilter"));
         assert!(ADMIN_DASHBOARD_HTML.contains("batchUpgradeFilters"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("batchCopySummary"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("batchUpgradeSummaryText"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-batch-filter=\"pending\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("retryBatchUpgradeNode"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-batch-retry"));
         assert!(ADMIN_DASHBOARD_HTML.contains("nodeUpgradeEligibility"));
