@@ -1895,6 +1895,26 @@
         font-size: 12px;
       }
 
+      .system-check-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .system-fix-button {
+        min-height: 30px;
+        padding: 0 11px;
+        border-color: rgba(11, 104, 93, 0.28);
+        color: var(--brand);
+        background: rgba(255, 255, 255, 0.82);
+        font-size: 12px;
+      }
+
+      .system-fix-button:hover {
+        background: rgba(231, 247, 243, 0.92);
+      }
+
       .diagnostic-result {
         margin-top: 14px;
         text-align: left;
@@ -2514,7 +2534,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.48.1</span>
+          <span class="mono">v0.49.0</span>
         </div>
       </aside>
 
@@ -3187,7 +3207,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.48.1</div>
+              <div class="insight-value">0.49.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -5246,6 +5266,87 @@
         return "";
       }
 
+      function systemDiagnosticAction(item, data) {
+        if (!item || item.status === "ok") return null;
+        const counts = data?.counts || {};
+        if (item.key === "nodes") {
+          if ((counts.nodes_total || 0) === 0 && canWrite()) {
+            return { action: "create_node", label: "新增节点" };
+          }
+          return { action: "view_nodes", label: "查看节点" };
+        }
+        if (item.key === "routes") {
+          return canWrite()
+            ? { action: "create_route", label: "新增路由" }
+            : { action: "view_routes", label: "查看路由" };
+        }
+        if (item.key === "alerts") {
+          return { action: "view_alerts", label: "查看告警" };
+        }
+        if (["schema", "public_base_url", "credential_key", "database"].includes(item.key)) {
+          return canWrite()
+            ? { action: "settings_commands", label: "查看安装命令" }
+            : { action: "settings_view", label: "查看系统设置" };
+        }
+        return null;
+      }
+
+      function renderSystemDiagnosticAction(item, data) {
+        const action = systemDiagnosticAction(item, data);
+        if (!action) return "";
+        return `
+          <div class="system-check-actions">
+            <button class="system-fix-button" type="button" data-system-fix="${escapeHtml(action.action)}">
+              ${escapeHtml(action.label)}
+            </button>
+          </div>
+        `;
+      }
+
+      function focusSystemCommandPanel() {
+        renderSystemSettings();
+        window.requestAnimationFrame(() => {
+          const commandPanel = els.systemInstallMysqlCommand?.closest(".operation-card");
+          commandPanel?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+      }
+
+      function handleSystemDiagnosticAction(action) {
+        if (action === "create_node") {
+          setActiveView("nodes");
+          openCreateNodeModal();
+          return;
+        }
+        if (action === "view_nodes") {
+          setActiveView("nodes");
+          if (state.selectedId) loadDetail(state.selectedId, { silent: true }).catch(showError);
+          return;
+        }
+        if (action === "create_route") {
+          setActiveView("routes");
+          openRouteRuleModal();
+          return;
+        }
+        if (action === "view_routes") {
+          setActiveView("routes");
+          loadRouteRules().catch(showError);
+          return;
+        }
+        if (action === "view_alerts") {
+          setActiveView("alerts");
+          loadHealthAlerts().catch(showError);
+          return;
+        }
+        if (action === "settings_commands") {
+          setActiveView("settings");
+          focusSystemCommandPanel();
+          return;
+        }
+        if (action === "settings_view") {
+          setActiveView("settings");
+        }
+      }
+
       function renderSystemDiagnostics() {
         const data = state.systemDiagnostics;
         if (!data) {
@@ -5282,6 +5383,7 @@
                   <div class="system-check-body">
                     <div>${escapeHtml(item.message || "--")}</div>
                     ${item.suggestion ? `<div class="system-check-suggestion">${escapeHtml(item.suggestion)}</div>` : ""}
+                    ${renderSystemDiagnosticAction(item, data)}
                   </div>
                 </div>
               `;
@@ -7504,6 +7606,12 @@
           renderSystemSettings();
           const target = document.getElementById(copyCommandButton.dataset.copySystemCommand);
           copyToClipboard(target?.value || "", copyCommandButton);
+          return;
+        }
+
+        const systemFixButton = event.target.closest("[data-system-fix]");
+        if (systemFixButton) {
+          handleSystemDiagnosticAction(systemFixButton.dataset.systemFix);
           return;
         }
 

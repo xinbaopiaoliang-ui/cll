@@ -10296,6 +10296,9 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("data-readonly-only"));
         assert!(ADMIN_DASHBOARD_HTML.contains("控制面自检"));
         assert!(ADMIN_DASHBOARD_HTML.contains("runSystemDiagnostics"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("systemDiagnosticAction"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("handleSystemDiagnosticAction"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-system-fix"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/system/diagnostics"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/nodes"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/games"));
