@@ -9243,6 +9243,13 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("batchUpgradeFilter"));
         assert!(ADMIN_DASHBOARD_HTML.contains("batchUpgradeFilters"));
         assert!(ADMIN_DASHBOARD_HTML.contains("batchCopySummary"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("batchTaskPicker"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("batchTaskAction"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("nodeBatchEligibility"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("runBatchTaskNode"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-batch-action=\"test_connection\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-batch-action=\"restart_node_service\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-batch-action=\"resume_scheduling\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("batchUpgradeSummaryText"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-batch-filter=\"pending\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("retryBatchUpgradeNode"));

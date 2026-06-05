@@ -740,6 +740,41 @@
         font-weight: 820;
       }
 
+      .batch-task-picker {
+        display: grid;
+        gap: 8px;
+      }
+
+      .batch-task-picker button {
+        min-height: 58px;
+        width: 100%;
+        display: grid;
+        justify-items: start;
+        gap: 4px;
+        padding: 10px 12px;
+        border-color: var(--line);
+        background: rgba(255, 255, 255, 0.74);
+        text-align: left;
+      }
+
+      .batch-task-picker button strong {
+        color: var(--ink);
+        font-size: 13px;
+        line-height: 1.2;
+      }
+
+      .batch-task-picker button span {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.25;
+      }
+
+      .batch-task-picker button.active {
+        border-color: rgba(23, 120, 111, 0.32);
+        background: rgba(23, 120, 111, 0.1);
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+
       .batch-upgrade-results {
         min-width: 0;
         display: grid;
@@ -2170,7 +2205,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.43.0</span>
+          <span class="mono">v0.44.0</span>
         </div>
       </aside>
 
@@ -2300,8 +2335,8 @@
                   <div class="panel-meta" id="listMeta">最多 500 条</div>
                 </div>
                 <div class="inline-actions" data-write-action>
-                  <button type="button" id="selectUpgradeableNodes">选择可升级</button>
-                  <button class="primary" type="button" id="openBatchUpgrade" disabled>批量升级</button>
+                  <button type="button" id="selectUpgradeableNodes">选择可操作</button>
+                  <button class="primary" type="button" id="openBatchUpgrade" disabled>批量任务</button>
                 </div>
               </div>
               <div class="table-wrap">
@@ -2309,7 +2344,7 @@
                   <thead>
                     <tr>
                       <th class="node-select-cell">
-                        <input id="batchSelectAllNodes" type="checkbox" title="选择全部可升级节点" />
+                        <input id="batchSelectAllNodes" type="checkbox" title="选择全部可操作节点" />
                       </th>
                       <th>节点</th>
                       <th>状态</th>
@@ -2927,8 +2962,8 @@
       <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="batchUpgradeTitle">
         <div class="modal-head">
           <div>
-            <div class="panel-title" id="batchUpgradeTitle">批量升级节点</div>
-            <div class="panel-meta" id="batchUpgradeMeta">选择多台已配置 SSH 的节点后，控制面会逐台执行升级命令。</div>
+            <div class="panel-title" id="batchUpgradeTitle">批量任务中心</div>
+            <div class="panel-meta" id="batchUpgradeMeta">选择节点和任务类型后，控制面会逐台执行远程运维动作。</div>
           </div>
           <button id="closeBatchUpgrade" type="button">关闭</button>
         </div>
@@ -2941,7 +2976,7 @@
                   <div class="batch-stat-value" id="batchSelectedCount">0</div>
                 </div>
                 <div class="batch-stat">
-                  <div class="batch-stat-label">可升级</div>
+                  <div class="batch-stat-label">可执行</div>
                   <div class="batch-stat-value" id="batchReadyCount">0</div>
                 </div>
                 <div class="batch-stat">
@@ -2953,17 +2988,35 @@
                   <div class="batch-stat-value" id="batchFailedCount">0</div>
                 </div>
               </div>
+              <div class="batch-task-picker" id="batchTaskPicker" aria-label="批量任务类型">
+                <button type="button" class="active" data-batch-action="upgrade_node">
+                  <strong>升级节点</strong>
+                  <span>更新节点内核</span>
+                </button>
+                <button type="button" data-batch-action="test_connection">
+                  <strong>测试 SSH</strong>
+                  <span>验证账号密码</span>
+                </button>
+                <button type="button" data-batch-action="restart_node_service">
+                  <strong>重启服务</strong>
+                  <span>重启 xaccel-node</span>
+                </button>
+                <button type="button" data-batch-action="resume_scheduling">
+                  <strong>恢复调度</strong>
+                  <span>退出排空 / 禁用</span>
+                </button>
+              </div>
               <div class="message">
-                批量升级会复用单节点 SSH 升级接口，每台节点都会生成运维任务和操作日志。执行过程中不要关闭控制面服务。
+                SSH 类任务会复用单节点远程运维接口，恢复调度会调用节点状态接口；每台节点都会留下任务记录或操作日志。
               </div>
               <div class="message error-text hidden" id="batchUpgradeError"></div>
               <div class="form-actions">
                 <button id="cancelBatchUpgrade" type="button">取消</button>
-                <button class="primary" id="startBatchUpgrade" type="button">开始批量升级</button>
+                <button class="primary" id="startBatchUpgrade" type="button">开始执行任务</button>
               </div>
             </div>
             <div class="batch-upgrade-results">
-              <div class="batch-filter-bar" id="batchUpgradeFilters" aria-label="批量升级结果筛选">
+              <div class="batch-filter-bar" id="batchUpgradeFilters" aria-label="批量任务结果筛选">
                 <div class="batch-filter-group">
                   <button type="button" class="active" data-batch-filter="all">全部</button>
                   <button type="button" data-batch-filter="pending">待执行</button>
@@ -3191,6 +3244,7 @@
         batchSelectedNodeIds: new Set(),
         batchUpgradeResults: {},
         batchUpgradeFilter: "all",
+        batchTaskAction: "upgrade_node",
         batchUpgradeRunning: false,
         pagination: {
           nodes: { page: 1, pageSize: 10 },
@@ -3303,10 +3357,12 @@
         selectUpgradeableNodes: document.getElementById("selectUpgradeableNodes"),
         openBatchUpgrade: document.getElementById("openBatchUpgrade"),
         batchUpgradeModal: document.getElementById("batchUpgradeModal"),
+        batchUpgradeTitle: document.getElementById("batchUpgradeTitle"),
         closeBatchUpgrade: document.getElementById("closeBatchUpgrade"),
         cancelBatchUpgrade: document.getElementById("cancelBatchUpgrade"),
         startBatchUpgrade: document.getElementById("startBatchUpgrade"),
         batchUpgradeMeta: document.getElementById("batchUpgradeMeta"),
+        batchTaskPicker: document.getElementById("batchTaskPicker"),
         batchUpgradeFilters: document.getElementById("batchUpgradeFilters"),
         batchCopySummary: document.getElementById("batchCopySummary"),
         batchUpgradeRows: document.getElementById("batchUpgradeRows"),
@@ -3396,6 +3452,49 @@
         opsTasks: "任务",
         audit: "日志",
         admins: "账号",
+      };
+
+      const BATCH_TASK_ACTIONS = {
+        upgrade_node: {
+          label: "升级节点",
+          title: "批量升级节点",
+          readyLabel: "可升级",
+          runningText: "正在通过 SSH 执行升级命令",
+          emptyText: "没有可升级节点，请先保存 SSH 凭据。",
+          confirmText: (count) => `确定批量升级 ${count} 台节点吗？控制面会逐台通过 SSH 执行升级命令。`,
+          successText: (count) => `批量升级完成，${count} 台全部成功`,
+          failedText: (failed) => `批量升级完成，${failed} 台失败，请在任务中心查看详情`,
+        },
+        test_connection: {
+          label: "测试 SSH",
+          title: "批量测试 SSH",
+          readyLabel: "可测试",
+          runningText: "正在测试 SSH 连接",
+          emptyText: "没有可测试节点，请先保存 SSH 凭据。",
+          confirmText: (count) => `确定批量测试 ${count} 台节点的 SSH 连接吗？`,
+          successText: (count) => `批量 SSH 测试完成，${count} 台全部成功`,
+          failedText: (failed) => `批量 SSH 测试完成，${failed} 台失败`,
+        },
+        restart_node_service: {
+          label: "重启服务",
+          title: "批量重启节点服务",
+          readyLabel: "可重启",
+          runningText: "正在通过 SSH 重启 xaccel-node 服务",
+          emptyText: "没有可重启服务的节点，请先保存 SSH 凭据。",
+          confirmText: (count) => `确定批量重启 ${count} 台节点的 xaccel-node 服务吗？`,
+          successText: (count) => `批量重启服务完成，${count} 台全部成功`,
+          failedText: (failed) => `批量重启服务完成，${failed} 台失败`,
+        },
+        resume_scheduling: {
+          label: "恢复调度",
+          title: "批量恢复调度",
+          readyLabel: "可恢复",
+          runningText: "正在提交恢复调度状态",
+          emptyText: "没有可恢复调度的节点，请先选择排空、禁用或离线节点。",
+          confirmText: (count) => `确定批量恢复 ${count} 台节点的调度吗？提交后会等待节点健康上报恢复在线。`,
+          successText: (count) => `批量恢复调度已提交，${count} 台全部成功`,
+          failedText: (failed) => `批量恢复调度完成，${failed} 台失败`,
+        },
       };
 
       function paginationState(key) {
@@ -4161,10 +4260,21 @@
         return `${user}@${host}:${port}`;
       }
 
-      function nodeUpgradeEligibility(node) {
+      function batchActionConfig(action = state.batchTaskAction) {
+        return BATCH_TASK_ACTIONS[action] || BATCH_TASK_ACTIONS.upgrade_node;
+      }
+
+      function nodeBatchEligibility(node, action = state.batchTaskAction) {
+        const config = batchActionConfig(action);
         const ssh = node?.ssh_credential || {};
         if (!canWrite()) {
-          return { eligible: false, className: "bad", label: "无权限", reason: "当前账号不能执行升级" };
+          return { eligible: false, className: "bad", label: "无权限", reason: `当前账号不能执行${config.label}` };
+        }
+        if (action === "resume_scheduling") {
+          if (canResumeScheduling(node)) {
+            return { eligible: true, className: "ok", label: "可恢复", reason: "节点处于排空、禁用或离线状态，可提交恢复调度" };
+          }
+          return { eligible: false, className: "warn", label: "无需恢复", reason: "只有排空、禁用或离线节点需要恢复调度" };
         }
         if (!ssh.configured) {
           return { eligible: false, className: "warn", label: "缺少 SSH", reason: "请先在节点详情里保存服务器账号密码" };
@@ -4173,12 +4283,16 @@
           return { eligible: true, className: "warn", label: "可尝试", reason: "SSH 上次检查失败，建议先测试连接" };
         }
         if (node.status !== "online") {
-          return { eligible: true, className: "warn", label: "可尝试", reason: "节点当前不在线，升级后可能需要等待上报" };
+          return { eligible: true, className: "warn", label: "可尝试", reason: "节点当前不在线，执行后可能需要等待上报" };
         }
         if (statusClass(node) === "bad") {
-          return { eligible: true, className: "warn", label: "可尝试", reason: "最近上报延迟，升级后会重新检查版本" };
+          return { eligible: true, className: "warn", label: "可尝试", reason: "最近上报延迟，执行后会重新检查节点状态" };
         }
-        return { eligible: true, className: "ok", label: "可升级", reason: "已配置 SSH，可执行批量升级" };
+        return { eligible: true, className: "ok", label: config.readyLabel, reason: `已配置 SSH，可执行${config.label}` };
+      }
+
+      function nodeUpgradeEligibility(node) {
+        return nodeBatchEligibility(node, "upgrade_node");
       }
 
       function selectedBatchNodes() {
@@ -4186,14 +4300,13 @@
       }
 
       function selectedReadyBatchNodes() {
-        return selectedBatchNodes().filter((node) => nodeUpgradeEligibility(node).eligible);
+        return selectedBatchNodes().filter((node) => nodeBatchEligibility(node).eligible);
       }
 
       function syncBatchSelection() {
         const validIds = new Set(state.nodes.map((node) => Number(node.id)));
         [...state.batchSelectedNodeIds].forEach((id) => {
-          const node = state.nodes.find((item) => Number(item.id) === Number(id));
-          if (!validIds.has(Number(id)) || !nodeUpgradeEligibility(node).eligible) {
+          if (!validIds.has(Number(id))) {
             state.batchSelectedNodeIds.delete(Number(id));
           }
         });
@@ -4201,21 +4314,21 @@
 
       function updateBatchUpgradeControls() {
         if (!els.openBatchUpgrade) return;
-        const eligibleNodes = state.nodes.filter((node) => nodeUpgradeEligibility(node).eligible);
-        const selected = selectedReadyBatchNodes();
+        const eligibleNodes = state.nodes.filter((node) => nodeBatchEligibility(node).eligible);
+        const selected = selectedBatchNodes();
         els.openBatchUpgrade.disabled = !canWrite() || selected.length === 0 || state.batchUpgradeRunning;
-        els.openBatchUpgrade.textContent = selected.length ? `批量升级（${selected.length}）` : "批量升级";
+        els.openBatchUpgrade.textContent = selected.length ? `批量任务（${selected.length}）` : "批量任务";
         els.selectUpgradeableNodes.disabled = !canWrite() || eligibleNodes.length === 0 || state.batchUpgradeRunning;
-        els.batchSelectAllNodes.disabled = !canWrite() || eligibleNodes.length === 0 || state.batchUpgradeRunning;
-        els.batchSelectAllNodes.checked = eligibleNodes.length > 0 && selected.length === eligibleNodes.length;
-        els.batchSelectAllNodes.indeterminate = selected.length > 0 && selected.length < eligibleNodes.length;
+        els.batchSelectAllNodes.disabled = !canWrite() || state.nodes.length === 0 || state.batchUpgradeRunning;
+        els.batchSelectAllNodes.checked = state.nodes.length > 0 && selected.length === state.nodes.length;
+        els.batchSelectAllNodes.indeterminate = selected.length > 0 && selected.length < state.nodes.length;
       }
 
       function setBatchSelection(nodeId, checked) {
         const id = Number(nodeId);
         const node = state.nodes.find((item) => Number(item.id) === id);
         if (!node) return;
-        if (checked && nodeUpgradeEligibility(node).eligible) {
+        if (checked && canWrite()) {
           state.batchSelectedNodeIds.add(id);
         } else {
           state.batchSelectedNodeIds.delete(id);
@@ -4224,10 +4337,10 @@
       }
 
       function selectUpgradeableNodes() {
-        if (!assertCanWrite("选择批量升级节点")) return;
+        if (!assertCanWrite("选择批量任务节点")) return;
         state.batchSelectedNodeIds = new Set(
           state.nodes
-            .filter((node) => nodeUpgradeEligibility(node).eligible)
+            .filter((node) => nodeBatchEligibility(node).eligible)
             .map((node) => Number(node.id)),
         );
         renderNodes();
@@ -4251,36 +4364,61 @@
         return state.batchUpgradeFilter === "all" || result.status === state.batchUpgradeFilter;
       }
 
-      function batchUpgradeMessage(data) {
+      function compactBatchOutput(value, maxLength = 140) {
+        const text = String(value || "").replace(/\s+/g, " ").trim();
+        if (!text) return "";
+        return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+      }
+
+      function batchTaskMessage(data) {
         const versionLine = sshVersionCheckLines(data.version_check).join(" / ");
+        const outputLine = compactBatchOutput(data.output);
         return [
           data.task ? `任务 #${data.task.id}` : "",
           `${data.command_label} / exit ${data.exit_code ?? "--"} / ${data.duration_ms}ms`,
           versionLine,
+          outputLine ? `输出：${outputLine}` : "",
         ].filter(Boolean).join(" / ");
       }
 
-      async function runBatchUpgradeNode(node) {
+      async function runBatchTaskNode(node, action = state.batchTaskAction) {
+        if (action === "resume_scheduling") {
+          await api(`/api/admin/v1/nodes/${node.id}/status`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              status: "offline",
+              reason: "批量恢复调度：退出排空或禁用保护，等待节点健康上报恢复在线",
+            }),
+          });
+          state.batchUpgradeResults[node.id] = {
+            status: "succeeded",
+            message: "已提交恢复调度，等待节点健康上报恢复在线",
+          };
+          return;
+        }
+
         const data = await api(`/api/admin/v1/nodes/${node.id}/ssh-actions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "upgrade_node" }),
+          body: JSON.stringify({ action }),
         });
         state.batchUpgradeResults[node.id] = {
           status: data.status === "failed" ? "failed" : "succeeded",
-          message: batchUpgradeMessage(data),
+          message: batchTaskMessage(data),
         };
       }
 
-      async function upgradeBatchNode(node) {
-        state.batchUpgradeResults[node.id] = { status: "running", message: "正在通过 SSH 执行升级命令" };
+      async function executeBatchTaskNode(node, action = state.batchTaskAction) {
+        const config = batchActionConfig(action);
+        state.batchUpgradeResults[node.id] = { status: "running", message: config.runningText };
         renderBatchUpgradeModal();
         try {
-          await runBatchUpgradeNode(node);
+          await runBatchTaskNode(node, action);
         } catch (error) {
           state.batchUpgradeResults[node.id] = {
             status: "failed",
-            message: error.message || "升级失败",
+            message: error.message || `${config.label}失败`,
           };
         }
         renderBatchUpgradeModal();
@@ -4295,7 +4433,7 @@
         const statusText =
           batchResultStatusText(result.status);
         const retryButton =
-          result.status === "failed" && canWrite() && !state.batchUpgradeRunning && nodeUpgradeEligibility(node).eligible
+          result.status === "failed" && canWrite() && !state.batchUpgradeRunning && nodeBatchEligibility(node).eligible
             ? `<button type="button" data-batch-retry="${node.id}">重试</button>`
             : "";
         return `
@@ -4308,6 +4446,7 @@
       }
 
       function batchUpgradeSummaryText() {
+        const config = batchActionConfig();
         const selected = selectedBatchNodes();
         if (!selected.length) return "";
         const lines = selected.map((node) => {
@@ -4320,22 +4459,30 @@
             result.message || "--",
           ].join(" / ");
         });
-        return [`批量升级节点：${selected.length} 台`, ...lines].join("\n");
+        return [`${config.title}：${selected.length} 台`, ...lines].join("\n");
       }
 
       function renderBatchUpgradeModal() {
+        const config = batchActionConfig();
         const selected = selectedBatchNodes();
         const ready = selectedReadyBatchNodes();
         const results = Object.values(state.batchUpgradeResults || {});
         const done = results.filter((item) => item.status === "succeeded").length;
         const failed = results.filter((item) => item.status === "failed").length;
+        els.batchUpgradeTitle.textContent = config.title;
         els.batchSelectedCount.textContent = selected.length;
         els.batchReadyCount.textContent = ready.length;
         els.batchDoneCount.textContent = done;
         els.batchFailedCount.textContent = failed;
-        els.batchUpgradeMeta.textContent = `${ready.length} 台可升级 / ${selected.length - ready.length} 台会跳过`;
+        els.batchUpgradeMeta.textContent = `${ready.length} 台${config.readyLabel} / ${selected.length - ready.length} 台会跳过`;
         els.startBatchUpgrade.disabled = state.batchUpgradeRunning || ready.length === 0;
-        els.startBatchUpgrade.textContent = state.batchUpgradeRunning ? "升级中..." : "开始批量升级";
+        els.startBatchUpgrade.textContent = state.batchUpgradeRunning ? "执行中..." : `开始${config.label}`;
+        if (els.batchTaskPicker) {
+          [...els.batchTaskPicker.querySelectorAll("[data-batch-action]")].forEach((button) => {
+            button.classList.toggle("active", button.dataset.batchAction === state.batchTaskAction);
+            button.disabled = state.batchUpgradeRunning;
+          });
+        }
         if (els.batchCopySummary) {
           els.batchCopySummary.disabled = selected.length === 0;
         }
@@ -4348,7 +4495,7 @@
         const visibleNodes = selected.filter((node) => batchResultVisible(batchResult(node.id)));
         els.batchUpgradeRows.innerHTML = visibleNodes.length
           ? visibleNodes.map((node) => {
-              const eligibility = nodeUpgradeEligibility(node);
+              const eligibility = nodeBatchEligibility(node);
               const result = batchResult(node.id);
               return `
                 <div class="batch-upgrade-item" data-node-id="${node.id}" data-result-status="${escapeHtml(result.status)}">
@@ -4384,10 +4531,10 @@
       }
 
       function openBatchUpgradeModal() {
-        if (!assertCanWrite("批量升级节点")) return;
+        if (!assertCanWrite("批量任务节点")) return;
         syncBatchSelection();
-        if (!selectedReadyBatchNodes().length) {
-          showStatusError("请先选择至少一台已配置 SSH 的节点。");
+        if (!selectedBatchNodes().length) {
+          showStatusError("请先选择至少一台节点。");
           return;
         }
         clearInlineError(els.batchUpgradeError);
@@ -4403,13 +4550,15 @@
       }
 
       async function startBatchUpgrade() {
-        if (!assertCanWrite("批量升级节点")) return;
+        if (!assertCanWrite("批量任务节点")) return;
+        const action = state.batchTaskAction;
+        const config = batchActionConfig(action);
         const nodes = selectedReadyBatchNodes();
         if (!nodes.length) {
-          showInlineError(els.batchUpgradeError, "没有可升级节点，请先保存 SSH 凭据。");
+          showInlineError(els.batchUpgradeError, config.emptyText);
           return;
         }
-        const confirmed = window.confirm(`确定批量升级 ${nodes.length} 台节点吗？控制面会逐台通过 SSH 执行升级命令。`);
+        const confirmed = window.confirm(config.confirmText(nodes.length));
         if (!confirmed) return;
 
         clearInlineError(els.batchUpgradeError);
@@ -4418,7 +4567,7 @@
         renderBatchUpgradeModal();
 
         for (const node of nodes) {
-          await upgradeBatchNode(node);
+          await executeBatchTaskNode(node, action);
         }
 
         state.batchUpgradeRunning = false;
@@ -4431,25 +4580,26 @@
         const results = Object.values(state.batchUpgradeResults);
         const failed = results.filter((item) => item.status === "failed").length;
         els.statusLine.textContent = failed
-          ? `批量升级完成，${failed} 台失败，请在任务中心查看详情`
-          : `批量升级完成，${results.length} 台全部成功`;
+          ? config.failedText(failed)
+          : config.successText(results.length);
         els.statusLine.classList.toggle("error-state", failed > 0);
         els.statusLine.classList.toggle("connected", failed === 0);
       }
 
       async function retryBatchUpgradeNode(nodeId) {
-        if (!assertCanWrite("重试批量升级节点")) return;
+        if (!assertCanWrite("重试批量任务节点")) return;
         if (state.batchUpgradeRunning) return;
         const node = state.nodes.find((item) => Number(item.id) === Number(nodeId));
         if (!node) return;
-        const eligibility = nodeUpgradeEligibility(node);
+        const action = state.batchTaskAction;
+        const eligibility = nodeBatchEligibility(node, action);
         if (!eligibility.eligible) {
           showInlineError(els.batchUpgradeError, eligibility.reason);
           return;
         }
         clearInlineError(els.batchUpgradeError);
         state.batchUpgradeRunning = true;
-        await upgradeBatchNode(node);
+        await executeBatchTaskNode(node, action);
         state.batchUpgradeRunning = false;
         await loadNodes({ silent: true });
         await loadOperationTasks({ silent: true });
@@ -4699,7 +4849,7 @@
             const endpoint = node.endpoint || `${node.server_ip}:${node.server_port}`;
             const resumeEnabled = canResumeScheduling(node);
             const canRestart = node.status === "online";
-            const upgradeEligibility = nodeUpgradeEligibility(node);
+            const batchEligibility = nodeBatchEligibility(node);
             const selectedForBatch = state.batchSelectedNodeIds.has(Number(node.id));
             const actionCell = canWrite()
               ? `
@@ -4725,7 +4875,7 @@
                     type="checkbox"
                     data-node-select="${node.id}"
                     ${selectedForBatch ? "checked" : ""}
-                    ${upgradeEligibility.eligible ? "" : `disabled title="${escapeHtml(upgradeEligibility.reason)}"`}
+                    ${canWrite() ? `title="${escapeHtml(batchEligibility.reason)}"` : "disabled title=\"只读账号不能选择批量任务节点\""}
                   />
                 </td>
                 <td>
@@ -6430,7 +6580,8 @@
       els.selectUpgradeableNodes.addEventListener("click", selectUpgradeableNodes);
       els.batchSelectAllNodes.addEventListener("change", (event) => {
         if (event.target.checked) {
-          selectUpgradeableNodes();
+          state.batchSelectedNodeIds = new Set(state.nodes.map((node) => Number(node.id)));
+          renderNodes();
         } else {
           state.batchSelectedNodeIds.clear();
           renderNodes();
@@ -6441,6 +6592,17 @@
       els.cancelBatchUpgrade.addEventListener("click", closeBatchUpgradeModal);
       els.batchUpgradeModal.addEventListener("click", (event) => {
         if (event.target === els.batchUpgradeModal) closeBatchUpgradeModal();
+      });
+      els.batchTaskPicker.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-batch-action]");
+        if (!button || state.batchUpgradeRunning) return;
+        state.batchTaskAction = button.dataset.batchAction || "upgrade_node";
+        state.batchUpgradeResults = {};
+        state.batchUpgradeFilter = "all";
+        clearInlineError(els.batchUpgradeError);
+        syncBatchSelection();
+        renderNodes();
+        renderBatchUpgradeModal();
       });
       els.batchUpgradeFilters.addEventListener("click", (event) => {
         const button = event.target.closest("[data-batch-filter]");
