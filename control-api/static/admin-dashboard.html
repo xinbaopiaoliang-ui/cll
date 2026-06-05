@@ -2347,6 +2347,10 @@
             <span class="nav-icon"></span>
             <span>节点管理</span>
           </button>
+          <button class="nav-item" type="button" data-view="alerts">
+            <span class="nav-icon"></span>
+            <span>健康告警</span>
+          </button>
           <button class="nav-item" type="button" data-view="games">
             <span class="nav-icon"></span>
             <span>游戏管理</span>
@@ -2370,7 +2374,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.45.0</span>
+          <span class="mono">v0.46.0</span>
         </div>
       </aside>
 
@@ -2464,7 +2468,7 @@
               </div>
             </div>
             <div class="alert-list" id="overviewAlertRows">
-              <div class="alert-empty">节点加载后会自动识别上报中断、监听异常、版本落后和 SSH 问题。</div>
+              <div class="alert-empty">节点加载后会自动识别上报中断、监听异常和 SSH 问题。</div>
             </div>
           </section>
 
@@ -2835,6 +2839,67 @@
           </section>
         </section>
 
+        <section class="view hidden" id="viewAlerts" data-view-panel="alerts">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">健康告警</div>
+                <div class="panel-meta" id="healthAlertMeta">节点巡检、确认处理和自动恢复记录</div>
+              </div>
+              <div class="inline-actions">
+                <button type="button" id="refreshHealthAlerts">刷新告警</button>
+              </div>
+            </div>
+            <div class="audit-toolbar">
+              <div class="field">
+                <label for="healthAlertNodeFilter">节点</label>
+                <select id="healthAlertNodeFilter">
+                  <option value="">全部节点</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="healthAlertStatusFilter">状态</label>
+                <select id="healthAlertStatusFilter">
+                  <option value="active" selected>未恢复</option>
+                  <option value="open">未处理</option>
+                  <option value="acknowledged">已确认</option>
+                  <option value="ignored">已忽略</option>
+                  <option value="resolved">已恢复</option>
+                  <option value="all">全部状态</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="healthAlertSeverityFilter">级别</label>
+                <select id="healthAlertSeverityFilter">
+                  <option value="">全部级别</option>
+                  <option value="critical">严重</option>
+                  <option value="warning">提醒</option>
+                </select>
+              </div>
+              <button type="button" id="applyHealthAlertFilter">筛选</button>
+            </div>
+            <div class="table-wrap">
+              <table class="audit-table">
+                <thead>
+                  <tr>
+                    <th>告警</th>
+                    <th>节点</th>
+                    <th>状态</th>
+                    <th>时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="healthAlertRows">
+                  <tr>
+                    <td colspan="5"><span class="skeleton"></span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pager hidden" id="healthAlertPager"></div>
+          </div>
+        </section>
+
         <section class="view hidden" id="viewAudit" data-view-panel="audit">
           <div class="panel">
             <div class="panel-head">
@@ -2863,6 +2928,7 @@
                   <option value="node.ssh_action_failed">SSH 操作失败</option>
                   <option value="node.ssh_credential.upsert">保存 SSH 凭据</option>
                   <option value="node.ssh_credential.delete">删除 SSH 凭据</option>
+                  <option value="node.health_alert.update">处理健康告警</option>
                   <option value="node.status.update">状态调整</option>
                   <option value="node.config.update">配置变更</option>
                   <option value="node.bootstrap_token.create">生成安装令牌</option>
@@ -3414,14 +3480,13 @@
       const PAGE_TITLES = {
         overview: "控制总览",
         nodes: "节点管理",
+        alerts: "健康告警",
         games: "游戏管理",
         routes: "游戏路由",
         ops: "运维工具",
         audit: "操作日志",
         admins: "权限管理",
       };
-
-      const CONTROL_DASHBOARD_VERSION = "0.45.0";
 
       const state = {
         token: localStorage.getItem("xaccel_admin_token") || "",
@@ -3433,6 +3498,8 @@
           }
         })(),
         nodes: [],
+        healthAlerts: [],
+        healthAlertsLoaded: false,
         games: [],
         routeRules: [],
         operationTasks: [],
@@ -3447,6 +3514,7 @@
         batchUpgradeRunning: false,
         pagination: {
           nodes: { page: 1, pageSize: 10 },
+          alerts: { page: 1, pageSize: 10 },
           games: { page: 1, pageSize: 10 },
           routes: { page: 1, pageSize: 10 },
           opsTasks: { page: 1, pageSize: 10 },
@@ -3553,6 +3621,14 @@
         overviewNodeRows: document.getElementById("overviewNodeRows"),
         overviewRouteMeta: document.getElementById("overviewRouteMeta"),
         overviewRouteRows: document.getElementById("overviewRouteRows"),
+        healthAlertMeta: document.getElementById("healthAlertMeta"),
+        healthAlertRows: document.getElementById("healthAlertRows"),
+        healthAlertPager: document.getElementById("healthAlertPager"),
+        healthAlertNodeFilter: document.getElementById("healthAlertNodeFilter"),
+        healthAlertStatusFilter: document.getElementById("healthAlertStatusFilter"),
+        healthAlertSeverityFilter: document.getElementById("healthAlertSeverityFilter"),
+        refreshHealthAlerts: document.getElementById("refreshHealthAlerts"),
+        applyHealthAlertFilter: document.getElementById("applyHealthAlertFilter"),
         listMeta: document.getElementById("listMeta"),
         nodeRows: document.getElementById("nodeRows"),
         nodePager: document.getElementById("nodePager"),
@@ -3650,6 +3726,7 @@
       const PAGE_SIZE_OPTIONS = [10, 20, 50];
       const PAGE_LABELS = {
         nodes: "节点",
+        alerts: "告警",
         games: "游戏",
         routes: "规则",
         opsTasks: "任务",
@@ -3760,6 +3837,7 @@
 
       function renderPagedList(key) {
         if (key === "nodes") renderNodes();
+        if (key === "alerts") renderHealthAlertPage();
         if (key === "games") renderGames();
         if (key === "routes") renderRouteRules();
         if (key === "opsTasks") renderOperationTasks();
@@ -4323,6 +4401,7 @@
         if (action === "node.ssh_action_failed") return "SSH 操作失败";
         if (action === "node.deploy") return "一键部署";
         if (action === "node.deploy_failed") return "一键部署失败";
+        if (action === "node.health_alert.update") return "处理健康告警";
         return action || "操作记录";
       }
 
@@ -4356,6 +4435,9 @@
         if (item.action === "node.ssh_action" || item.action === "node.ssh_action_failed") {
           const label = detail.command_label || sshActionText(detail.action);
           return `${label || "SSH 操作"} / 耗时 ${operationTaskDuration({ duration_ms: detail.duration_ms })}${actor}`;
+        }
+        if (item.action === "node.health_alert.update") {
+          return `告警 #${detail.alert_id || "--"} / ${healthAlertStatusText(detail.status)} / ${detail.title || "--"}${actor}`;
         }
         if (item.action === "node.deploy" || item.action === "node.deploy_failed") {
           const label = detail.command_label || "一键部署 / 升级节点";
@@ -4897,30 +4979,47 @@
         return node?.latest_report?.raw?.health || {};
       }
 
-      function parseVersionParts(value) {
-        const text = String(value || "").trim().replace(/^v/i, "");
-        const match = text.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
-        if (!match) return null;
-        return [
-          Number(match[1] || 0),
-          Number(match[2] || 0),
-          Number(match[3] || 0),
-        ];
-      }
-
-      function compareVersion(left, right) {
-        const leftParts = parseVersionParts(left);
-        const rightParts = parseVersionParts(right);
-        if (!leftParts || !rightParts) return null;
-        for (let index = 0; index < 3; index += 1) {
-          if (leftParts[index] > rightParts[index]) return 1;
-          if (leftParts[index] < rightParts[index]) return -1;
-        }
-        return 0;
-      }
-
       function alertSeverityText(severity) {
         return severity === "critical" ? "严重" : "提醒";
+      }
+
+      function healthAlertStatusText(status) {
+        if (status === "open") return "未处理";
+        if (status === "acknowledged") return "已确认";
+        if (status === "ignored") return "已忽略";
+        if (status === "resolved") return "已恢复";
+        return status || "未知";
+      }
+
+      function healthAlertStatusClass(status) {
+        if (status === "resolved") return "ok";
+        if (status === "acknowledged" || status === "ignored") return "warn";
+        return "bad";
+      }
+
+      function activeHealthAlerts() {
+        if (!state.healthAlertsLoaded) {
+          return nodeHealthAlerts(state.nodes);
+        }
+        return (state.healthAlerts || []).filter((item) =>
+          item.status === "open" || item.status === "acknowledged",
+        );
+      }
+
+      function healthAlertNodeId(item) {
+        return Number(item.node_id ?? item.nodeId);
+      }
+
+      function healthAlertNodeName(item) {
+        return item.node_name || item.nodeName || `节点 ${healthAlertNodeId(item)}`;
+      }
+
+      function healthAlertEndpoint(item) {
+        return item.node_endpoint || item.endpoint || "--";
+      }
+
+      function healthAlertLastSeen(item) {
+        return item.last_seen_at || item.lastReportAt;
       }
 
       function nodeHealthAlerts(nodes = state.nodes) {
@@ -5002,16 +5101,6 @@
             });
           }
 
-          const versionCompare = compareVersion(node.kernel_version, CONTROL_DASHBOARD_VERSION);
-          if (node.kernel_version && versionCompare !== null && versionCompare < 0) {
-            alerts.push({
-              ...base,
-              severity: "warning",
-              code: "version_lag",
-              title: "节点版本落后",
-              message: `当前节点 ${node.kernel_version}，控制面 ${CONTROL_DASHBOARD_VERSION}，建议安排升级。`,
-            });
-          }
         });
 
         return alerts.sort((left, right) => {
@@ -5027,10 +5116,10 @@
 
       function renderHealthAlerts() {
         if (!els.overviewAlertRows) return;
-        const alerts = nodeHealthAlerts();
+        const alerts = activeHealthAlerts();
         const critical = alerts.filter((item) => item.severity === "critical").length;
         const warning = alerts.filter((item) => item.severity === "warning").length;
-        const affectedNodes = new Set(alerts.map((item) => item.nodeId)).size;
+        const affectedNodes = new Set(alerts.map((item) => healthAlertNodeId(item))).size;
         const filtered = alerts.filter((item) => state.alertFilter === "all" || item.severity === state.alertFilter);
 
         els.overviewAlertMeta.textContent = alerts.length
@@ -5060,7 +5149,7 @@
             <div class="alert-empty">
               <div>
                 <div class="strong">节点状态干净</div>
-                <div class="cell-note">没有发现上报中断、监听异常、版本落后或 SSH 失败。</div>
+                <div class="cell-note">没有发现上报中断、监听异常或 SSH 失败。</div>
               </div>
             </div>
           `;
@@ -5083,15 +5172,15 @@
                 <div class="alert-message">${escapeHtml(item.message)}</div>
               </div>
               <div class="alert-node">
-                <div class="strong">${escapeHtml(item.nodeName || `节点 ${item.nodeId}`)}</div>
-                <div class="mono endpoint">${escapeHtml(item.endpoint)}</div>
-                <div class="cell-note">${item.lastReportAt ? `上报 ${escapeHtml(ageText(item.lastReportAt))}` : "没有上报"}</div>
+                <div class="strong">${escapeHtml(healthAlertNodeName(item))}</div>
+                <div class="mono endpoint">${escapeHtml(healthAlertEndpoint(item))}</div>
+                <div class="cell-note">${healthAlertLastSeen(item) ? `发现 ${escapeHtml(ageText(healthAlertLastSeen(item)))}` : "等待上报"}</div>
               </div>
               <div class="alert-actions">
-                <button type="button" data-alert-node="${item.nodeId}">查看节点</button>
+                <button type="button" data-alert-node="${healthAlertNodeId(item)}">查看节点</button>
                 ${
-                  item.code === "ssh_failed" && canWrite()
-                    ? `<button type="button" data-alert-ssh-test="${item.nodeId}">测试 SSH</button>`
+                  (item.alert_key || item.code) === "ssh_failed" && canWrite()
+                    ? `<button type="button" data-alert-ssh-test="${healthAlertNodeId(item)}">测试 SSH</button>`
                     : ""
                 }
               </div>
@@ -5140,7 +5229,7 @@
           (max, node) => Math.max(max, node.last_report_at || 0),
           0,
         );
-        const alerts = nodeHealthAlerts(nodes);
+        const alerts = activeHealthAlerts();
         const criticalAlerts = alerts.filter((item) => item.severity === "critical").length;
         const warningAlerts = alerts.filter((item) => item.severity === "warning").length;
         const healthLabel = criticalAlerts ? "需处理" : warningAlerts ? "有提醒" : "正常";
@@ -5544,6 +5633,96 @@
         if (selected && state.nodes.some((node) => String(node.id) === selected)) {
           els.auditNodeFilter.value = selected;
         }
+      }
+
+      function populateHealthAlertNodeFilter() {
+        if (!els.healthAlertNodeFilter) return;
+        const selected = els.healthAlertNodeFilter.value;
+        els.healthAlertNodeFilter.innerHTML = [
+          `<option value="">全部节点</option>`,
+          ...state.nodes.map((node) => {
+            const label = `${node.name} / ${node.endpoint || `${node.server_ip}:${node.server_port}`}`;
+            return `<option value="${node.id}">${escapeHtml(label)}</option>`;
+          }),
+        ].join("");
+        if (selected && state.nodes.some((node) => String(node.id) === selected)) {
+          els.healthAlertNodeFilter.value = selected;
+        }
+      }
+
+      function renderHealthAlertPage(serverTime = state.serverTime) {
+        const allAlerts = state.healthAlerts || [];
+        const nodeId = textOrNull(els.healthAlertNodeFilter?.value);
+        const status = textOrNull(els.healthAlertStatusFilter?.value) || "active";
+        const severity = textOrNull(els.healthAlertSeverityFilter?.value);
+        const alerts = allAlerts.filter((item) => {
+          const statusMatched =
+            status === "all" ||
+            (status === "active" && ["open", "acknowledged"].includes(item.status)) ||
+            item.status === status;
+          return (
+            statusMatched &&
+            (!nodeId || String(item.node_id) === String(nodeId)) &&
+            (!severity || item.severity === severity)
+          );
+        });
+        els.healthAlertMeta.textContent = alerts.length
+          ? `${alerts.length} 条 / 刷新 ${formatClock(serverTime)}`
+          : "暂无健康告警";
+        if (!alerts.length) {
+          els.healthAlertRows.innerHTML = `<tr><td colspan="5" class="empty">暂无健康告警。节点恢复正常后，历史告警会自动标记为已恢复。</td></tr>`;
+          renderPager("alerts", 0, els.healthAlertPager);
+          return;
+        }
+
+        const visibleAlerts = paginatedItems("alerts", alerts);
+        els.healthAlertRows.innerHTML = visibleAlerts
+          .map((item) => {
+            const nodeId = healthAlertNodeId(item);
+            const canChange = canWrite() && item.status !== "resolved";
+            const actionCell = canChange
+              ? `
+                  ${item.status === "open" ? `<button type="button" data-alert-action="acknowledged" data-health-alert-id="${item.id}">确认</button>` : ""}
+                  ${item.status !== "ignored" ? `<button type="button" data-alert-action="ignored" data-health-alert-id="${item.id}">忽略</button>` : ""}
+                  ${item.status !== "open" ? `<button type="button" data-alert-action="open" data-health-alert-id="${item.id}">重新打开</button>` : ""}
+                  <button type="button" data-alert-jump-node="${nodeId}">查看节点</button>
+                `
+              : `
+                  <button type="button" data-alert-jump-node="${nodeId}">查看节点</button>
+                  ${item.status === "resolved" ? `<span class="readonly-pill">已恢复</span>` : readonlyActionsCell()}
+                `;
+            return `
+              <tr data-health-alert-id="${item.id}">
+                <td>
+                  <div class="audit-entry">
+                    <span class="chip ${item.severity === "critical" ? "bad" : "warn"}">${escapeHtml(alertSeverityText(item.severity))}</span>
+                    <span class="strong">${escapeHtml(item.title)}</span>
+                    <span class="cell-note mono">#${item.id} / ${escapeHtml(item.alert_key || "--")}</span>
+                  </div>
+                  <div class="audit-summary">${escapeHtml(item.message || "--")}</div>
+                </td>
+                <td>
+                  <span class="strong">${escapeHtml(healthAlertNodeName(item))}</span>
+                  <div class="cell-note mono">${escapeHtml(healthAlertEndpoint(item))} / ID ${nodeId}</div>
+                </td>
+                <td>
+                  <span class="chip ${healthAlertStatusClass(item.status)}">${escapeHtml(healthAlertStatusText(item.status))}</span>
+                </td>
+                <td>
+                  <div class="mono age ${ageClass(item.last_seen_at)}">${escapeHtml(ageText(item.last_seen_at))}</div>
+                  <div class="cell-note">首次 ${escapeHtml(formatTime(item.first_seen_at))}</div>
+                  <div class="cell-note">最近 ${escapeHtml(formatTime(item.last_seen_at))}</div>
+                </td>
+                <td>
+                  <div class="row-actions">
+                    ${actionCell}
+                  </div>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+        renderPager("alerts", alerts.length, els.healthAlertPager);
       }
 
       function renderAuditLogs(serverTime = state.serverTime) {
@@ -5979,10 +6158,12 @@
           state.selectedId = state.nodes[0].id;
         }
         populateAuditNodeFilter();
+        populateHealthAlertNodeFilter();
         await loadGames({ silent: true });
         await loadRouteRules({ silent: true });
         await loadOperationTasks({ silent: true });
         await loadAuditLogs({ silent: true });
+        await loadHealthAlerts({ silent: true });
         const latestReport = state.nodes.reduce(
           (max, node) => Math.max(max, node.last_report_at || 0),
           0,
@@ -6071,6 +6252,31 @@
         const data = await api(`/api/admin/v1/audit-logs?${params.toString()}`);
         state.auditLogs = data.logs || [];
         renderAuditLogs(data.server_time);
+      }
+
+      async function loadHealthAlerts({ silent = false } = {}) {
+        if (!silent && els.healthAlertRows) {
+          els.healthAlertRows.innerHTML = `<tr><td colspan="5"><span class="skeleton"></span></td></tr>`;
+        }
+        const params = new URLSearchParams({ limit: "500" });
+
+        const data = await api(`/api/admin/v1/health-alerts?${params.toString()}`);
+        state.healthAlerts = data.alerts || [];
+        state.healthAlertsLoaded = true;
+        renderHealthAlerts();
+        renderHealthAlertPage(data.server_time);
+        renderSummary({ server_time: state.serverTime || data.server_time });
+      }
+
+      async function updateHealthAlert(alertId, status) {
+        if (!assertCanWrite("处理健康告警")) return;
+        const data = await api(`/api/admin/v1/health-alerts/${alertId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        });
+        await loadHealthAlerts({ silent: true });
+        els.statusLine.textContent = `告警 #${data.alert.id} 已更新为 ${healthAlertStatusText(data.alert.status)}`;
       }
 
       async function loadAdminUsers({ silent = false } = {}) {
@@ -7227,6 +7433,42 @@
         if (!button) return;
         setActiveView("nodes");
         loadDetail(button.dataset.taskNode).catch(showError);
+      });
+
+      els.refreshHealthAlerts.addEventListener("click", () => {
+        loadHealthAlerts().catch(showError);
+      });
+
+      els.applyHealthAlertFilter.addEventListener("click", () => {
+        resetPagination("alerts");
+        renderHealthAlertPage();
+      });
+
+      els.healthAlertNodeFilter.addEventListener("change", () => {
+        resetPagination("alerts");
+        renderHealthAlertPage();
+      });
+
+      els.healthAlertStatusFilter.addEventListener("change", () => {
+        resetPagination("alerts");
+        renderHealthAlertPage();
+      });
+
+      els.healthAlertSeverityFilter.addEventListener("change", () => {
+        resetPagination("alerts");
+        renderHealthAlertPage();
+      });
+
+      els.healthAlertRows.addEventListener("click", (event) => {
+        const actionButton = event.target.closest("[data-alert-action]");
+        if (actionButton) {
+          updateHealthAlert(actionButton.dataset.healthAlertId, actionButton.dataset.alertAction).catch(showError);
+          return;
+        }
+        const nodeButton = event.target.closest("[data-alert-jump-node]");
+        if (!nodeButton) return;
+        setActiveView("nodes");
+        loadDetail(nodeButton.dataset.alertJumpNode).catch(showError);
       });
 
       els.refreshAuditLogs.addEventListener("click", () => {

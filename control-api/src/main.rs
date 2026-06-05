@@ -763,6 +763,63 @@ struct AdminListAuditLogsResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct AdminListHealthAlertsQuery {
+    node_id: Option<u64>,
+    status: Option<String>,
+    severity: Option<String>,
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminUpdateHealthAlertRequest {
+    status: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminListHealthAlertsResponse {
+    alerts: Vec<AdminHealthAlertSummary>,
+    total: usize,
+    summary: AdminHealthAlertCounts,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminHealthAlertResponse {
+    status: &'static str,
+    alert: AdminHealthAlertSummary,
+    server_time: u64,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct AdminHealthAlertCounts {
+    open: usize,
+    acknowledged: usize,
+    ignored: usize,
+    resolved: usize,
+    critical: usize,
+    warning: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminHealthAlertSummary {
+    id: u64,
+    node_id: u64,
+    node_name: String,
+    node_endpoint: String,
+    alert_key: String,
+    severity: String,
+    title: String,
+    message: String,
+    status: String,
+    first_seen_at: Option<u64>,
+    last_seen_at: Option<u64>,
+    acknowledged_at: Option<u64>,
+    acknowledged_by: Option<u64>,
+    resolved_at: Option<u64>,
+    updated_at: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
 struct AdminListGamesQuery {
     status: Option<String>,
     platform: Option<String>,
@@ -1228,6 +1285,7 @@ struct AdminNodeRow {
     latest_udp_sessions: Option<u32>,
     latest_tcp_sessions: Option<u32>,
     latest_reported_at: Option<u64>,
+    latest_report_raw_json: Option<String>,
     ssh_host: Option<String>,
     ssh_port: Option<u32>,
     ssh_username: Option<String>,
@@ -1261,6 +1319,26 @@ struct AdminAuditLogRow {
     action: String,
     created_at: Option<u64>,
     detail_json: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct HealthAlertRow {
+    id: u64,
+    node_id: u64,
+    node_name: String,
+    node_server_ip: String,
+    node_server_port: u32,
+    alert_key: String,
+    severity: String,
+    title: String,
+    message: String,
+    status: String,
+    first_seen_at: Option<u64>,
+    last_seen_at: Option<u64>,
+    acknowledged_at: Option<u64>,
+    acknowledged_by: Option<u64>,
+    resolved_at: Option<u64>,
+    updated_at: Option<u64>,
 }
 
 #[derive(Debug, FromRow)]
@@ -1445,6 +1523,14 @@ struct BusinessSyncCatalog {
     route_rules: Vec<NormalizedRouteRule>,
 }
 
+#[derive(Debug)]
+struct HealthAlertSpec {
+    key: &'static str,
+    severity: &'static str,
+    title: String,
+    message: String,
+}
+
 #[derive(Debug, FromRow)]
 struct NodeConfigRow {
     id: u64,
@@ -1623,6 +1709,11 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/admin/v1/operation-tasks/:task_id",
             get(admin_get_operation_task),
+        )
+        .route("/api/admin/v1/health-alerts", get(admin_list_health_alerts))
+        .route(
+            "/api/admin/v1/health-alerts/:alert_id",
+            patch(admin_update_health_alert),
         )
         .route("/api/admin/v1/audit-logs", get(admin_list_audit_logs))
         .route(
@@ -1817,6 +1908,7 @@ async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
     ensure_node_remote_tasks_table(pool).await?;
     ensure_node_ssh_credentials_table(pool).await?;
     ensure_node_operation_tasks_table(pool).await?;
+    ensure_node_health_alerts_table(pool).await?;
     seed_game_catalog_from_routes(pool).await?;
     Ok(())
 }
@@ -2183,6 +2275,39 @@ CREATE TABLE IF NOT EXISTS node_operation_tasks (
     .execute(pool)
     .await
     .context("failed to create node_operation_tasks")?;
+    Ok(())
+}
+
+async fn ensure_node_health_alerts_table(pool: &MySqlPool) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+CREATE TABLE IF NOT EXISTS node_health_alerts (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  node_id BIGINT UNSIGNED NOT NULL,
+  alert_key VARCHAR(64) NOT NULL,
+  severity ENUM('critical', 'warning') NOT NULL,
+  title VARCHAR(128) NOT NULL,
+  message TEXT NOT NULL,
+  status ENUM('open', 'acknowledged', 'resolved', 'ignored') NOT NULL DEFAULT 'open',
+  first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  acknowledged_at TIMESTAMP NULL,
+  acknowledged_by BIGINT UNSIGNED NULL,
+  resolved_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_node_health_alert (node_id, alert_key),
+  INDEX idx_health_alert_status (status, severity, last_seen_at),
+  INDEX idx_health_alert_node (node_id, status, last_seen_at),
+  CONSTRAINT fk_health_alert_node
+    FOREIGN KEY (node_id) REFERENCES accel_nodes(id)
+    ON DELETE CASCADE
+)
+"#,
+    )
+    .execute(pool)
+    .await
+    .context("failed to create node_health_alerts")?;
     Ok(())
 }
 
@@ -2942,6 +3067,76 @@ async fn admin_get_operation_task(
 
     Ok(Json(AdminOperationTaskResponse {
         task: AdminOperationTaskSummary::from_row(task),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_list_health_alerts(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<AdminListHealthAlertsQuery>,
+) -> Result<Json<AdminListHealthAlertsResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    reconcile_node_health_alerts(&state.pool).await?;
+    let status = query
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let severity = query
+        .severity
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let alerts = select_health_alerts(
+        &state.pool,
+        query.node_id,
+        status,
+        severity,
+        clamp_limit(query.limit, 200, 500),
+    )
+    .await?
+    .into_iter()
+    .map(AdminHealthAlertSummary::from_row)
+    .collect::<Vec<_>>();
+    let summary = health_alert_counts(&alerts);
+
+    Ok(Json(AdminListHealthAlertsResponse {
+        total: alerts.len(),
+        alerts,
+        summary,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_update_health_alert(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(alert_id): Path<u64>,
+    Json(request): Json<AdminUpdateHealthAlertRequest>,
+) -> Result<Json<AdminHealthAlertResponse>, AppError> {
+    let actor = require_admin_write(&state, &headers)?;
+    let status = validate_health_alert_status(&request.status)?;
+    let alert = update_health_alert_status(&state.pool, alert_id, status, &actor).await?;
+    insert_node_audit_log(
+        &state.pool,
+        alert.node_id,
+        actor.audit_actor_type(),
+        actor.id,
+        "node.health_alert.update",
+        serde_json::json!({
+            "alert_id": alert.id,
+            "alert_key": alert.alert_key,
+            "severity": alert.severity,
+            "status": alert.status,
+            "title": alert.title,
+        }),
+    )
+    .await?;
+
+    Ok(Json(AdminHealthAlertResponse {
+        status: "ok",
+        alert: AdminHealthAlertSummary::from_row(alert),
         server_time: now_unix(),
     }))
 }
@@ -4163,6 +4358,7 @@ SELECT
   lr.udp_sessions AS latest_udp_sessions,
   lr.tcp_sessions AS latest_tcp_sessions,
   CAST(UNIX_TIMESTAMP(lr.reported_at) AS UNSIGNED) AS latest_reported_at,
+  CAST(lr.raw_json AS CHAR) AS latest_report_raw_json,
   sc.host AS ssh_host,
   sc.port AS ssh_port,
   sc.username AS ssh_username,
@@ -4224,6 +4420,7 @@ SELECT
   lr.udp_sessions AS latest_udp_sessions,
   lr.tcp_sessions AS latest_tcp_sessions,
   CAST(UNIX_TIMESTAMP(lr.reported_at) AS UNSIGNED) AS latest_reported_at,
+  CAST(lr.raw_json AS CHAR) AS latest_report_raw_json,
   sc.host AS ssh_host,
   sc.port AS ssh_port,
   sc.username AS ssh_username,
@@ -4320,6 +4517,245 @@ WHERE 1 = 1
         .fetch_all(pool)
         .await
         .map_err(AppError::database)
+}
+
+async fn reconcile_node_health_alerts(pool: &MySqlPool) -> Result<(), AppError> {
+    let nodes = select_admin_nodes(pool, 500).await?;
+    let now = now_unix();
+    for node in nodes {
+        let specs = build_node_health_alert_specs(&node, now);
+        for spec in &specs {
+            upsert_health_alert(pool, &node, spec).await?;
+        }
+        resolve_missing_health_alerts(pool, node.id, &specs).await?;
+    }
+    Ok(())
+}
+
+async fn upsert_health_alert(
+    pool: &MySqlPool,
+    node: &AdminNodeRow,
+    spec: &HealthAlertSpec,
+) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+INSERT INTO node_health_alerts (
+  node_id,
+  alert_key,
+  severity,
+  title,
+  message,
+  status,
+  first_seen_at,
+  last_seen_at
+) VALUES (?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  severity = VALUES(severity),
+  title = VALUES(title),
+  message = VALUES(message),
+  last_seen_at = CURRENT_TIMESTAMP,
+  status = IF(node_health_alerts.status = 'resolved', 'open', node_health_alerts.status),
+  resolved_at = IF(node_health_alerts.status = 'resolved', NULL, node_health_alerts.resolved_at),
+  updated_at = CURRENT_TIMESTAMP
+"#,
+    )
+    .bind(node.id)
+    .bind(spec.key)
+    .bind(spec.severity)
+    .bind(&spec.title)
+    .bind(&spec.message)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+    Ok(())
+}
+
+async fn resolve_missing_health_alerts(
+    pool: &MySqlPool,
+    node_id: u64,
+    active_specs: &[HealthAlertSpec],
+) -> Result<(), AppError> {
+    let mut builder = QueryBuilder::<MySql>::new(
+        r#"
+UPDATE node_health_alerts
+SET
+  status = 'resolved',
+  resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP),
+  updated_at = CURRENT_TIMESTAMP
+WHERE node_id =
+"#,
+    );
+    builder.push_bind(node_id);
+    builder.push(" AND status IN ('open', 'acknowledged', 'ignored')");
+    if !active_specs.is_empty() {
+        builder.push(" AND alert_key NOT IN (");
+        {
+            let mut separated = builder.separated(", ");
+            for spec in active_specs {
+                separated.push_bind(spec.key);
+            }
+        }
+        builder.push(")");
+    }
+
+    builder
+        .build()
+        .execute(pool)
+        .await
+        .map_err(AppError::database)?;
+    Ok(())
+}
+
+async fn select_health_alerts(
+    pool: &MySqlPool,
+    node_id: Option<u64>,
+    status: Option<&str>,
+    severity: Option<&str>,
+    limit: u32,
+) -> Result<Vec<HealthAlertRow>, AppError> {
+    let mut builder = QueryBuilder::<MySql>::new(
+        r#"
+SELECT
+  h.id,
+  h.node_id,
+  n.name AS node_name,
+  n.server_ip AS node_server_ip,
+  n.server_port AS node_server_port,
+  h.alert_key,
+  h.severity,
+  h.title,
+  h.message,
+  h.status,
+  CAST(UNIX_TIMESTAMP(h.first_seen_at) AS UNSIGNED) AS first_seen_at,
+  CAST(UNIX_TIMESTAMP(h.last_seen_at) AS UNSIGNED) AS last_seen_at,
+  CAST(UNIX_TIMESTAMP(h.acknowledged_at) AS UNSIGNED) AS acknowledged_at,
+  h.acknowledged_by,
+  CAST(UNIX_TIMESTAMP(h.resolved_at) AS UNSIGNED) AS resolved_at,
+  CAST(UNIX_TIMESTAMP(h.updated_at) AS UNSIGNED) AS updated_at
+FROM node_health_alerts h
+JOIN accel_nodes n ON n.id = h.node_id
+WHERE 1 = 1
+"#,
+    );
+    if let Some(node_id) = node_id {
+        builder.push(" AND h.node_id = ");
+        builder.push_bind(node_id);
+    }
+    if let Some(status) = status {
+        match status {
+            "active" => {
+                builder.push(" AND h.status IN ('open', 'acknowledged')");
+            }
+            "all" => {}
+            status => {
+                validate_health_alert_filter_status(status)?;
+                builder.push(" AND h.status = ");
+                builder.push_bind(status);
+            }
+        };
+    }
+    if let Some(severity) = severity {
+        validate_health_alert_severity(severity)?;
+        builder.push(" AND h.severity = ");
+        builder.push_bind(severity);
+    }
+    builder.push(
+        r#"
+ORDER BY
+  FIELD(h.status, 'open', 'acknowledged', 'ignored', 'resolved'),
+  FIELD(h.severity, 'critical', 'warning'),
+  h.last_seen_at DESC,
+  h.id DESC
+LIMIT
+"#,
+    );
+    builder.push_bind(limit);
+
+    builder
+        .build_query_as::<HealthAlertRow>()
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::database)
+}
+
+async fn select_health_alert(pool: &MySqlPool, alert_id: u64) -> Result<HealthAlertRow, AppError> {
+    sqlx::query_as::<_, HealthAlertRow>(
+        r#"
+SELECT
+  h.id,
+  h.node_id,
+  n.name AS node_name,
+  n.server_ip AS node_server_ip,
+  n.server_port AS node_server_port,
+  h.alert_key,
+  h.severity,
+  h.title,
+  h.message,
+  h.status,
+  CAST(UNIX_TIMESTAMP(h.first_seen_at) AS UNSIGNED) AS first_seen_at,
+  CAST(UNIX_TIMESTAMP(h.last_seen_at) AS UNSIGNED) AS last_seen_at,
+  CAST(UNIX_TIMESTAMP(h.acknowledged_at) AS UNSIGNED) AS acknowledged_at,
+  h.acknowledged_by,
+  CAST(UNIX_TIMESTAMP(h.resolved_at) AS UNSIGNED) AS resolved_at,
+  CAST(UNIX_TIMESTAMP(h.updated_at) AS UNSIGNED) AS updated_at
+FROM node_health_alerts h
+JOIN accel_nodes n ON n.id = h.node_id
+WHERE h.id = ?
+LIMIT 1
+"#,
+    )
+    .bind(alert_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::database)?
+    .ok_or_else(|| AppError::not_found("health_alert_not_found", "health alert does not exist"))
+}
+
+async fn update_health_alert_status(
+    pool: &MySqlPool,
+    alert_id: u64,
+    status: &str,
+    actor: &AdminActor,
+) -> Result<HealthAlertRow, AppError> {
+    match status {
+        "open" => {
+            sqlx::query(
+                r#"
+UPDATE node_health_alerts
+SET status = 'open',
+    acknowledged_at = NULL,
+    acknowledged_by = NULL,
+    resolved_at = NULL,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+"#,
+            )
+            .bind(alert_id)
+            .execute(pool)
+            .await
+            .map_err(AppError::database)?;
+        }
+        "acknowledged" | "ignored" => {
+            sqlx::query(
+                r#"
+UPDATE node_health_alerts
+SET status = ?,
+    acknowledged_at = CURRENT_TIMESTAMP,
+    acknowledged_by = ?,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+"#,
+            )
+            .bind(status)
+            .bind(actor.id)
+            .bind(alert_id)
+            .execute(pool)
+            .await
+            .map_err(AppError::database)?;
+        }
+        _ => unreachable!("validated health alert status"),
+    }
+    select_health_alert(pool, alert_id).await
 }
 
 async fn select_admin_node_tasks(
@@ -6833,6 +7269,202 @@ fn normalize_ssh_credential_request(
     })
 }
 
+fn build_node_health_alert_specs(node: &AdminNodeRow, now: u64) -> Vec<HealthAlertSpec> {
+    let mut alerts = Vec::new();
+    let endpoint = format!("{}:{}", node.server_ip, node.server_port);
+
+    if node.status != "online" {
+        let planned = matches!(
+            node.status.as_str(),
+            "pending_install" | "disabled" | "draining"
+        );
+        alerts.push(HealthAlertSpec {
+            key: "node_status",
+            severity: if planned { "warning" } else { "critical" },
+            title: "节点未在线".to_string(),
+            message: format!(
+                "{}，调度会避开这个节点。",
+                node_status_value_text(&node.status)
+            ),
+        });
+    }
+
+    match node.last_report_at {
+        None => {
+            let planned = matches!(
+                node.status.as_str(),
+                "pending_install" | "disabled" | "draining"
+            );
+            alerts.push(HealthAlertSpec {
+                key: "report_missing",
+                severity: if planned { "warning" } else { "critical" },
+                title: "还没有健康上报".to_string(),
+                message: "节点没有上报运行数据，先确认内核服务和控制面地址。".to_string(),
+            });
+        }
+        Some(reported_at) => {
+            let age = now.saturating_sub(reported_at);
+            if age > 180 {
+                alerts.push(HealthAlertSpec {
+                    key: "report_stale",
+                    severity: "critical",
+                    title: "健康上报中断".to_string(),
+                    message: format!(
+                        "最近一次上报在 {} 前，可能是节点掉线或控制面不可达。",
+                        age_label(age)
+                    ),
+                });
+            } else if age > 90 {
+                alerts.push(HealthAlertSpec {
+                    key: "report_slow",
+                    severity: "warning",
+                    title: "健康上报延迟".to_string(),
+                    message: format!(
+                        "最近一次上报在 {} 前，建议观察网络和节点负载。",
+                        age_label(age)
+                    ),
+                });
+            }
+        }
+    }
+
+    if let Some(status) = node.latest_report_status.as_deref() {
+        if status != "ready" {
+            alerts.push(HealthAlertSpec {
+                key: "report_status",
+                severity: if status == "degraded" {
+                    "warning"
+                } else {
+                    "critical"
+                },
+                title: "健康上报状态异常".to_string(),
+                message: format!(
+                    "最新上报状态是 {}，需要查看节点日志。",
+                    report_status_value_text(status)
+                ),
+            });
+        }
+    }
+
+    if node.status == "online" {
+        if let Some((udp, tcp)) = latest_listener_flags(node) {
+            if udp == Some(false) || tcp == Some(false) {
+                alerts.push(HealthAlertSpec {
+                    key: "listener_down",
+                    severity: "critical",
+                    title: "监听异常".to_string(),
+                    message: format!(
+                        "{} 的监听不完整：{}，客户端可能无法接入。",
+                        endpoint,
+                        listener_flags_label(udp, tcp)
+                    ),
+                });
+            }
+        }
+    }
+
+    if node.ssh_host.is_some() && node.ssh_auth_status.as_deref() == Some("failed") {
+        alerts.push(HealthAlertSpec {
+            key: "ssh_failed",
+            severity: "warning",
+            title: "SSH 连接失败".to_string(),
+            message: node
+                .ssh_last_error
+                .clone()
+                .unwrap_or_else(|| "服务器账号密码或端口可能不对，一键升级会失败。".to_string()),
+        });
+    }
+
+    alerts
+}
+
+fn latest_listener_flags(node: &AdminNodeRow) -> Option<(Option<bool>, Option<bool>)> {
+    let raw = node.latest_report_raw_json.as_deref()?;
+    let value = serde_json::from_str::<Value>(raw).ok()?;
+    let listeners = value.get("health")?.get("listeners")?;
+    Some((
+        listeners.get("udp_listening").and_then(Value::as_bool),
+        listeners.get("tcp_listening").and_then(Value::as_bool),
+    ))
+}
+
+fn listener_flags_label(udp: Option<bool>, tcp: Option<bool>) -> String {
+    let udp = match udp {
+        Some(true) => "UDP 正常",
+        Some(false) => "UDP 异常",
+        None => "UDP 未上报",
+    };
+    let tcp = match tcp {
+        Some(true) => "TCP 正常",
+        Some(false) => "TCP 异常",
+        None => "TCP 未上报",
+    };
+    format!("{udp} / {tcp}")
+}
+
+fn node_status_value_text(status: &str) -> &'static str {
+    match status {
+        "online" => "在线",
+        "pending_install" => "待安装",
+        "installing" => "安装中",
+        "disabled" => "禁用",
+        "draining" => "排空",
+        "offline" => "离线",
+        "install_failed" => "安装失败",
+        "degraded" => "降级",
+        _ => "未知状态",
+    }
+}
+
+fn report_status_value_text(status: &str) -> &'static str {
+    match status {
+        "ready" => "就绪",
+        "error" => "异常",
+        "degraded" => "降级",
+        _ => "未知",
+    }
+}
+
+fn age_label(age: u64) -> String {
+    if age < 60 {
+        format!("{age} 秒")
+    } else if age < 3600 {
+        format!("{} 分钟", age / 60)
+    } else {
+        format!("{} 小时", age / 3600)
+    }
+}
+
+fn validate_health_alert_status(status: &str) -> Result<&str, AppError> {
+    match status.trim() {
+        "open" | "acknowledged" | "ignored" => Ok(status.trim()),
+        _ => Err(AppError::bad_request(
+            "invalid_health_alert_status",
+            "health alert status must be open, acknowledged, or ignored",
+        )),
+    }
+}
+
+fn validate_health_alert_filter_status(status: &str) -> Result<(), AppError> {
+    match status {
+        "open" | "acknowledged" | "resolved" | "ignored" => Ok(()),
+        _ => Err(AppError::bad_request(
+            "invalid_health_alert_status",
+            "health alert status filter is invalid",
+        )),
+    }
+}
+
+fn validate_health_alert_severity(severity: &str) -> Result<(), AppError> {
+    match severity {
+        "critical" | "warning" => Ok(()),
+        _ => Err(AppError::bad_request(
+            "invalid_health_alert_severity",
+            "health alert severity must be critical or warning",
+        )),
+    }
+}
+
 fn normalize_ssh_host(value: &str) -> Result<String, AppError> {
     let host = normalize_required_text(value, "ssh host", 128)?;
     let allowed = host
@@ -8207,6 +8839,47 @@ impl AdminOperationTaskSummary {
     }
 }
 
+impl AdminHealthAlertSummary {
+    fn from_row(row: HealthAlertRow) -> Self {
+        Self {
+            id: row.id,
+            node_id: row.node_id,
+            node_name: row.node_name,
+            node_endpoint: format!("{}:{}", row.node_server_ip, row.node_server_port),
+            alert_key: row.alert_key,
+            severity: row.severity,
+            title: row.title,
+            message: row.message,
+            status: row.status,
+            first_seen_at: row.first_seen_at,
+            last_seen_at: row.last_seen_at,
+            acknowledged_at: row.acknowledged_at,
+            acknowledged_by: row.acknowledged_by,
+            resolved_at: row.resolved_at,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
+fn health_alert_counts(alerts: &[AdminHealthAlertSummary]) -> AdminHealthAlertCounts {
+    let mut counts = AdminHealthAlertCounts::default();
+    for alert in alerts {
+        match alert.status.as_str() {
+            "open" => counts.open += 1,
+            "acknowledged" => counts.acknowledged += 1,
+            "ignored" => counts.ignored += 1,
+            "resolved" => counts.resolved += 1,
+            _ => {}
+        }
+        match alert.severity.as_str() {
+            "critical" => counts.critical += 1,
+            "warning" => counts.warning += 1,
+            _ => {}
+        }
+    }
+    counts
+}
+
 impl AdminUserSummary {
     fn from_row(row: AdminUserRow) -> Self {
         Self {
@@ -8492,6 +9165,7 @@ mod tests {
             latest_udp_sessions: None,
             latest_tcp_sessions: None,
             latest_reported_at: None,
+            latest_report_raw_json: None,
             ssh_host: None,
             ssh_port: None,
             ssh_username: None,
@@ -9206,7 +9880,15 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("overviewAlertRows"));
         assert!(ADMIN_DASHBOARD_HTML.contains("nodeHealthAlerts"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-alert-filter=\"critical\""));
-        assert!(ADMIN_DASHBOARD_HTML.contains("CONTROL_DASHBOARD_VERSION"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-view=\"alerts\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("healthAlertRows"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("healthAlertPager"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("loadHealthAlerts"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("updateHealthAlert"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/health-alerts"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("node.health_alert.update"));
+        assert!(!ADMIN_DASHBOARD_HTML.contains("CONTROL_DASHBOARD_VERSION"));
+        assert!(!ADMIN_DASHBOARD_HTML.contains("版本落后"));
         assert!(ADMIN_DASHBOARD_HTML.contains("账号管理只对超级管理员开放"));
         assert!(ADMIN_DASHBOARD_HTML.contains("showPermissionError"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-write-action"));
@@ -9415,6 +10097,54 @@ mod tests {
         let error = normalize_route_rule_request(&request).unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.code, "invalid_route_status");
+    }
+
+    #[test]
+    fn health_alerts_do_not_compare_node_kernel_to_control_panel_version() {
+        let mut node = valid_admin_node_row();
+        node.kernel_version = Some("0.33.0".to_string());
+        node.last_report_at = Some(2_000);
+        node.latest_report_status = Some("ready".to_string());
+        node.latest_report_raw_json = Some(
+            serde_json::json!({
+                "health": {
+                    "listeners": {
+                        "udp_listening": true,
+                        "tcp_listening": true
+                    }
+                }
+            })
+            .to_string(),
+        );
+
+        let alerts = build_node_health_alert_specs(&node, 2_020);
+
+        assert!(alerts.iter().all(|alert| alert.key != "version_lag"));
+        assert!(alerts.is_empty());
+    }
+
+    #[test]
+    fn health_alerts_detect_listener_down_from_latest_report() {
+        let mut node = valid_admin_node_row();
+        node.last_report_at = Some(2_000);
+        node.latest_report_status = Some("ready".to_string());
+        node.latest_report_raw_json = Some(
+            serde_json::json!({
+                "health": {
+                    "listeners": {
+                        "udp_listening": true,
+                        "tcp_listening": false
+                    }
+                }
+            })
+            .to_string(),
+        );
+
+        let alerts = build_node_health_alert_specs(&node, 2_020);
+
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].key, "listener_down");
+        assert_eq!(alerts[0].severity, "critical");
     }
 
     #[test]
