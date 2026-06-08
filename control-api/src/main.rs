@@ -2213,7 +2213,7 @@ async fn mysql_column_data_type(
 ) -> anyhow::Result<Option<String>> {
     let data_type = sqlx::query_scalar::<_, String>(
         r#"
-SELECT LOWER(DATA_TYPE)
+SELECT CAST(LOWER(DATA_TYPE) AS CHAR)
 FROM information_schema.COLUMNS
 WHERE TABLE_SCHEMA = DATABASE()
   AND TABLE_NAME = ?
