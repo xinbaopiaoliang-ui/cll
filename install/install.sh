@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.33.0"
+INSTALLER_VERSION="0.33.1"
 SERVICE_NAME="xaccel-node"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-node"
@@ -66,6 +66,19 @@ log() {
 fail() {
   printf '[xaccel-installer] ERROR: %s\n' "$*" >&2
   exit 1
+}
+
+download_file() {
+  local url output
+  url="$1"
+  output="$2"
+  curl -fsSL \
+    --retry 5 \
+    --retry-delay 3 \
+    --connect-timeout 20 \
+    --max-time 300 \
+    "$url" \
+    -o "$output"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -381,18 +394,18 @@ install_binary_release() {
   sha_file="${tar_file}.sha256"
 
   log "download node release: ${artifact_url}"
-  if ! curl -fsSL "$artifact_url" -o "$tar_file"; then
+  if ! download_file "$artifact_url" "$tar_file"; then
     rm -rf "$tmp_dir"
     if [[ "$ALLOW_PLACEHOLDER" == "1" ]]; then
       log "release download failed; installing placeholder because --allow-placeholder is set"
       install_binary_placeholder
       return 0
     fi
-    fail "failed to download release artifact. Create a GitHub Release first, or pass --allow-placeholder for installer-only testing"
+    fail "failed to download release artifact after retries. Check GitHub Release assets or node server access to github.com"
   fi
 
   log "download checksum: ${sha_url}"
-  if curl -fsSL "$sha_url" -o "$sha_file"; then
+  if download_file "$sha_url" "$sha_file"; then
     if command -v sha256sum >/dev/null 2>&1; then
       (cd "$tmp_dir" && sha256sum -c "$(basename "$sha_file")")
     elif command -v shasum >/dev/null 2>&1; then
@@ -403,7 +416,7 @@ install_binary_release() {
     fi
   else
     rm -rf "$tmp_dir"
-    fail "failed to download sha256 file for release artifact"
+    fail "failed to download sha256 file for release artifact after retries"
   fi
 
   tar -xzf "$tar_file" -C "$tmp_dir"

@@ -86,6 +86,19 @@ fail() {
   exit 1
 }
 
+download_file() {
+  local url output
+  url="$1"
+  output="$2"
+  curl -fsSL \
+    --retry 5 \
+    --retry-delay 3 \
+    --connect-timeout 20 \
+    --max-time 300 \
+    "$url" \
+    -o "$output"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --database-url)
@@ -370,15 +383,15 @@ install_binary_release() {
   sha_file="${tar_file}.sha256"
 
   log "download control-api release: ${artifact_url}"
-  curl -fsSL "$artifact_url" -o "$tar_file" || {
+  download_file "$artifact_url" "$tar_file" || {
     rm -rf "$tmp_dir"
-    fail "failed to download release artifact"
+    fail "failed to download release artifact after retries. Check GitHub Release assets or server access to github.com"
   }
 
   log "download checksum: ${sha_url}"
-  curl -fsSL "$sha_url" -o "$sha_file" || {
+  download_file "$sha_url" "$sha_file" || {
     rm -rf "$tmp_dir"
-    fail "failed to download sha256 file"
+    fail "failed to download sha256 file after retries"
   }
 
   if command -v sha256sum >/dev/null 2>&1; then
