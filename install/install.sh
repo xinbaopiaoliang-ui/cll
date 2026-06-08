@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.33.3"
+INSTALLER_VERSION="0.33.5"
 SERVICE_NAME="xaccel-node"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-node"
@@ -29,6 +29,7 @@ OPEN_FIREWALL="0"
 DRY_RUN="0"
 ARTIFACT_URL=""
 SHA256_URL=""
+DOWNLOAD_MODE="github-api-first"
 ALLOW_PLACEHOLDER="0"
 ENABLE_CONTROL_PLANE="0"
 
@@ -51,6 +52,7 @@ Options:
   --channel CHANNEL       Release channel. Default: stable.
   --artifact-url URL      Override xaccel-node tar.gz download URL.
   --sha256-url URL        Override xaccel-node sha256 download URL.
+  --download-mode MODE    github-api-first or standard-first. Default: github-api-first.
   --allow-placeholder     Install placeholder service if release download is unavailable.
   --enable-control-plane  Enable daemon reports to --panel-url. Standalone mode defaults off.
   --open-firewall         Try to open the node port with ufw/firewalld.
@@ -113,6 +115,18 @@ download_latest_github_asset() {
     -o "$output"
 }
 
+download_default_release_asset() {
+  local asset_name url output
+  asset_name="$1"
+  url="$2"
+  output="$3"
+  if [[ "$DOWNLOAD_MODE" == "standard-first" ]]; then
+    download_file "$url" "$output" || download_latest_github_asset "$asset_name" "$output"
+  else
+    download_latest_github_asset "$asset_name" "$output" || download_file "$url" "$output"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --bootstrap-url)
@@ -161,6 +175,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --sha256-url)
       SHA256_URL="${2:-}"
+      shift 2
+      ;;
+    --download-mode)
+      DOWNLOAD_MODE="${2:-}"
       shift 2
       ;;
     --allow-placeholder)
@@ -226,6 +244,10 @@ preflight() {
   command -v curl >/dev/null 2>&1 || fail "curl is required"
   command -v tar >/dev/null 2>&1 || fail "tar is required"
   [[ -n "$LISTEN_IP" ]] || fail "--listen-ip must not be empty"
+  case "$DOWNLOAD_MODE" in
+    github-api-first|standard-first) ;;
+    *) fail "--download-mode must be github-api-first or standard-first" ;;
+  esac
 
   if [[ "$STANDALONE" == "1" ]]; then
     [[ -n "$NODE_ID" ]] || fail "--node-id is required in standalone mode"
@@ -427,10 +449,8 @@ install_binary_release() {
 
   log "download node release: ${artifact_url}"
   if [[ -z "$ARTIFACT_URL" ]]; then
-    if download_latest_github_asset "$artifact_name" "$tar_file"; then
-      log "downloaded node release via GitHub API"
-    elif download_file "$artifact_url" "$tar_file"; then
-      :
+    if download_default_release_asset "$artifact_name" "$artifact_url" "$tar_file"; then
+      log "downloaded node release with ${DOWNLOAD_MODE}"
     else
       rm -rf "$tmp_dir"
       if [[ "$ALLOW_PLACEHOLDER" == "1" ]]; then
@@ -452,10 +472,8 @@ install_binary_release() {
 
   log "download checksum: ${sha_url}"
   if [[ -z "$SHA256_URL" ]]; then
-    if download_latest_github_asset "${artifact_name}.sha256" "$sha_file"; then
-      log "downloaded checksum via GitHub API"
-    elif download_file "$sha_url" "$sha_file"; then
-      :
+    if download_default_release_asset "${artifact_name}.sha256" "$sha_url" "$sha_file"; then
+      log "downloaded checksum with ${DOWNLOAD_MODE}"
     else
       rm -rf "$tmp_dir"
       fail "failed to download sha256 file for release artifact after retries"

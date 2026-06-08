@@ -2534,7 +2534,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.50.2</span>
+          <span class="mono">v0.51.0</span>
         </div>
       </aside>
 
@@ -3207,7 +3207,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.50.2</div>
+              <div class="insight-value">0.51.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -3220,6 +3220,65 @@
               <div class="insight-value small" id="systemHealthUrl">--</div>
               <div class="insight-note">服务启动后应返回 ready 和 database ok。</div>
             </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">下载源配置</div>
+                <div class="panel-meta">控制节点安装脚本和 release 包下载地址，节点升级会使用这里的默认值。</div>
+              </div>
+            </div>
+            <div class="message hidden" data-readonly-only>
+              当前账号是只读权限，只能查看下载源配置，不能保存修改。
+            </div>
+            <form id="systemDownloadForm" data-write-action>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="settingsNodeInstallUrl">节点安装脚本 URL</label>
+                  <input id="settingsNodeInstallUrl" name="node_install_url" autocomplete="off" />
+                  <div class="form-help">远程部署和节点升级时，会先拉取这个 install.sh。</div>
+                </div>
+                <div class="field">
+                  <label for="settingsControlInstallUrl">控制面安装脚本 URL</label>
+                  <input id="settingsControlInstallUrl" name="control_install_url" autocomplete="off" />
+                  <div class="form-help">系统设置里生成控制面升级和新装命令时使用。</div>
+                </div>
+                <div class="field">
+                  <label for="settingsReleaseDownloadMode">Release 下载策略</label>
+                  <select id="settingsReleaseDownloadMode" name="release_download_mode">
+                    <option value="github_api_first">优先 GitHub API</option>
+                    <option value="standard_first">优先标准下载</option>
+                    <option value="custom_urls">使用自定义包地址</option>
+                  </select>
+                  <div class="form-help">当前安装脚本默认优先 GitHub API；自定义包地址会追加到安装命令。</div>
+                </div>
+                <div class="field">
+                  <label for="settingsNodeArtifactUrl">节点 release 包 URL</label>
+                  <input id="settingsNodeArtifactUrl" name="node_artifact_url" autocomplete="off" placeholder="可选" />
+                  <div class="form-help">填写后节点安装命令会追加 --artifact-url。</div>
+                </div>
+                <div class="field">
+                  <label for="settingsNodeSha256Url">节点 sha256 URL</label>
+                  <input id="settingsNodeSha256Url" name="node_sha256_url" autocomplete="off" placeholder="可选" />
+                  <div class="form-help">填写后节点安装命令会追加 --sha256-url。</div>
+                </div>
+                <div class="field">
+                  <label for="settingsControlArtifactUrl">控制面 release 包 URL</label>
+                  <input id="settingsControlArtifactUrl" name="control_artifact_url" autocomplete="off" placeholder="可选" />
+                  <div class="form-help">填写后控制面升级命令会追加 --artifact-url。</div>
+                </div>
+                <div class="field">
+                  <label for="settingsControlSha256Url">控制面 sha256 URL</label>
+                  <input id="settingsControlSha256Url" name="control_sha256_url" autocomplete="off" placeholder="可选" />
+                  <div class="form-help">填写后控制面升级命令会追加 --sha256-url。</div>
+                </div>
+              </div>
+              <div class="message error-text hidden" id="systemDownloadError"></div>
+              <div class="form-actions">
+                <button class="primary" type="submit">保存下载源</button>
+              </div>
+            </form>
           </section>
 
           <section class="panel">
@@ -3772,6 +3831,15 @@
         auditLogs: [],
         adminUsers: [],
         systemDiagnostics: null,
+        systemSettings: {
+          node_install_url: "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh",
+          node_artifact_url: null,
+          node_sha256_url: null,
+          control_install_url: "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh",
+          control_artifact_url: null,
+          control_sha256_url: null,
+          release_download_mode: "github_api_first",
+        },
         selectedId: null,
         batchSelectedNodeIds: new Set(),
         batchUpgradeResults: {},
@@ -3965,6 +4033,15 @@
         systemInstallMysqlCommand: document.getElementById("systemInstallMysqlCommand"),
         systemUninstallCommand: document.getElementById("systemUninstallCommand"),
         systemPurgeCommand: document.getElementById("systemPurgeCommand"),
+        systemDownloadForm: document.getElementById("systemDownloadForm"),
+        systemDownloadError: document.getElementById("systemDownloadError"),
+        settingsNodeInstallUrl: document.getElementById("settingsNodeInstallUrl"),
+        settingsNodeArtifactUrl: document.getElementById("settingsNodeArtifactUrl"),
+        settingsNodeSha256Url: document.getElementById("settingsNodeSha256Url"),
+        settingsControlInstallUrl: document.getElementById("settingsControlInstallUrl"),
+        settingsControlArtifactUrl: document.getElementById("settingsControlArtifactUrl"),
+        settingsControlSha256Url: document.getElementById("settingsControlSha256Url"),
+        settingsReleaseDownloadMode: document.getElementById("settingsReleaseDownloadMode"),
         runSystemDiagnostics: document.getElementById("runSystemDiagnostics"),
         systemDiagnosticsMeta: document.getElementById("systemDiagnosticsMeta"),
         systemDiagnosticsStatus: document.getElementById("systemDiagnosticsStatus"),
@@ -4232,6 +4309,7 @@
         }
         if (state.activeView === "settings") {
           renderSystemSettings();
+          loadSystemSettings({ silent: true }).catch(showError);
           loadSystemDiagnostics({ silent: Boolean(state.systemDiagnostics) }).catch(showError);
         }
       }
@@ -5213,20 +5291,47 @@
         return window.location.origin;
       }
 
+      function commandArg(value) {
+        return `'${String(value ?? "").replaceAll("'", "'\\''")}'`;
+      }
+
+      function appendOptionalInstallerUrls(command, artifactUrl, sha256Url) {
+        let next = command;
+        if (artifactUrl) {
+          next += ` \\\n  --artifact-url ${commandArg(artifactUrl)}`;
+        }
+        if (sha256Url) {
+          next += ` \\\n  --sha256-url ${commandArg(sha256Url)}`;
+        }
+        return next;
+      }
+
+      function installerDownloadModeArg(mode) {
+        return mode === "standard_first" ? "standard-first" : "github-api-first";
+      }
+
       function controlPanelUpgradeCommand() {
-        return `curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \\
+        const settings = state.systemSettings || {};
+        const installUrl = settings.control_install_url || "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh";
+        const command = `curl -fsSL ${commandArg(installUrl)} | sudo bash -s -- \\
   --database-url 'mysql://xaccel:xaccel_password@127.0.0.1:3306/xaccel' \\
   --listen 0.0.0.0:18080 \\
-  --public-base-url ${defaultPublicBaseUrl()}`;
+  --public-base-url ${commandArg(defaultPublicBaseUrl())} \\
+  --download-mode ${commandArg(installerDownloadModeArg(settings.release_download_mode))}`;
+        return appendOptionalInstallerUrls(command, settings.control_artifact_url, settings.control_sha256_url);
       }
 
       function controlPanelInstallWithMysqlCommand() {
-        return `curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \\
+        const settings = state.systemSettings || {};
+        const installUrl = settings.control_install_url || "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh";
+        const command = `curl -fsSL ${commandArg(installUrl)} | sudo bash -s -- \\
   --database-url 'mysql://xaccel:xaccel_password@127.0.0.1:3306/xaccel' \\
   --init-mysql \\
   --mysql-root-password '替换成你的MySQLRoot密码' \\
   --listen 0.0.0.0:18080 \\
-  --public-base-url ${defaultPublicBaseUrl()}`;
+  --public-base-url ${commandArg(defaultPublicBaseUrl())} \\
+  --download-mode ${commandArg(installerDownloadModeArg(settings.release_download_mode))}`;
+        return appendOptionalInstallerUrls(command, settings.control_artifact_url, settings.control_sha256_url);
       }
 
       function controlPanelUninstallCommand() {
@@ -5248,12 +5353,34 @@
 
       function renderSystemSettings() {
         const publicBaseUrl = defaultPublicBaseUrl();
+        const settings = state.systemSettings || {};
         if (els.systemPublicBaseUrl) els.systemPublicBaseUrl.textContent = publicBaseUrl;
         if (els.systemHealthUrl) els.systemHealthUrl.textContent = `${publicBaseUrl}/health`;
         if (els.systemUpgradeCommand) els.systemUpgradeCommand.value = controlPanelUpgradeCommand();
         if (els.systemInstallMysqlCommand) els.systemInstallMysqlCommand.value = controlPanelInstallWithMysqlCommand();
         if (els.systemUninstallCommand) els.systemUninstallCommand.value = controlPanelUninstallCommand();
         if (els.systemPurgeCommand) els.systemPurgeCommand.value = controlPanelPurgeCommand();
+        if (els.settingsNodeInstallUrl) {
+          els.settingsNodeInstallUrl.value = settings.node_install_url || "";
+        }
+        if (els.settingsNodeArtifactUrl) {
+          els.settingsNodeArtifactUrl.value = settings.node_artifact_url || "";
+        }
+        if (els.settingsNodeSha256Url) {
+          els.settingsNodeSha256Url.value = settings.node_sha256_url || "";
+        }
+        if (els.settingsControlInstallUrl) {
+          els.settingsControlInstallUrl.value = settings.control_install_url || "";
+        }
+        if (els.settingsControlArtifactUrl) {
+          els.settingsControlArtifactUrl.value = settings.control_artifact_url || "";
+        }
+        if (els.settingsControlSha256Url) {
+          els.settingsControlSha256Url.value = settings.control_sha256_url || "";
+        }
+        if (els.settingsReleaseDownloadMode) {
+          els.settingsReleaseDownloadMode.value = settings.release_download_mode || "github_api_first";
+        }
       }
 
       function systemStatusText(status) {
@@ -6724,6 +6851,7 @@
         }
         populateAuditNodeFilter();
         populateHealthAlertNodeFilter();
+        await loadSystemSettings({ silent: true });
         await loadGames({ silent: true });
         await loadRouteRules({ silent: true });
         await loadOperationTasks({ silent: true });
@@ -6833,6 +6961,19 @@
         renderSummary({ server_time: state.serverTime || data.server_time });
       }
 
+      async function loadSystemSettings({ silent = false } = {}) {
+        if (!state.token) {
+          renderSystemSettings();
+          return;
+        }
+        if (!silent && els.systemDownloadForm) {
+          clearInlineError(els.systemDownloadError);
+        }
+        const data = await api("/api/admin/v1/system/settings");
+        state.systemSettings = data.settings || state.systemSettings;
+        renderSystemSettings();
+      }
+
       async function loadSystemDiagnostics({ silent = false } = {}) {
         if (!silent && els.systemDiagnosticRows) {
           els.systemDiagnosticRows.innerHTML = `<div class="loading"><span class="skeleton"></span></div>`;
@@ -6854,6 +6995,29 @@
             els.runSystemDiagnostics.textContent = "立即自检";
           }
         }
+      }
+
+      async function saveSystemDownloadSettings() {
+        if (!assertCanWrite("保存下载源配置")) return;
+        clearInlineError(els.systemDownloadError);
+        const form = els.systemDownloadForm;
+        const data = await api("/api/admin/v1/system/settings", {
+          method: "PATCH",
+          body: JSON.stringify({
+            node_install_url: textOrNull(form.elements.node_install_url.value),
+            node_artifact_url: textOrNull(form.elements.node_artifact_url.value),
+            node_sha256_url: textOrNull(form.elements.node_sha256_url.value),
+            control_install_url: textOrNull(form.elements.control_install_url.value),
+            control_artifact_url: textOrNull(form.elements.control_artifact_url.value),
+            control_sha256_url: textOrNull(form.elements.control_sha256_url.value),
+            release_download_mode: textOrNull(form.elements.release_download_mode.value),
+          }),
+        });
+        state.systemSettings = data.settings || state.systemSettings;
+        renderSystemSettings();
+        els.statusLine.textContent = "下载源配置已保存";
+        els.statusLine.classList.add("connected");
+        els.statusLine.classList.remove("error-state");
       }
 
       async function updateHealthAlert(alertId, status) {
@@ -7789,6 +7953,13 @@
           showInlineError(els.diagnosticError, error.message);
           els.diagnosticResult.classList.add("empty");
           els.diagnosticResult.textContent = "诊断失败，请检查游戏路由、节点状态、UDP 防火墙和请求参数。";
+        });
+      });
+
+      els.systemDownloadForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        saveSystemDownloadSettings().catch((error) => {
+          showInlineError(els.systemDownloadError, error.message);
         });
       });
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.50.3"
+INSTALLER_VERSION="0.51.0"
 SERVICE_NAME="xaccel-control-api"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-control-api"
@@ -21,6 +21,7 @@ BUSINESS_SYNC_TOKEN=""
 CREDENTIAL_KEY=""
 ARTIFACT_URL=""
 SHA256_URL=""
+DOWNLOAD_MODE="github-api-first"
 DRY_RUN="0"
 INIT_MYSQL="0"
 MYSQL_ROOT_PASSWORD=""
@@ -52,6 +53,7 @@ Options:
                          Generated automatically when omitted.
   --artifact-url URL      Override xaccel-control-api tar.gz download URL.
   --sha256-url URL        Override xaccel-control-api sha256 download URL.
+  --download-mode MODE    github-api-first or standard-first. Default: github-api-first.
   --dry-run               Run preflight only and print planned actions.
   --init-mysql            Create database/user and grant local Docker bridge hosts before install.
   --mysql-root-password P MySQL root password for --init-mysql.
@@ -131,6 +133,18 @@ download_latest_github_asset() {
     -o "$output"
 }
 
+download_default_release_asset() {
+  local asset_name url output
+  asset_name="$1"
+  url="$2"
+  output="$3"
+  if [[ "$DOWNLOAD_MODE" == "standard-first" ]]; then
+    download_file "$url" "$output" || download_latest_github_asset "$asset_name" "$output"
+  else
+    download_latest_github_asset "$asset_name" "$output" || download_file "$url" "$output"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --database-url)
@@ -171,6 +185,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --sha256-url)
       SHA256_URL="${2:-}"
+      shift 2
+      ;;
+    --download-mode)
+      DOWNLOAD_MODE="${2:-}"
       shift 2
       ;;
     --dry-run)
@@ -277,6 +295,10 @@ preflight() {
   [[ "$MAX_DB_CONNECTIONS" =~ ^[0-9]+$ ]] || fail "--max-db-connections must be numeric"
   (( TOKEN_TTL_SEC >= 1 )) || fail "--token-ttl-sec must be positive"
   (( MAX_DB_CONNECTIONS >= 1 )) || fail "--max-db-connections must be positive"
+  case "$DOWNLOAD_MODE" in
+    github-api-first|standard-first) ;;
+    *) fail "--download-mode must be github-api-first or standard-first" ;;
+  esac
   if [[ "$INIT_MYSQL" == "1" || "$SKIP_DB_PREFLIGHT" != "1" ]]; then
     command -v mysql >/dev/null 2>&1 || fail "mysql client is required; install mysql-client or rerun with --skip-db-preflight"
   fi
@@ -416,10 +438,8 @@ install_binary_release() {
 
   log "download control-api release: ${artifact_url}"
   if [[ -z "$ARTIFACT_URL" ]]; then
-    if download_latest_github_asset "$artifact_name" "$tar_file"; then
-      log "downloaded control-api release via GitHub API"
-    elif download_file "$artifact_url" "$tar_file"; then
-      :
+    if download_default_release_asset "$artifact_name" "$artifact_url" "$tar_file"; then
+      log "downloaded control-api release with ${DOWNLOAD_MODE}"
     else
       rm -rf "$tmp_dir"
       fail "failed to download release artifact after retries. Check GitHub Release assets or server access to github.com/api.github.com"
@@ -431,10 +451,8 @@ install_binary_release() {
 
   log "download checksum: ${sha_url}"
   if [[ -z "$SHA256_URL" ]]; then
-    if download_latest_github_asset "${artifact_name}.sha256" "$sha_file"; then
-      log "downloaded checksum via GitHub API"
-    elif download_file "$sha_url" "$sha_file"; then
-      :
+    if download_default_release_asset "${artifact_name}.sha256" "$sha_url" "$sha_file"; then
+      log "downloaded checksum with ${DOWNLOAD_MODE}"
     else
       rm -rf "$tmp_dir"
       fail "failed to download sha256 file after retries"

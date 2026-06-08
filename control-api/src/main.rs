@@ -23,6 +23,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{mysql::MySqlPoolOptions, FromRow, MySql, MySqlPool, QueryBuilder};
 use std::{
+    collections::HashMap,
     io::ErrorKind,
     net::{IpAddr, SocketAddr},
     path::Path as FsPath,
@@ -52,6 +53,8 @@ const DEFAULT_BOOTSTRAP_TTL_SEC: u64 = 3600;
 const MAX_BOOTSTRAP_TTL_SEC: u64 = 86_400;
 const DEFAULT_INSTALL_URL: &str =
     "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh";
+const DEFAULT_CONTROL_INSTALL_URL: &str =
+    "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const MIN_NODE_VERSION: &str = "0.1.0";
 const ADMIN_DASHBOARD_HTML: &str = include_str!("../static/admin-dashboard.html");
@@ -71,13 +74,14 @@ const ADMIN_SESSION_VERSION: &str = "v1";
 const ADMIN_SESSION_TTL_SEC: u64 = 8 * 60 * 60;
 const ADMIN_PASSWORD_SCHEME: &str = "pbkdf2-sha256";
 const ADMIN_PASSWORD_ITERATIONS: u32 = 120_000;
-const SYSTEM_DIAGNOSTIC_CORE_TABLES: [&str; 6] = [
+const SYSTEM_DIAGNOSTIC_CORE_TABLES: [&str; 7] = [
     "accel_nodes",
     "accel_games",
     "game_route_rules",
     "node_runtime_reports",
     "node_health_alerts",
     "node_operation_tasks",
+    "system_settings",
 ];
 
 #[derive(Debug, Parser)]
@@ -708,6 +712,35 @@ struct AdminDeleteSshCredentialResponse {
 #[derive(Debug, Deserialize)]
 struct AdminSshActionRequest {
     action: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminUpdateSystemSettingsRequest {
+    node_install_url: Option<String>,
+    node_artifact_url: Option<String>,
+    node_sha256_url: Option<String>,
+    control_install_url: Option<String>,
+    control_artifact_url: Option<String>,
+    control_sha256_url: Option<String>,
+    release_download_mode: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct AdminSystemSettingsSummary {
+    node_install_url: String,
+    node_artifact_url: Option<String>,
+    node_sha256_url: Option<String>,
+    control_install_url: String,
+    control_artifact_url: Option<String>,
+    control_sha256_url: Option<String>,
+    release_download_mode: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminSystemSettingsResponse {
+    status: &'static str,
+    settings: AdminSystemSettingsSummary,
+    server_time: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -1419,6 +1452,12 @@ struct OperationTaskRow {
 }
 
 #[derive(Debug, FromRow)]
+struct SystemSettingRow {
+    setting_key: String,
+    setting_value: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
 struct AdminUserRow {
     id: u64,
     username: String,
@@ -1767,6 +1806,10 @@ async fn main() -> anyhow::Result<()> {
             get(admin_system_diagnostics),
         )
         .route(
+            "/api/admin/v1/system/settings",
+            get(admin_get_system_settings).patch(admin_update_system_settings),
+        )
+        .route(
             "/api/admin/v1/games",
             get(admin_list_games).post(admin_create_game),
         )
@@ -1945,6 +1988,7 @@ async fn admin_delete_user(
 
 async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
     ensure_admin_users_table(pool).await?;
+    ensure_system_settings_table(pool).await?;
     ensure_game_route_game_name_column(pool).await?;
     ensure_game_catalog_table(pool).await?;
     ensure_game_region_table(pool).await?;
@@ -1980,6 +2024,23 @@ CREATE TABLE IF NOT EXISTS admin_users (
     .execute(pool)
     .await
     .context("failed to create admin_users")?;
+    Ok(())
+}
+
+async fn ensure_system_settings_table(pool: &MySqlPool) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+CREATE TABLE IF NOT EXISTS system_settings (
+  setting_key VARCHAR(64) PRIMARY KEY,
+  setting_value TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+)
+"#,
+    )
+    .execute(pool)
+    .await
+    .context("failed to create system_settings")?;
     Ok(())
 }
 
@@ -2527,7 +2588,10 @@ async fn build_system_diagnostics(state: &AppState) -> AdminSystemDiagnosticsRes
             "schema",
             "核心数据表",
             "critical",
-            format!("只检测到 {found}/6 个核心表，数据库结构不完整。"),
+            format!(
+                "只检测到 {found}/{} 个核心表，数据库结构不完整。",
+                SYSTEM_DIAGNOSTIC_CORE_TABLES.len()
+            ),
             Some("重新运行控制面安装脚本，或导入 db/schema.sql 后再重启服务。"),
         ),
         Err(error) => {
@@ -2785,6 +2849,34 @@ async fn admin_system_diagnostics(
 ) -> Result<Json<AdminSystemDiagnosticsResponse>, AppError> {
     require_admin(&state, &headers)?;
     Ok(Json(build_system_diagnostics(&state).await))
+}
+
+async fn admin_get_system_settings(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<AdminSystemSettingsResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let settings = select_system_settings(&state.pool).await?;
+    Ok(Json(AdminSystemSettingsResponse {
+        status: "ok",
+        settings,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_update_system_settings(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<AdminUpdateSystemSettingsRequest>,
+) -> Result<Json<AdminSystemSettingsResponse>, AppError> {
+    require_admin_write(&state, &headers)?;
+    let settings = normalize_system_settings_request(request)?;
+    upsert_system_settings(&state.pool, &settings).await?;
+    Ok(Json(AdminSystemSettingsResponse {
+        status: "ok",
+        settings,
+        server_time: now_unix(),
+    }))
 }
 
 async fn node_bootstrap(
@@ -3120,6 +3212,7 @@ async fn admin_create_bootstrap_token(
     Json(request): Json<AdminCreateBootstrapTokenRequest>,
 ) -> Result<Json<AdminCreateBootstrapTokenResponse>, AppError> {
     require_admin_write(&state, &headers)?;
+    let settings = select_system_settings(&state.pool).await?;
     let public_base_url = request
         .public_base_url
         .as_deref()
@@ -3131,7 +3224,7 @@ async fn admin_create_bootstrap_token(
         .as_deref()
         .map(normalize_url_arg)
         .transpose()?
-        .unwrap_or_else(|| DEFAULT_INSTALL_URL.to_string());
+        .unwrap_or_else(|| settings.node_install_url.clone());
     let channel = request
         .channel
         .as_deref()
@@ -3148,6 +3241,9 @@ async fn admin_create_bootstrap_token(
         &bootstrap_token,
         request.enable_control_plane.unwrap_or(true),
         channel.as_deref(),
+        settings.node_artifact_url.as_deref(),
+        settings.node_sha256_url.as_deref(),
+        &settings.release_download_mode,
     );
 
     Ok(Json(AdminCreateBootstrapTokenResponse {
@@ -3168,6 +3264,7 @@ async fn admin_deploy_node(
     Json(request): Json<AdminDeployNodeRequest>,
 ) -> Result<Json<AdminDeployNodeResponse>, AppError> {
     let actor = require_admin_write(&state, &headers)?;
+    let settings = select_system_settings(&state.pool).await?;
     let before_node = select_admin_node(&state.pool, node_id)
         .await?
         .ok_or_else(|| AppError::not_found("node_not_found", "node does not exist"))?;
@@ -3182,7 +3279,7 @@ async fn admin_deploy_node(
         .as_deref()
         .map(normalize_url_arg)
         .transpose()?
-        .unwrap_or_else(|| DEFAULT_INSTALL_URL.to_string());
+        .unwrap_or_else(|| settings.node_install_url.clone());
     let channel = request
         .channel
         .as_deref()
@@ -3230,6 +3327,9 @@ async fn admin_deploy_node(
             !is_root,
             request.enable_control_plane.unwrap_or(true),
             channel.as_deref(),
+            settings.node_artifact_url.as_deref(),
+            settings.node_sha256_url.as_deref(),
+            &settings.release_download_mode,
         ),
         send_password_to_stdin: !is_root,
     };
@@ -5179,6 +5279,102 @@ async fn select_operation_task(
         .fetch_optional(pool)
         .await
         .map_err(AppError::database)
+}
+
+async fn select_system_settings(pool: &MySqlPool) -> Result<AdminSystemSettingsSummary, AppError> {
+    let rows = sqlx::query_as::<_, SystemSettingRow>(
+        r#"
+SELECT setting_key, setting_value
+FROM system_settings
+WHERE setting_key IN (
+  'node_install_url',
+  'node_artifact_url',
+  'node_sha256_url',
+  'control_install_url',
+  'control_artifact_url',
+  'control_sha256_url',
+  'release_download_mode'
+)
+"#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::database)?;
+
+    let values = rows
+        .into_iter()
+        .map(|row| (row.setting_key, row.setting_value))
+        .collect::<HashMap<_, _>>();
+
+    Ok(AdminSystemSettingsSummary {
+        node_install_url: values
+            .get("node_install_url")
+            .and_then(|value| value.clone())
+            .unwrap_or_else(|| DEFAULT_INSTALL_URL.to_string()),
+        node_artifact_url: values
+            .get("node_artifact_url")
+            .and_then(|value| value.clone()),
+        node_sha256_url: values
+            .get("node_sha256_url")
+            .and_then(|value| value.clone()),
+        control_install_url: values
+            .get("control_install_url")
+            .and_then(|value| value.clone())
+            .unwrap_or_else(|| DEFAULT_CONTROL_INSTALL_URL.to_string()),
+        control_artifact_url: values
+            .get("control_artifact_url")
+            .and_then(|value| value.clone()),
+        control_sha256_url: values
+            .get("control_sha256_url")
+            .and_then(|value| value.clone()),
+        release_download_mode: values
+            .get("release_download_mode")
+            .and_then(|value| value.clone())
+            .unwrap_or_else(|| "github_api_first".to_string()),
+    })
+}
+
+async fn upsert_system_settings(
+    pool: &MySqlPool,
+    settings: &AdminSystemSettingsSummary,
+) -> Result<(), AppError> {
+    let entries = [
+        ("node_install_url", Some(settings.node_install_url.as_str())),
+        ("node_artifact_url", settings.node_artifact_url.as_deref()),
+        ("node_sha256_url", settings.node_sha256_url.as_deref()),
+        (
+            "control_install_url",
+            Some(settings.control_install_url.as_str()),
+        ),
+        (
+            "control_artifact_url",
+            settings.control_artifact_url.as_deref(),
+        ),
+        ("control_sha256_url", settings.control_sha256_url.as_deref()),
+        (
+            "release_download_mode",
+            Some(settings.release_download_mode.as_str()),
+        ),
+    ];
+
+    for (key, value) in entries {
+        sqlx::query(
+            r#"
+INSERT INTO system_settings (setting_key, setting_value, created_at, updated_at)
+VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  setting_value = VALUES(setting_value),
+  updated_at = CURRENT_TIMESTAMP
+"#,
+        )
+        .bind(key)
+        .bind(value)
+        .execute(pool)
+        .await
+        .map_err(AppError::database)?;
+    }
+
+    Ok(())
 }
 
 async fn select_admin_users(pool: &MySqlPool) -> Result<Vec<AdminUserRow>, AppError> {
@@ -7564,6 +7760,18 @@ fn validate_operation_task_status(status: &str) -> Result<&'static str, AppError
     }
 }
 
+fn validate_release_download_mode(mode: Option<&str>) -> Result<&'static str, AppError> {
+    match mode.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("github_api_first") => Ok("github_api_first"),
+        Some("standard_first") => Ok("standard_first"),
+        Some("custom_urls") => Ok("custom_urls"),
+        Some(_) => Err(AppError::bad_request(
+            "invalid_release_download_mode",
+            "release_download_mode must be github_api_first, standard_first, or custom_urls",
+        )),
+    }
+}
+
 fn validate_ssh_action(action: &str) -> Result<&'static str, AppError> {
     match action.trim() {
         "test_connection" => Ok("test_connection"),
@@ -7960,15 +8168,19 @@ async fn build_ssh_action_plan(
             let expires_at = now_unix() + SSH_BOOTSTRAP_TTL_SEC;
             let bootstrap_token = create_bootstrap_token(pool, node_id, None, expires_at).await?;
             let bootstrap_url = format!("{public_base_url}{NODE_BOOTSTRAP_PATH}");
+            let settings = select_system_settings(pool).await?;
             Ok(SshActionPlan {
                 command_label: "升级节点内核".to_string(),
                 remote_command: build_remote_bootstrap_install_command(
-                    DEFAULT_INSTALL_URL,
+                    &settings.node_install_url,
                     &bootstrap_url,
                     &bootstrap_token,
                     !is_root,
                     true,
                     None,
+                    settings.node_artifact_url.as_deref(),
+                    settings.node_sha256_url.as_deref(),
+                    &settings.release_download_mode,
                 ),
                 send_password_to_stdin: !is_root,
             })
@@ -7987,6 +8199,9 @@ fn build_remote_bootstrap_install_command(
     use_sudo: bool,
     enable_control_plane: bool,
     channel: Option<&str>,
+    artifact_url: Option<&str>,
+    sha256_url: Option<&str>,
+    release_download_mode: &str,
 ) -> String {
     let runner = if use_sudo {
         "sudo -S -p '' bash"
@@ -8006,6 +8221,18 @@ fn build_remote_bootstrap_install_command(
         command.push_str(" --channel ");
         command.push_str(&shell_quote(channel));
     }
+    if let Some(artifact_url) = artifact_url {
+        command.push_str(" --artifact-url ");
+        command.push_str(&shell_quote(artifact_url));
+    }
+    if let Some(sha256_url) = sha256_url {
+        command.push_str(" --sha256-url ");
+        command.push_str(&shell_quote(sha256_url));
+    }
+    command.push_str(" --download-mode ");
+    command.push_str(&shell_quote(installer_download_mode_arg(
+        release_download_mode,
+    )));
     command
 }
 
@@ -8508,6 +8735,40 @@ fn normalize_optional_text(
     Ok(Some(value.to_string()))
 }
 
+fn normalize_optional_url_arg(value: Option<&str>) -> Result<Option<String>, AppError> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    normalize_url_arg(value).map(Some)
+}
+
+fn normalize_system_settings_request(
+    request: AdminUpdateSystemSettingsRequest,
+) -> Result<AdminSystemSettingsSummary, AppError> {
+    let release_download_mode =
+        validate_release_download_mode(request.release_download_mode.as_deref())?.to_string();
+
+    Ok(AdminSystemSettingsSummary {
+        node_install_url: request
+            .node_install_url
+            .as_deref()
+            .map(normalize_url_arg)
+            .transpose()?
+            .unwrap_or_else(|| DEFAULT_INSTALL_URL.to_string()),
+        node_artifact_url: normalize_optional_url_arg(request.node_artifact_url.as_deref())?,
+        node_sha256_url: normalize_optional_url_arg(request.node_sha256_url.as_deref())?,
+        control_install_url: request
+            .control_install_url
+            .as_deref()
+            .map(normalize_url_arg)
+            .transpose()?
+            .unwrap_or_else(|| DEFAULT_CONTROL_INSTALL_URL.to_string()),
+        control_artifact_url: normalize_optional_url_arg(request.control_artifact_url.as_deref())?,
+        control_sha256_url: normalize_optional_url_arg(request.control_sha256_url.as_deref())?,
+        release_download_mode,
+    })
+}
+
 fn normalize_ip_text(value: &str, field: &'static str) -> Result<String, AppError> {
     let value = normalize_required_text(value, field, 64)?;
     value.parse::<IpAddr>().map_err(|_| {
@@ -8970,18 +9231,43 @@ fn build_bootstrap_install_command(
     bootstrap_token: &str,
     enable_control_plane: bool,
     channel: Option<&str>,
+    artifact_url: Option<&str>,
+    sha256_url: Option<&str>,
+    release_download_mode: &str,
 ) -> String {
+    let install_url = shell_quote(install_url);
+    let bootstrap_url = shell_quote(bootstrap_url);
+    let bootstrap_token = shell_quote(bootstrap_token);
     let mut command = format!(
         "curl -fsSL {install_url} | sudo bash -s -- \\\n  --bootstrap-url {bootstrap_url} \\\n  --bootstrap-token {bootstrap_token}"
     );
     if let Some(channel) = channel {
         command.push_str(" \\\n  --channel ");
-        command.push_str(channel);
+        command.push_str(&shell_quote(channel));
     }
+    if let Some(artifact_url) = artifact_url {
+        command.push_str(" \\\n  --artifact-url ");
+        command.push_str(&shell_quote(artifact_url));
+    }
+    if let Some(sha256_url) = sha256_url {
+        command.push_str(" \\\n  --sha256-url ");
+        command.push_str(&shell_quote(sha256_url));
+    }
+    command.push_str(" \\\n  --download-mode ");
+    command.push_str(&shell_quote(installer_download_mode_arg(
+        release_download_mode,
+    )));
     if enable_control_plane {
         command.push_str(" \\\n  --enable-control-plane");
     }
     command
+}
+
+fn installer_download_mode_arg(mode: &str) -> &'static str {
+    match mode {
+        "standard_first" => "standard-first",
+        _ => "github-api-first",
+    }
 }
 
 fn sign_client_token(claims: &ClientTokenClaims, secret: &str) -> anyhow::Result<String> {
@@ -9836,6 +10122,45 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_system_download_settings() {
+        let settings = normalize_system_settings_request(AdminUpdateSystemSettingsRequest {
+            node_install_url: Some("https://example.com/install.sh/".to_string()),
+            node_artifact_url: Some("https://mirror.test/node.tar.gz".to_string()),
+            node_sha256_url: Some("".to_string()),
+            control_install_url: None,
+            control_artifact_url: None,
+            control_sha256_url: Some("https://mirror.test/control.sha256".to_string()),
+            release_download_mode: Some("custom_urls".to_string()),
+        })
+        .expect("settings");
+
+        assert_eq!(settings.node_install_url, "https://example.com/install.sh");
+        assert_eq!(
+            settings.node_artifact_url.as_deref(),
+            Some("https://mirror.test/node.tar.gz")
+        );
+        assert_eq!(settings.node_sha256_url, None);
+        assert_eq!(settings.control_install_url, DEFAULT_CONTROL_INSTALL_URL);
+        assert_eq!(
+            settings.control_sha256_url.as_deref(),
+            Some("https://mirror.test/control.sha256")
+        );
+        assert_eq!(settings.release_download_mode, "custom_urls");
+
+        let error = normalize_system_settings_request(AdminUpdateSystemSettingsRequest {
+            node_install_url: None,
+            node_artifact_url: None,
+            node_sha256_url: None,
+            control_install_url: None,
+            control_artifact_url: None,
+            control_sha256_url: None,
+            release_download_mode: Some("shell".to_string()),
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "invalid_release_download_mode");
+    }
+
+    #[test]
     fn parses_operation_task_version_check_summary() {
         let row = OperationTaskRow {
             id: 7,
@@ -10345,6 +10670,11 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("systemInstallMysqlCommand"));
         assert!(ADMIN_DASHBOARD_HTML.contains("systemUninstallCommand"));
         assert!(ADMIN_DASHBOARD_HTML.contains("systemPurgeCommand"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("下载源配置"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("systemDownloadForm"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("settingsNodeInstallUrl"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("settingsControlArtifactUrl"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/system/settings"));
         assert!(ADMIN_DASHBOARD_HTML.contains("--init-mysql"));
         assert!(ADMIN_DASHBOARD_HTML.contains("control-api-uninstall.sh"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-copy-system-command"));
@@ -10370,8 +10700,9 @@ mod tests {
     #[test]
     fn system_diagnostics_use_current_core_table_names() {
         assert!(SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"node_operation_tasks"));
+        assert!(SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"system_settings"));
         assert!(!SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"operation_tasks"));
-        assert_eq!(SYSTEM_DIAGNOSTIC_CORE_TABLES.len(), 6);
+        assert_eq!(SYSTEM_DIAGNOSTIC_CORE_TABLES.len(), 7);
     }
 
     #[test]
@@ -10558,10 +10889,16 @@ mod tests {
             "xbt.token",
             true,
             Some("stable"),
+            Some("https://mirror.test/xaccel-node.tar.gz"),
+            Some("https://mirror.test/xaccel-node.tar.gz.sha256"),
+            "standard_first",
         );
 
-        assert!(command.contains("--bootstrap-url http://127.0.0.1:18080/api/node/v1/bootstrap"));
-        assert!(command.contains("--bootstrap-token xbt.token"));
+        assert!(command.contains("--bootstrap-url 'http://127.0.0.1:18080/api/node/v1/bootstrap'"));
+        assert!(command.contains("--bootstrap-token 'xbt.token'"));
+        assert!(command.contains("--artifact-url 'https://mirror.test/xaccel-node.tar.gz'"));
+        assert!(command.contains("--sha256-url 'https://mirror.test/xaccel-node.tar.gz.sha256'"));
+        assert!(command.contains("--download-mode 'standard-first'"));
         assert!(command.contains("--enable-control-plane"));
     }
 
@@ -10579,11 +10916,14 @@ mod tests {
             false,
             true,
             None,
+            None,
+            None,
+            "github_api_first",
         );
 
         assert_eq!(
             command,
-            "curl -fsSL 'http://install.test/a'\\''b' | bash -s -- --bootstrap-url 'http://control.test/bootstrap?x=1;touch /tmp/pwn' --bootstrap-token 'xbt.token' --enable-control-plane"
+            "curl -fsSL 'http://install.test/a'\\''b' | bash -s -- --bootstrap-url 'http://control.test/bootstrap?x=1;touch /tmp/pwn' --bootstrap-token 'xbt.token' --enable-control-plane --download-mode 'github-api-first'"
         );
 
         let command = build_remote_bootstrap_install_command(
@@ -10593,10 +10933,13 @@ mod tests {
             true,
             false,
             Some("beta"),
+            Some("https://mirror.test/node.tgz"),
+            Some("https://mirror.test/node.tgz.sha256"),
+            "standard_first",
         );
         assert_eq!(
             command,
-            "curl -fsSL 'http://install.test/install.sh' | sudo -S -p '' bash -s -- --bootstrap-url 'http://control.test/bootstrap' --bootstrap-token 'xbt.token' --channel 'beta'"
+            "curl -fsSL 'http://install.test/install.sh' | sudo -S -p '' bash -s -- --bootstrap-url 'http://control.test/bootstrap' --bootstrap-token 'xbt.token' --channel 'beta' --artifact-url 'https://mirror.test/node.tgz' --sha256-url 'https://mirror.test/node.tgz.sha256' --download-mode 'standard-first'"
         );
     }
 }
