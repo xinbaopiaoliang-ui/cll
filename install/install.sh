@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.33.1"
+INSTALLER_VERSION="0.33.2"
 SERVICE_NAME="xaccel-node"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-node"
@@ -78,6 +78,38 @@ download_file() {
     --connect-timeout 20 \
     --max-time 300 \
     "$url" \
+    -o "$output"
+}
+
+github_latest_asset_id() {
+  local asset_name
+  asset_name="$1"
+  curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" |
+    awk -v target="$asset_name" '
+      /"id":/ {
+        id = $0
+        gsub(/[^0-9]/, "", id)
+      }
+      index($0, "\"name\": \"" target "\"") {
+        print id
+        exit
+      }
+    '
+}
+
+download_latest_github_asset() {
+  local asset_name output asset_id
+  asset_name="$1"
+  output="$2"
+  asset_id="$(github_latest_asset_id "$asset_name")"
+  [[ -n "$asset_id" ]] || return 1
+  curl -fsSL \
+    -H "Accept: application/octet-stream" \
+    --retry 5 \
+    --retry-delay 3 \
+    --connect-timeout 20 \
+    --max-time 300 \
+    "https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${asset_id}" \
     -o "$output"
 }
 
@@ -395,28 +427,36 @@ install_binary_release() {
 
   log "download node release: ${artifact_url}"
   if ! download_file "$artifact_url" "$tar_file"; then
-    rm -rf "$tmp_dir"
-    if [[ "$ALLOW_PLACEHOLDER" == "1" ]]; then
-      log "release download failed; installing placeholder because --allow-placeholder is set"
-      install_binary_placeholder
-      return 0
+    if [[ -z "$ARTIFACT_URL" ]] && download_latest_github_asset "$artifact_name" "$tar_file"; then
+      log "downloaded node release via GitHub API fallback"
+    else
+      rm -rf "$tmp_dir"
+      if [[ "$ALLOW_PLACEHOLDER" == "1" ]]; then
+        log "release download failed; installing placeholder because --allow-placeholder is set"
+        install_binary_placeholder
+        return 0
+      fi
+      fail "failed to download release artifact after retries. Check GitHub Release assets or node server access to github.com/api.github.com"
     fi
-    fail "failed to download release artifact after retries. Check GitHub Release assets or node server access to github.com"
   fi
 
   log "download checksum: ${sha_url}"
   if download_file "$sha_url" "$sha_file"; then
-    if command -v sha256sum >/dev/null 2>&1; then
-      (cd "$tmp_dir" && sha256sum -c "$(basename "$sha_file")")
-    elif command -v shasum >/dev/null 2>&1; then
-      (cd "$tmp_dir" && shasum -a 256 -c "$(basename "$sha_file")")
-    else
-      rm -rf "$tmp_dir"
-      fail "sha256sum or shasum is required to verify release artifact"
-    fi
+    :
+  elif [[ -z "$SHA256_URL" ]] && download_latest_github_asset "${artifact_name}.sha256" "$sha_file"; then
+    log "downloaded checksum via GitHub API fallback"
   else
     rm -rf "$tmp_dir"
     fail "failed to download sha256 file for release artifact after retries"
+  fi
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$tmp_dir" && sha256sum -c "$(basename "$sha_file")")
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "$tmp_dir" && shasum -a 256 -c "$(basename "$sha_file")")
+  else
+    rm -rf "$tmp_dir"
+    fail "sha256sum or shasum is required to verify release artifact"
   fi
 
   tar -xzf "$tar_file" -C "$tmp_dir"
