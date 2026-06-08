@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.50.2"
+INSTALLER_VERSION="0.50.3"
 SERVICE_NAME="xaccel-control-api"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-control-api"
@@ -415,21 +415,31 @@ install_binary_release() {
   sha_file="${tar_file}.sha256"
 
   log "download control-api release: ${artifact_url}"
-  if download_file "$artifact_url" "$tar_file"; then
-    :
-  elif [[ -z "$ARTIFACT_URL" ]] && download_latest_github_asset "$artifact_name" "$tar_file"; then
-    log "downloaded control-api release via GitHub API fallback"
-  else
+  if [[ -z "$ARTIFACT_URL" ]]; then
+    if download_latest_github_asset "$artifact_name" "$tar_file"; then
+      log "downloaded control-api release via GitHub API"
+    elif download_file "$artifact_url" "$tar_file"; then
+      :
+    else
+      rm -rf "$tmp_dir"
+      fail "failed to download release artifact after retries. Check GitHub Release assets or server access to github.com/api.github.com"
+    fi
+  elif ! download_file "$artifact_url" "$tar_file"; then
     rm -rf "$tmp_dir"
-    fail "failed to download release artifact after retries. Check GitHub Release assets or server access to github.com/api.github.com"
+    fail "failed to download release artifact after retries. Check artifact URL or server network"
   fi
 
   log "download checksum: ${sha_url}"
-  if download_file "$sha_url" "$sha_file"; then
-    :
-  elif [[ -z "$SHA256_URL" ]] && download_latest_github_asset "${artifact_name}.sha256" "$sha_file"; then
-    log "downloaded checksum via GitHub API fallback"
-  else
+  if [[ -z "$SHA256_URL" ]]; then
+    if download_latest_github_asset "${artifact_name}.sha256" "$sha_file"; then
+      log "downloaded checksum via GitHub API"
+    elif download_file "$sha_url" "$sha_file"; then
+      :
+    else
+      rm -rf "$tmp_dir"
+      fail "failed to download sha256 file after retries"
+    fi
+  elif ! download_file "$sha_url" "$sha_file"; then
     rm -rf "$tmp_dir"
     fail "failed to download sha256 file after retries"
   fi
