@@ -62,6 +62,7 @@ const DEFAULT_DIAGNOSTIC_TIMEOUT_SEC: u64 = 3;
 const DEFAULT_DIAGNOSTIC_RESPONSE_TIMEOUT_MS: u64 = 500;
 const SSH_KNOWN_HOSTS_FILE: &str = "/var/lib/xaccel-control-api/known_hosts";
 const SSH_ACTION_TIMEOUT_SEC: u64 = 120;
+const MAX_STORED_LAST_ERROR_CHARS: usize = 4096;
 const SSH_BOOTSTRAP_TTL_SEC: u64 = 3600;
 const SSH_UPGRADE_REPORT_WAIT_SEC: u64 = 45;
 const SSH_UPGRADE_REPORT_POLL_SEC: u64 = 3;
@@ -2205,6 +2206,29 @@ LIMIT 1
     Ok(exists.is_some())
 }
 
+async fn mysql_column_data_type(
+    pool: &MySqlPool,
+    table: &'static str,
+    column: &'static str,
+) -> anyhow::Result<Option<String>> {
+    let data_type = sqlx::query_scalar::<_, String>(
+        r#"
+SELECT LOWER(DATA_TYPE)
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = ?
+  AND COLUMN_NAME = ?
+LIMIT 1
+"#,
+    )
+    .bind(table)
+    .bind(column)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(data_type)
+}
+
 async fn ensure_game_catalog_table(pool: &MySqlPool) -> anyhow::Result<()> {
     sqlx::query(
         r#"
@@ -2273,7 +2297,7 @@ CREATE TABLE IF NOT EXISTS node_ssh_credentials (
   password_ciphertext TEXT NOT NULL,
   password_nonce VARCHAR(64) NOT NULL,
   auth_status ENUM('untested', 'ok', 'failed') NOT NULL DEFAULT 'untested',
-  last_error VARCHAR(512) NULL,
+  last_error TEXT NULL,
   last_checked_at TIMESTAMP NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -2286,6 +2310,18 @@ CREATE TABLE IF NOT EXISTS node_ssh_credentials (
     .execute(pool)
     .await
     .context("failed to create node_ssh_credentials")?;
+    let last_error_type = mysql_column_data_type(pool, "node_ssh_credentials", "last_error")
+        .await
+        .context("failed to inspect node_ssh_credentials.last_error")?;
+    if !matches!(
+        last_error_type.as_deref(),
+        Some("text" | "mediumtext" | "longtext")
+    ) {
+        sqlx::query("ALTER TABLE node_ssh_credentials MODIFY COLUMN last_error TEXT NULL")
+            .execute(pool)
+            .await
+            .context("failed to widen node_ssh_credentials.last_error")?;
+    }
     Ok(())
 }
 
@@ -6739,6 +6775,8 @@ async fn update_ssh_credential_status(
     auth_status: &str,
     last_error: Option<&str>,
 ) -> Result<(), AppError> {
+    let stored_last_error =
+        last_error.map(|error| truncate_chars(error, MAX_STORED_LAST_ERROR_CHARS));
     sqlx::query(
         r#"
 UPDATE node_ssh_credentials
@@ -6750,7 +6788,7 @@ WHERE node_id = ?
 "#,
     )
     .bind(auth_status)
-    .bind(last_error)
+    .bind(stored_last_error.as_deref())
     .bind(node_id)
     .execute(pool)
     .await
@@ -8918,6 +8956,14 @@ fn pbkdf2_hmac_sha256(
     Ok(output)
 }
 
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+
+    value.chars().take(max_chars).collect()
+}
+
 fn build_bootstrap_install_command(
     install_url: &str,
     bootstrap_url: &str,
@@ -9764,6 +9810,15 @@ mod tests {
         let error = validate_ssh_action("shell").unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.code, "invalid_ssh_action");
+    }
+
+    #[test]
+    fn truncates_stored_errors_on_character_boundaries() {
+        let value = "连接失败".repeat(8);
+        let truncated = truncate_chars(&value, 5);
+
+        assert_eq!(truncated, "连接失败连");
+        assert_eq!(truncate_chars("short", 4096), "short");
     }
 
     #[test]

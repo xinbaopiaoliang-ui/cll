@@ -249,7 +249,7 @@ CREATE TABLE node_ssh_credentials (
   password_ciphertext TEXT NOT NULL,
   password_nonce VARCHAR(64) NOT NULL,
   auth_status ENUM('untested', 'ok', 'failed') NOT NULL DEFAULT 'untested',
-  last_error VARCHAR(512) NULL,
+  last_error TEXT NULL,
   last_checked_at TIMESTAMP NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
