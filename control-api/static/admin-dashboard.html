@@ -1206,6 +1206,68 @@
         padding: 18px;
       }
 
+      .secret-panel-body {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(240px, 0.6fr);
+        gap: 14px;
+        padding: 18px;
+      }
+
+      .secret-box {
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .secret-label-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .secret-value {
+        min-height: 48px;
+        display: flex;
+        align-items: center;
+        padding: 12px 14px;
+        border: 1px solid rgba(15, 23, 29, 0.16);
+        border-radius: 8px;
+        background: #101b22;
+        color: #edf5f3;
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+        word-break: break-all;
+      }
+
+      .secret-value.masked {
+        background: var(--surface-soft);
+        color: var(--muted);
+      }
+
+      .secret-guidance {
+        display: grid;
+        align-content: start;
+        gap: 8px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(247, 250, 249, 0.76);
+      }
+
+      .secret-guidance strong {
+        font-size: 13px;
+      }
+
+      .secret-guidance p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.65;
+      }
+
       .insight-card {
         min-height: 150px;
         display: grid;
@@ -2443,6 +2505,7 @@
         .batch-upgrade-layout,
         .batch-upgrade-item,
         .system-diagnostic-layout,
+        .secret-panel-body,
         .permission-overview,
         .permission-matrix,
         .topbar {
@@ -2619,7 +2682,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.53.0</span>
+          <span class="mono">v0.54.0</span>
         </div>
       </aside>
 
@@ -3292,7 +3355,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.53.0</div>
+              <div class="insight-value">0.54.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -3304,6 +3367,34 @@
               <h3>健康检查</h3>
               <div class="insight-value small" id="systemHealthUrl">--</div>
               <div class="insight-note">服务启动后应返回 ready 和 database ok。</div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">业务后台对接 Token</div>
+                <div class="panel-meta">业务后台调用同步游戏、路由和 connect-intent API 时使用。</div>
+              </div>
+              <div class="top-actions">
+                <button id="revealBusinessToken" type="button" data-super-only>显示 Token</button>
+                <button class="hidden" id="copyBusinessToken" type="button" data-super-only>复制 Token</button>
+              </div>
+            </div>
+            <div class="secret-panel-body">
+              <div class="secret-box">
+                <div class="secret-label-row">
+                  <strong>当前配置</strong>
+                  <span class="chip warn" id="businessTokenStatus">未加载</span>
+                </div>
+                <div class="secret-value masked" id="businessTokenValue">点击“显示 Token”后查看明文</div>
+                <div class="message error-text hidden" id="businessTokenError"></div>
+              </div>
+              <div class="secret-guidance">
+                <strong>使用方式</strong>
+                <p>只放在业务后台服务端配置里，客户端不能看到。业务后台请求控制面时带上 Authorization: Bearer。</p>
+                <p>只有超级管理员能显示明文；运维和只读账号只能确认是否已配置。</p>
+              </div>
             </div>
           </section>
 
@@ -3921,6 +4012,11 @@
         adminUsers: [],
         systemDiagnostics: null,
         systemDownloadCheck: null,
+        businessToken: {
+          loaded: false,
+          configured: false,
+          token: "",
+        },
         systemSettings: {
           node_install_url: "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh",
           node_artifact_url: null,
@@ -4119,6 +4215,11 @@
         controlUpgradeCommand: document.getElementById("controlUpgradeCommand"),
         systemPublicBaseUrl: document.getElementById("systemPublicBaseUrl"),
         systemHealthUrl: document.getElementById("systemHealthUrl"),
+        businessTokenStatus: document.getElementById("businessTokenStatus"),
+        businessTokenValue: document.getElementById("businessTokenValue"),
+        businessTokenError: document.getElementById("businessTokenError"),
+        revealBusinessToken: document.getElementById("revealBusinessToken"),
+        copyBusinessToken: document.getElementById("copyBusinessToken"),
         systemUpgradeCommand: document.getElementById("systemUpgradeCommand"),
         systemInstallMysqlCommand: document.getElementById("systemInstallMysqlCommand"),
         systemUninstallCommand: document.getElementById("systemUninstallCommand"),
@@ -4379,6 +4480,7 @@
           item.classList.toggle("hidden", !admin || canWrite());
         });
         renderPermissionMatrix();
+        renderBusinessToken();
       }
 
       function setActiveView(view) {
@@ -5480,6 +5582,68 @@
         }
         if (els.settingsReleaseDownloadMode) {
           els.settingsReleaseDownloadMode.value = settings.release_download_mode || "github_api_first";
+        }
+        renderBusinessToken();
+      }
+
+      function renderBusinessToken() {
+        if (!els.businessTokenStatus || !els.businessTokenValue) return;
+        const tokenState = state.businessToken || {};
+        const configured = Boolean(tokenState.configured);
+        const loaded = Boolean(tokenState.loaded);
+        const token = tokenState.token || "";
+
+        els.businessTokenStatus.className = `chip ${configured ? "ok" : "warn"}`;
+        els.businessTokenStatus.textContent = configured ? "已配置" : "未配置";
+
+        if (!isSuperAdmin()) {
+          els.businessTokenValue.className = "secret-value masked";
+          els.businessTokenValue.textContent = configured
+            ? "已配置业务后台 Token；只有超级管理员能查看明文。"
+            : "当前没有配置 XACCEL_BUSINESS_SYNC_TOKEN。";
+          els.copyBusinessToken?.classList.add("hidden");
+          return;
+        }
+
+        if (loaded && token) {
+          els.businessTokenValue.className = "secret-value";
+          els.businessTokenValue.textContent = token;
+          els.copyBusinessToken?.classList.remove("hidden");
+          return;
+        }
+
+        els.businessTokenValue.className = "secret-value masked";
+        els.businessTokenValue.textContent = configured
+          ? "点击“显示 Token”后查看明文。"
+          : "当前没有配置 XACCEL_BUSINESS_SYNC_TOKEN。";
+        els.copyBusinessToken?.classList.add("hidden");
+      }
+
+      async function revealBusinessToken() {
+        if (!assertSuperAdmin("查看业务后台 Token")) return;
+        clearInlineError(els.businessTokenError);
+        if (els.revealBusinessToken) {
+          els.revealBusinessToken.disabled = true;
+          els.revealBusinessToken.textContent = "读取中...";
+        }
+        try {
+          const data = await api("/api/admin/v1/system/business-token");
+          state.businessToken = {
+            loaded: true,
+            configured: Boolean(data.configured),
+            token: data.token || "",
+          };
+          renderBusinessToken();
+          els.statusLine.textContent = data.configured
+            ? "业务后台 Token 已显示，请只在服务端配置里使用。"
+            : "业务后台 Token 尚未配置。";
+          els.statusLine.classList.toggle("connected", Boolean(data.configured));
+          els.statusLine.classList.toggle("error-state", !data.configured);
+        } finally {
+          if (els.revealBusinessToken) {
+            els.revealBusinessToken.disabled = false;
+            els.revealBusinessToken.textContent = "显示 Token";
+          }
         }
       }
 
@@ -7120,6 +7284,11 @@
         }
         const data = await api("/api/admin/v1/system/settings");
         state.systemSettings = data.settings || state.systemSettings;
+        state.businessToken.configured = Boolean(data.business_sync_token_configured);
+        if (!state.businessToken.configured) {
+          state.businessToken.loaded = false;
+          state.businessToken.token = "";
+        }
         renderSystemSettings();
       }
 
@@ -7163,6 +7332,7 @@
           }),
         });
         state.systemSettings = data.settings || state.systemSettings;
+        state.businessToken.configured = Boolean(data.business_sync_token_configured);
         state.systemDownloadCheck = null;
         renderSystemSettings();
         renderSystemDownloadCheck();
@@ -7274,6 +7444,7 @@
           localStorage.removeItem("xaccel_admin_current");
           state.token = "";
           state.currentAdmin = null;
+          state.businessToken = { loaded: false, configured: false, token: "" };
           setLoggedIn(false);
           showInlineError(els.loginError, error.message);
         }
@@ -7290,6 +7461,7 @@
         state.operationTasks = [];
         state.auditLogs = [];
         state.adminUsers = [];
+        state.businessToken = { loaded: false, configured: false, token: "" };
         state.selectedId = null;
         clearInterval(state.timer);
         state.timer = null;
@@ -8145,6 +8317,17 @@
 
       els.runDownloadCheck.addEventListener("click", () => {
         runSystemDownloadCheck().catch(showError);
+      });
+
+      els.revealBusinessToken.addEventListener("click", () => {
+        revealBusinessToken().catch((error) => {
+          showInlineError(els.businessTokenError, error.message);
+        });
+      });
+
+      els.copyBusinessToken.addEventListener("click", (event) => {
+        if (!assertSuperAdmin("复制业务后台 Token")) return;
+        copyToClipboard(state.businessToken?.token || "", event.currentTarget);
       });
 
       els.refreshNow.addEventListener("click", () => {

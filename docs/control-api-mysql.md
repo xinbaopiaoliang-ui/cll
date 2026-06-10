@@ -144,6 +144,9 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
   --business-sync-token 'change-this-business-sync-token'
 ```
 
+The same token can be viewed in `/admin` under 系统设置 -> 业务后台对接
+Token. Plaintext is only returned to super administrators.
+
 Then sync catalog data from the business backend:
 
 ```bash

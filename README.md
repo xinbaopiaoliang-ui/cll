@@ -62,8 +62,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.53.0
-git push origin v0.53.0
+git tag v0.54.0
+git push origin v0.54.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -81,8 +81,9 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.53.0` adds the protected business-backend status and
-connect-intent APIs, plus a dedicated integration contract for business systems.
+next stage. Version `0.54.0` adds a super-admin-only business API token viewer
+in System Settings. Version `0.53.0` adds the protected business-backend status
+and connect-intent APIs, plus a dedicated integration contract for business systems.
 Version `0.32.0` keeps the legacy TCP/UDP `ping` probe, supports
 JSON `xaccel/1` client probe responses, verifies optional `xat.v1` HMAC client
 tokens, keeps a short-lived UDP session table, echoes `session.data` packets for

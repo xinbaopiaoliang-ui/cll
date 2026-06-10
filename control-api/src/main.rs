@@ -787,6 +787,15 @@ struct AdminSystemSettingsSummary {
 struct AdminSystemSettingsResponse {
     status: &'static str,
     settings: AdminSystemSettingsSummary,
+    business_sync_token_configured: bool,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminBusinessTokenResponse {
+    status: &'static str,
+    configured: bool,
+    token: Option<String>,
     server_time: u64,
 }
 
@@ -1915,6 +1924,10 @@ async fn main() -> anyhow::Result<()> {
             get(admin_get_system_settings).patch(admin_update_system_settings),
         )
         .route(
+            "/api/admin/v1/system/business-token",
+            get(admin_get_business_token),
+        )
+        .route(
             "/api/admin/v1/system/download-check",
             post(admin_system_download_check),
         )
@@ -3032,6 +3045,7 @@ async fn admin_get_system_settings(
     Ok(Json(AdminSystemSettingsResponse {
         status: "ok",
         settings,
+        business_sync_token_configured: state.business_sync_token.is_some(),
         server_time: now_unix(),
     }))
 }
@@ -3047,6 +3061,22 @@ async fn admin_update_system_settings(
     Ok(Json(AdminSystemSettingsResponse {
         status: "ok",
         settings,
+        business_sync_token_configured: state.business_sync_token.is_some(),
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_get_business_token(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<AdminBusinessTokenResponse>, AppError> {
+    require_admin_super(&state, &headers)?;
+    let token = state.business_sync_token.clone();
+
+    Ok(Json(AdminBusinessTokenResponse {
+        status: "ok",
+        configured: token.is_some(),
+        token,
         server_time: now_unix(),
     }))
 }
@@ -11270,6 +11300,10 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("systemInstallMysqlCommand"));
         assert!(ADMIN_DASHBOARD_HTML.contains("systemUninstallCommand"));
         assert!(ADMIN_DASHBOARD_HTML.contains("systemPurgeCommand"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("业务后台对接 Token"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("businessTokenValue"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("revealBusinessToken"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/system/business-token"));
         assert!(ADMIN_DASHBOARD_HTML.contains("下载源配置"));
         assert!(ADMIN_DASHBOARD_HTML.contains("systemDownloadForm"));
         assert!(ADMIN_DASHBOARD_HTML.contains("runDownloadCheck"));
