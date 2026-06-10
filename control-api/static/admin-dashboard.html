@@ -2698,7 +2698,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.55.0</span>
+          <span class="mono">v0.55.1</span>
         </div>
       </aside>
 
@@ -3371,7 +3371,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.55.0</div>
+              <div class="insight-value">0.55.1</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -6268,9 +6268,14 @@
         if (!state.token) {
           throw new Error("管理员令牌未设置");
         }
+        const optionHeaders = options.headers || {};
+        const hasBody = options.body !== undefined && options.body !== null;
+        const isFormData =
+          typeof FormData !== "undefined" && options.body instanceof FormData;
         const headers = {
           Authorization: `Bearer ${state.token}`,
-          ...(options.headers || {}),
+          ...(hasBody && !isFormData ? { "Content-Type": "application/json" } : {}),
+          ...optionHeaders,
         };
         const response = await fetch(path, { ...options, headers });
         const text = await response.text();
