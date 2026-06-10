@@ -316,9 +316,9 @@ Done in `v0.31.0`:
 
 Goals:
 
-- Move game and route ownership toward the business backend. Keep the control
-  panel game catalog as a read-only synced snapshot, and keep route editing as
-  an operations fallback/debug tool rather than the normal business entry point.
+- Keep game, region, and route ownership in the business backend. The control
+  panel no longer exposes game/route management as a primary menu entry; it
+  keeps business sync snapshots and operations fallback visibility only.
 - Add nonce replay storage for node report requests.
 - Parse production bootstrap response.
 - Add websocket or long-poll events for drain, config update, and user kick.

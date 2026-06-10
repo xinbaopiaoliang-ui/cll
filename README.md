@@ -62,8 +62,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.55.1
-git push origin v0.55.1
+git tag v0.56.0
+git push origin v0.56.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -81,7 +81,11 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.55.1` fixes JSON content-type handling for saving the
+next stage. Version `0.56.0` moves game and route daily operations out of the
+control dashboard: the sidebar now focuses on node operations, games are shown
+as business sync snapshots, routes are shown as operations fallback snapshots,
+and health checks guide operators to `sync-catalog` instead of local game/route
+creation. Version `0.55.1` fixes JSON content-type handling for saving the
 business API token from System Settings. Version `0.55.0` lets super
 administrators edit the business API token directly in System Settings and
 applies it immediately. Version `0.54.0` adds a super-admin-only business API
@@ -120,9 +124,10 @@ adds a business-backend sync boundary: `xaccel-control-api` can accept
 token-protected catalog syncs at `/api/business/v1/sync-catalog`, upsert games,
 game regions, and route rules, and schedule connect-intents by optional
 `region_id`. The dashboard remains focused on node operations and emergency
-route visibility rather than becoming the source of business data. The dashboard includes
-CRUD for `game_route_rules`, letting operators create, edit, disable, and delete
-game-to-node target mappings without direct MySQL access. Version `0.29.0`
+route visibility rather than becoming the source of business data; current
+versions treat game and route tables as business-synced execution snapshots.
+Earlier `0.30.x` builds still exposed direct `game_route_rules` CRUD for
+operator fallback. Version `0.29.0`
 added a game catalog with token-protected admin APIs and a `/admin` game
 management page for creating, editing, filtering, enabling, disabling, and
 deleting games; route-rule forms can now pick a game from the catalog and

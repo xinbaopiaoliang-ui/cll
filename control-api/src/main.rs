@@ -1235,6 +1235,8 @@ struct BusinessConnectIntentResponse {
 struct BusinessStatusResponse {
     status: &'static str,
     version: &'static str,
+    catalog_owner: &'static str,
+    control_role: &'static str,
     business_api_enabled: bool,
     nodes_total: u64,
     nodes_online: u64,
@@ -2813,18 +2815,18 @@ async fn build_system_diagnostics(state: &AppState) -> AdminSystemDiagnosticsRes
         push_system_check(
             &mut checks,
             "routes",
-            "游戏路由",
+            "业务路由同步",
             "warning",
-            "当前没有启用中的游戏路由。",
-            Some("在游戏路由里给游戏绑定节点和目标地址，否则客户端拿不到可用线路。"),
+            "当前没有启用中的业务路由同步副本。",
+            Some("请先由业务后台调用 /api/business/v1/sync-catalog 同步游戏、区服和路由，控制面只做调度执行副本。"),
         );
     } else {
         push_system_check(
             &mut checks,
             "routes",
-            "游戏路由",
+            "业务路由同步",
             "ok",
-            format!("已启用 {} 条游戏路由。", counts.routes_enabled),
+            format!("已启用 {} 条业务路由同步副本。", counts.routes_enabled),
             None,
         );
     }
@@ -3016,6 +3018,8 @@ async fn business_status(
     Ok(Json(BusinessStatusResponse {
         status: "ok",
         version: VERSION,
+        catalog_owner: "business_backend",
+        control_role: "node_operations",
         business_api_enabled: current_business_sync_token(&state)?.is_some(),
         nodes_total,
         nodes_online,
@@ -11370,8 +11374,10 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("新增节点"));
         assert!(ADMIN_DASHBOARD_HTML.contains("编辑配置"));
         assert!(ADMIN_DASHBOARD_HTML.contains("控制总览"));
-        assert!(ADMIN_DASHBOARD_HTML.contains("游戏管理"));
-        assert!(ADMIN_DASHBOARD_HTML.contains("游戏路由"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("业务游戏同步快照"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("路由运维兜底"));
+        assert!(!ADMIN_DASHBOARD_HTML.contains("data-view=\"games\""));
+        assert!(!ADMIN_DASHBOARD_HTML.contains("data-view=\"routes\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("操作日志"));
         assert!(ADMIN_DASHBOARD_HTML.contains("系统设置"));
         assert!(ADMIN_DASHBOARD_HTML.contains("部署和维护命令"));

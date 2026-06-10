@@ -2671,14 +2671,6 @@
             <span class="nav-icon"></span>
             <span>健康告警</span>
           </button>
-          <button class="nav-item" type="button" data-view="games">
-            <span class="nav-icon"></span>
-            <span>游戏管理</span>
-          </button>
-          <button class="nav-item" type="button" data-view="routes">
-            <span class="nav-icon"></span>
-            <span>游戏路由</span>
-          </button>
           <button class="nav-item" type="button" data-view="ops">
             <span class="nav-icon"></span>
             <span>运维工具</span>
@@ -2698,7 +2690,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.55.1</span>
+          <span class="mono">v0.56.0</span>
         </div>
       </aside>
 
@@ -2710,8 +2702,6 @@
           </div>
           <div class="top-actions">
             <button id="openCreateNode" class="primary" type="button" data-write-action>新增节点</button>
-            <button id="openGame" type="button" data-write-action>新增游戏</button>
-            <button id="openRouteRule" type="button" data-write-action>新增规则</button>
             <button id="refreshNow" type="button">立即刷新</button>
             <button id="toggleAuto" type="button">自动刷新：开</button>
             <button id="logoutButton" class="danger" type="button">退出</button>
@@ -2908,11 +2898,11 @@
           <div class="panel">
             <div class="panel-head">
               <div>
-                <div class="panel-title">游戏库</div>
-                <div class="panel-meta" id="gameMeta">最多 500 条</div>
+                <div class="panel-title">业务游戏同步快照</div>
+                <div class="panel-meta" id="gameMeta">业务后台通过 sync-catalog 同步，控制面只读排查。</div>
               </div>
               <div class="inline-actions">
-                <button class="primary" type="button" data-open-game>新增游戏</button>
+                <span class="chip ok">业务后台主入口</span>
               </div>
             </div>
             <div class="catalog-toolbar">
@@ -2968,11 +2958,11 @@
           <div class="panel">
             <div class="panel-head">
               <div>
-                <div class="panel-title">游戏路由规则</div>
-                <div class="panel-meta" id="routeMeta">最多 500 条</div>
+                <div class="panel-title">路由运维兜底快照</div>
+                <div class="panel-meta" id="routeMeta">日常新增和编辑从业务后台发起，控制面用于排查调度副本。</div>
               </div>
               <div class="inline-actions">
-                <button class="primary" type="button" data-open-route>新增规则</button>
+                <span class="chip warn">只做兜底排查</span>
               </div>
             </div>
             <div class="table-wrap">
@@ -3101,10 +3091,10 @@
                     </div>
                   </div>
                   <div class="operation-card">
-                    <div class="operation-title">新增路由</div>
-                    <div class="message">为游戏名称和 ID 绑定节点及目标 UDP 地址，客户端 connect-intent 会按优先级调度。</div>
+                    <div class="operation-title">业务同步</div>
+                    <div class="message">游戏、区服和线路由业务后台调用 sync-catalog 同步；控制面只保留执行副本。</div>
                     <div class="form-actions">
-                      <button class="primary" type="button" data-open-route data-write-action>新增规则</button>
+                      <button type="button" data-system-fix="business_settings">查看对接配置</button>
                     </div>
                   </div>
                   <div class="operation-card" data-write-action>
@@ -3371,7 +3361,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.55.1</div>
+              <div class="insight-value">0.56.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -3843,7 +3833,7 @@
             <div class="field span-2">
               <label for="routeGameSelect">游戏库</label>
               <select id="routeGameSelect" data-route-game-select></select>
-              <div class="form-help">选择后会自动填入游戏 ID 和名称；如果游戏还不存在，请先到游戏管理新增。</div>
+              <div class="form-help">选择后会自动填入游戏 ID 和名称；游戏和区服主数据请先由业务后台同步。</div>
             </div>
             <div class="field">
               <label for="routeGameId">游戏 ID</label>
@@ -4013,8 +4003,8 @@
         overview: "控制总览",
         nodes: "节点管理",
         alerts: "健康告警",
-        games: "游戏管理",
-        routes: "游戏路由",
+        games: "游戏同步快照",
+        routes: "路由运维兜底",
         ops: "运维工具",
         audit: "操作日志",
         settings: "系统设置",
@@ -4080,22 +4070,22 @@
         {
           role: "super_admin",
           title: "超级管理员",
-          summary: "完整控制权限，负责账号、核心数据和高风险运维动作。",
-          allow: ["账号管理", "节点部署 / 升级 / 重启", "游戏和路由维护", "删除节点 / 游戏 / 路由", "查看任务和日志"],
+          summary: "完整控制权限，负责账号、节点运维、业务同步 Token 和高风险操作。",
+          allow: ["账号管理", "节点部署 / 升级 / 重启", "业务同步 Token", "节点删除和状态调整", "查看任务和日志"],
           deny: [],
         },
         {
           role: "operator",
           title: "运维人员",
-          summary: "负责日常运维，可以处理节点和路由，但不能碰账号和核心删除动作。",
-          allow: ["新增和修改节点", "一键部署 / 升级节点", "维护游戏和路由", "保存 SSH 凭据", "查看任务和日志"],
+          summary: "负责日常节点运维，可以查看业务同步快照，但不维护业务主数据。",
+          allow: ["新增和修改节点", "一键部署 / 升级节点", "查看同步快照", "保存 SSH 凭据", "查看任务和日志"],
           deny: ["账号管理", "删除核心数据"],
         },
         {
           role: "viewer",
           title: "只读账号",
           summary: "用于巡检和交接查看，只能看状态、任务、日志和配置结果。",
-          allow: ["查看控制总览", "查看节点状态", "查看游戏和路由", "查看运维任务", "查看操作日志"],
+          allow: ["查看控制总览", "查看节点状态", "查看同步快照", "查看运维任务", "查看操作日志"],
           deny: ["部署 / 重启 / 升级", "新增 / 修改 / 删除", "保存 SSH 凭据", "管理账号"],
         },
       ];
@@ -5793,12 +5783,7 @@
           if (canWrite() && (counts.nodes_total || 0) === 0) {
             return [{ action: "create_node", label: "先新增节点" }];
           }
-          if (canWrite() && (counts.games_enabled || 0) === 0) {
-            return [{ action: "create_game", label: "先新增游戏" }];
-          }
-          return canWrite()
-            ? [{ action: "create_route", label: "新增路由" }]
-            : [{ action: "view_routes", label: "查看路由" }];
+          return [{ action: "business_settings", label: "检查业务同步" }];
         }
         if (item.key === "alerts") {
           const actions = [{ action: "view_alerts", label: "查看告警" }];
@@ -5834,6 +5819,14 @@
         window.requestAnimationFrame(() => {
           const commandPanel = els.systemInstallMysqlCommand?.closest(".operation-card");
           commandPanel?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+      }
+
+      function focusBusinessTokenPanel() {
+        renderSystemSettings();
+        window.requestAnimationFrame(() => {
+          const tokenPanel = els.businessTokenValue?.closest(".panel");
+          tokenPanel?.scrollIntoView({ behavior: "smooth", block: "center" });
         });
       }
 
@@ -5874,36 +5867,9 @@
       }
 
       async function openSuggestedRouteFromDiagnostics() {
-        if (!assertCanWrite("新增路由")) return;
-        setActiveView("routes");
-        if (!state.nodes.length) {
-          await loadNodes({ silent: true });
-        } else {
-          await Promise.all([
-            loadGames({ silent: true }),
-            loadRouteRules({ silent: true }),
-          ]);
-        }
-        const game = firstRouteCandidateGame();
-        const node = firstRouteCandidateNode();
-        if (!game) {
-          setActiveView("games");
-          openGameModal();
-          return;
-        }
-        if (!node) {
-          setActiveView("nodes");
-          openCreateNodeModal();
-          return;
-        }
-        openRouteRuleModal({
-          game_id: game.game_id,
-          game_name: game.name,
-          node_id: node?.id,
-          protocol: "udp",
-          priority: 100,
-          status: "enabled",
-        });
+        setActiveView("settings");
+        focusBusinessTokenPanel();
+        showSuccess("游戏和路由请从业务后台同步，控制面只保留执行快照。");
       }
 
       async function openBatchUpgradeFromDiagnostics() {
@@ -5928,8 +5894,8 @@
           return;
         }
         if (action === "create_game") {
-          setActiveView("games");
-          openGameModal();
+          setActiveView("settings");
+          focusBusinessTokenPanel();
           return;
         }
         if (action === "view_nodes") {
@@ -5961,6 +5927,11 @@
         }
         if (action === "settings_view") {
           setActiveView("settings");
+          return;
+        }
+        if (action === "business_settings") {
+          setActiveView("settings");
+          focusBusinessTokenPanel();
         }
       }
 
@@ -6499,7 +6470,7 @@
 
       function renderGames() {
         if (!state.games.length) {
-          els.gameRows.innerHTML = `<tr><td colspan="7" class="empty">暂无游戏，请先新增一个游戏再配置路由。</td></tr>`;
+          els.gameRows.innerHTML = `<tr><td colspan="7" class="empty">暂无游戏同步快照，请从业务后台调用 sync-catalog 同步游戏。</td></tr>`;
           renderPager("games", 0, els.gamePager);
           return;
         }
@@ -6516,19 +6487,7 @@
         els.gameRows.innerHTML = visibleGames
           .map((game) => {
             const enabled = game.status === "enabled";
-            const nextStatus = enabled ? "disabled" : "enabled";
-            const actionCell = canWrite()
-              ? `
-                    <button type="button" data-game-action="route" data-game-id="${game.game_id}">配路由</button>
-                    <button type="button" data-game-action="edit" data-game-id="${game.game_id}">编辑</button>
-                    <button type="button" data-game-action="toggle" data-game-status="${nextStatus}" data-game-id="${game.game_id}">${enabled ? "禁用" : "启用"}</button>
-                    ${
-                      canDeleteCoreData()
-                        ? `<button class="danger" type="button" data-game-action="delete" data-game-id="${game.game_id}">删除</button>`
-                        : ""
-                    }
-              `
-              : readonlyActionsCell();
+            const actionCell = `<span class="chip ok">同步快照</span>`;
             return `
               <tr data-game-id="${game.game_id}">
                 <td>
@@ -6562,7 +6521,7 @@
 
       function renderRouteRules() {
         if (!state.routeRules.length) {
-          els.routeRows.innerHTML = `<tr><td colspan="7" class="empty">暂无路由规则，先新增一条游戏到节点的绑定。</td></tr>`;
+          els.routeRows.innerHTML = `<tr><td colspan="7" class="empty">暂无路由同步快照，请从业务后台同步 route_rules；控制面仅做运维兜底。</td></tr>`;
           renderPager("routes", 0, els.routePager);
           return;
         }
@@ -6581,19 +6540,8 @@
             const enabled = rule.status === "enabled";
             const node = state.nodes.find((item) => item.id === rule.node_id);
             const endpoint = rule.node_endpoint || node?.endpoint || "";
-            const nextStatus = enabled ? "disabled" : "enabled";
             const label = gameLabel(rule);
-            const actionCell = canWrite()
-              ? `
-                    <button type="button" data-route-action="edit" data-route-id="${rule.id}">编辑</button>
-                    <button type="button" data-route-action="toggle" data-route-status="${nextStatus}" data-route-id="${rule.id}">${enabled ? "禁用" : "启用"}</button>
-                    ${
-                      canDeleteCoreData()
-                        ? `<button class="danger" type="button" data-route-action="delete" data-route-id="${rule.id}">删除</button>`
-                        : ""
-                    }
-              `
-              : readonlyActionsCell();
+            const actionCell = `<span class="chip warn">运维兜底</span>`;
             return `
               <tr data-route-id="${rule.id}">
                 <td>
@@ -7697,7 +7645,7 @@
                   `;
                 })
                 .join("") ||
-              '<div class="empty">没有候选节点。请检查游戏路由是否启用、节点是否在线、节点密钥是否存在。</div>'
+              '<div class="empty">没有候选节点。请检查业务路由同步副本是否启用、节点是否在线、节点密钥是否存在。</div>'
             }
           </div>
           ${
@@ -8246,7 +8194,7 @@
         if (event.target === els.deployNodeModal) closeDeployNodeModal();
       });
 
-      els.openGame.addEventListener("click", () => openGameModal());
+      els.openGame?.addEventListener("click", () => openGameModal());
       document.querySelectorAll("[data-open-game]").forEach((button) => {
         button.addEventListener("click", () => openGameModal());
       });
@@ -8256,7 +8204,7 @@
         if (event.target === els.gameModal) closeGameModal();
       });
 
-      els.openRouteRule.addEventListener("click", () => openRouteRuleModal());
+      els.openRouteRule?.addEventListener("click", () => openRouteRuleModal());
       document.querySelectorAll("[data-open-route]").forEach((button) => {
         button.addEventListener("click", () => openRouteRuleModal());
       });
@@ -8379,7 +8327,7 @@
         runConnectDiagnostic(els.diagnosticForm).catch((error) => {
           showInlineError(els.diagnosticError, error.message);
           els.diagnosticResult.classList.add("empty");
-          els.diagnosticResult.textContent = "诊断失败，请检查游戏路由、节点状态、UDP 防火墙和请求参数。";
+          els.diagnosticResult.textContent = "诊断失败，请检查业务路由同步副本、节点状态、UDP 防火墙和请求参数。";
         });
       });
 
