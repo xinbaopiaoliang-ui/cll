@@ -140,6 +140,49 @@ struct ConnectIntentRequest {
     bandwidth_quality: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct BusinessConnectIntentRequest {
+    request_id: Option<String>,
+    entitlement_id: Option<String>,
+    user_id: u64,
+    device_id: String,
+    game_id: u64,
+    region_id: Option<u64>,
+    platform: Option<String>,
+    client_isp: Option<String>,
+    client_ip: Option<String>,
+    bandwidth_quality: Option<String>,
+    client_version: Option<String>,
+}
+
+impl BusinessConnectIntentRequest {
+    fn to_connect_intent_request(&self) -> ConnectIntentRequest {
+        ConnectIntentRequest {
+            user_id: self.user_id,
+            device_id: self.device_id.clone(),
+            game_id: self.game_id,
+            region_id: self.region_id,
+            platform: self.platform.clone(),
+            client_isp: self.client_isp.clone(),
+            client_ip: self.client_ip.clone(),
+            bandwidth_quality: self.bandwidth_quality.clone(),
+        }
+    }
+
+    fn into_connect_intent_request(self) -> ConnectIntentRequest {
+        ConnectIntentRequest {
+            user_id: self.user_id,
+            device_id: self.device_id,
+            game_id: self.game_id,
+            region_id: self.region_id,
+            platform: self.platform,
+            client_isp: self.client_isp,
+            client_ip: self.client_ip,
+            bandwidth_quality: self.bandwidth_quality,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct ConnectIntentResponse {
     intent_id: String,
@@ -1163,6 +1206,28 @@ struct BusinessSyncCatalogResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct BusinessConnectIntentResponse {
+    status: &'static str,
+    request_id: Option<String>,
+    entitlement_id: Option<String>,
+    client_version: Option<String>,
+    connect_intent: ConnectIntentResponse,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct BusinessStatusResponse {
+    status: &'static str,
+    version: &'static str,
+    business_api_enabled: bool,
+    nodes_total: u64,
+    nodes_online: u64,
+    games_enabled: u64,
+    routes_enabled: u64,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
 struct AdminNodeSummary {
     id: u64,
     name: String,
@@ -1767,6 +1832,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin", get(admin_dashboard))
         .route("/health", get(health))
         .route("/api/client/v1/connect-intent", post(connect_intent))
+        .route("/api/business/v1/status", get(business_status))
+        .route(
+            "/api/business/v1/connect-intent",
+            post(business_connect_intent),
+        )
         .route("/api/business/v1/sync-catalog", post(business_sync_catalog))
         .route(NODE_BOOTSTRAP_PATH, post(node_bootstrap))
         .route(NODE_HANDSHAKE_PATH, post(node_handshake))
@@ -2869,6 +2939,69 @@ async fn business_sync_catalog(
     let catalog = normalize_business_sync_catalog(request)?;
     let response = sync_business_catalog(&state.pool, catalog).await?;
     Ok(Json(response))
+}
+
+async fn business_connect_intent(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<BusinessConnectIntentRequest>,
+) -> Result<Json<BusinessConnectIntentResponse>, AppError> {
+    require_business_sync(&state, &headers)?;
+    validate_business_connect_intent_request(&request)?;
+    let request_id = request.request_id.clone();
+    let entitlement_id = request.entitlement_id.clone();
+    let client_version = request.client_version.clone();
+    let connect_request = request.into_connect_intent_request();
+    let connect_intent =
+        issue_connect_intent(&state.pool, state.token_ttl_sec, connect_request).await?;
+
+    Ok(Json(BusinessConnectIntentResponse {
+        status: "ok",
+        request_id,
+        entitlement_id,
+        client_version,
+        connect_intent,
+        server_time: now_unix(),
+    }))
+}
+
+async fn business_status(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<BusinessStatusResponse>, AppError> {
+    require_business_sync(&state, &headers)?;
+    let nodes_total = system_count(&state.pool, "SELECT COUNT(*) FROM accel_nodes")
+        .await
+        .map_err(AppError::database)?;
+    let nodes_online = system_count(
+        &state.pool,
+        "SELECT COUNT(*) FROM accel_nodes WHERE status = 'online'",
+    )
+    .await
+    .map_err(AppError::database)?;
+    let games_enabled = system_count(
+        &state.pool,
+        "SELECT COUNT(*) FROM accel_games WHERE status = 'enabled'",
+    )
+    .await
+    .map_err(AppError::database)?;
+    let routes_enabled = system_count(
+        &state.pool,
+        "SELECT COUNT(*) FROM game_route_rules WHERE status = 'enabled'",
+    )
+    .await
+    .map_err(AppError::database)?;
+
+    Ok(Json(BusinessStatusResponse {
+        status: "ok",
+        version: VERSION,
+        business_api_enabled: state.business_sync_token.is_some(),
+        nodes_total,
+        nodes_online,
+        games_enabled,
+        routes_enabled,
+        server_time: now_unix(),
+    }))
 }
 
 async fn admin_connectivity_diagnostic(
@@ -7573,6 +7706,38 @@ fn validate_connect_intent_request(request: &ConnectIntentRequest) -> Result<(),
     Ok(())
 }
 
+fn validate_business_connect_intent_request(
+    request: &BusinessConnectIntentRequest,
+) -> Result<(), AppError> {
+    validate_connect_intent_request(&request.to_connect_intent_request())?;
+    validate_optional_business_text(request.request_id.as_deref(), "request_id", 128)?;
+    validate_optional_business_text(request.entitlement_id.as_deref(), "entitlement_id", 128)?;
+    validate_optional_business_text(request.client_version.as_deref(), "client_version", 64)?;
+    Ok(())
+}
+
+fn validate_optional_business_text(
+    value: Option<&str>,
+    field: &'static str,
+    max_chars: usize,
+) -> Result<(), AppError> {
+    if let Some(value) = value {
+        if value.trim().is_empty() {
+            return Err(AppError::bad_request(
+                "invalid_business_field",
+                format!("{field} must not be empty when provided"),
+            ));
+        }
+        if value.chars().count() > max_chars {
+            return Err(AppError::bad_request(
+                "invalid_business_field",
+                format!("{field} must not exceed {max_chars} characters"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_connectivity_diagnostic_request(
     request: &AdminConnectivityDiagnosticRequest,
 ) -> Result<(), AppError> {
@@ -10831,6 +10996,52 @@ mod tests {
             business_sync_token_from_headers(&headers),
             Some("sync-secret")
         );
+    }
+
+    #[test]
+    fn validates_business_connect_intent_request() {
+        let request = BusinessConnectIntentRequest {
+            request_id: Some("req-20260610-0001".to_string()),
+            entitlement_id: Some("vip-order-1001".to_string()),
+            user_id: 1001,
+            device_id: "pc-001".to_string(),
+            game_id: 8888,
+            region_id: Some(1),
+            platform: Some("pc".to_string()),
+            client_isp: Some("telecom".to_string()),
+            client_ip: Some("127.0.0.1".to_string()),
+            bandwidth_quality: Some("fast".to_string()),
+            client_version: Some("0.1.0".to_string()),
+        };
+
+        validate_business_connect_intent_request(&request).expect("request is valid");
+        let connect_request = request.to_connect_intent_request();
+        assert_eq!(connect_request.user_id, 1001);
+        assert_eq!(connect_request.device_id, "pc-001");
+        assert_eq!(connect_request.game_id, 8888);
+        assert_eq!(connect_request.region_id, Some(1));
+        assert_eq!(connect_request.bandwidth_quality.as_deref(), Some("fast"));
+    }
+
+    #[test]
+    fn rejects_invalid_business_connect_intent_metadata() {
+        let request = BusinessConnectIntentRequest {
+            request_id: Some(" ".to_string()),
+            entitlement_id: None,
+            user_id: 1001,
+            device_id: "pc-001".to_string(),
+            game_id: 8888,
+            region_id: None,
+            platform: Some("pc".to_string()),
+            client_isp: None,
+            client_ip: None,
+            bandwidth_quality: Some("normal".to_string()),
+            client_version: None,
+        };
+
+        let error = validate_business_connect_intent_request(&request).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_business_field");
     }
 
     #[test]

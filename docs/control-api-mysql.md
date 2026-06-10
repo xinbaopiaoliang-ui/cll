@@ -163,6 +163,26 @@ curl -fsSL -X POST http://127.0.0.1:18080/api/business/v1/sync-catalog \
 omitted, the control API derives a stable id from the route fields so repeated
 catalog syncs update the same execution route instead of creating duplicates.
 
+The business backend can also verify the protected integration surface:
+
+```bash
+curl -fsSL http://127.0.0.1:18080/api/business/v1/status \
+  -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}"
+```
+
+After the business backend has checked login, entitlement, device limits, and
+game access, it can request the node candidates and short-lived node credential
+for the client:
+
+```bash
+curl -fsSL -X POST http://127.0.0.1:18080/api/business/v1/connect-intent \
+  -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"request_id":"req-1","entitlement_id":"vip-1001","user_id":1001,"device_id":"pc-001","game_id":8888,"region_id":1,"platform":"pc","client_isp":"telecom","client_ip":"127.0.0.1","bandwidth_quality":"fast","client_version":"0.1.0"}'
+```
+
+Detailed integration contract: [业务后台对接控制面](business-backend-integration.md).
+
 ## Current Limits
 
 - User entitlement is still owned by the business backend and is not checked by

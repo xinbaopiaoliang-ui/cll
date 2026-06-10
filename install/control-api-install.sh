@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.52.0"
+INSTALLER_VERSION="0.53.0"
 SERVICE_NAME="xaccel-control-api"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-control-api"
@@ -48,7 +48,7 @@ Options:
   --admin-token TOKEN     Admin API bearer token. Generated automatically when omitted.
   --public-base-url URL   Optional public base URL for node bootstrap responses.
   --business-sync-token TOKEN
-                         Optional bearer token for business backend catalog sync API.
+                         Optional bearer token for business backend API.
   --credential-key KEY   Base64 32-byte key for encrypting saved SSH passwords.
                          Generated automatically when omitted.
   --artifact-url URL      Override xaccel-control-api tar.gz download URL.

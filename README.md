@@ -36,6 +36,7 @@ traffic through a self-developed node core.
 - [数据库表结构草案](db/schema.sql)
 - [Release Manifest 示例](install/release-manifest.example.json)
 - [Rust + MySQL connect-intent 控制面](docs/control-api-mysql.md)
+- [业务后台对接控制面](docs/business-backend-integration.md)
 
 ## Core Assumptions
 
@@ -61,8 +62,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.32.0
-git push origin v0.32.0
+git tag v0.53.0
+git push origin v0.53.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -80,7 +81,9 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.32.0` keeps the legacy TCP/UDP `ping` probe, supports
+next stage. Version `0.53.0` adds the protected business-backend status and
+connect-intent APIs, plus a dedicated integration contract for business systems.
+Version `0.32.0` keeps the legacy TCP/UDP `ping` probe, supports
 JSON `xaccel/1` client probe responses, verifies optional `xat.v1` HMAC client
 tokens, keeps a short-lived UDP session table, echoes `session.data` packets for
 client integration testing, binds backend-style connect-intent routes from
