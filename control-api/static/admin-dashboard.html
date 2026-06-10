@@ -1915,6 +1915,91 @@
         background: rgba(231, 247, 243, 0.92);
       }
 
+      .download-check-result {
+        margin-top: 14px;
+      }
+
+      .download-check-result.empty {
+        min-height: 88px;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        border: 1px dashed var(--line);
+        border-radius: 8px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .download-check-summary {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .download-check-list {
+        display: grid;
+        gap: 9px;
+      }
+
+      .download-check-item {
+        display: grid;
+        grid-template-columns: minmax(160px, 0.42fr) minmax(0, 1fr) minmax(96px, 0.18fr);
+        gap: 12px;
+        align-items: start;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.74);
+      }
+
+      .download-check-item.ok {
+        border-color: rgba(18, 130, 95, 0.18);
+        background: rgba(245, 252, 249, 0.78);
+      }
+
+      .download-check-item.bad {
+        border-color: rgba(180, 35, 24, 0.22);
+        background: rgba(255, 247, 245, 0.76);
+      }
+
+      .download-check-main {
+        min-width: 0;
+        display: grid;
+        gap: 5px;
+      }
+
+      .download-check-title {
+        font-weight: 820;
+      }
+
+      .download-check-url {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
+
+      .download-check-meta {
+        color: var(--faint);
+        font-size: 12px;
+      }
+
+      .download-check-message {
+        min-width: 0;
+        color: var(--ink);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .download-check-suggestion {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
       .diagnostic-result {
         margin-top: 14px;
         text-align: left;
@@ -2534,7 +2619,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.51.0</span>
+          <span class="mono">v0.52.0</span>
         </div>
       </aside>
 
@@ -3207,7 +3292,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.51.0</div>
+              <div class="insight-value">0.52.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -3228,6 +3313,7 @@
                 <div class="panel-title">下载源配置</div>
                 <div class="panel-meta">控制节点安装脚本和 release 包下载地址，节点升级会使用这里的默认值。</div>
               </div>
+              <button id="runDownloadCheck" type="button">测试下载源</button>
             </div>
             <div class="message hidden" data-readonly-only>
               当前账号是只读权限，只能查看下载源配置，不能保存修改。
@@ -3279,6 +3365,9 @@
                 <button class="primary" type="submit">保存下载源</button>
               </div>
             </form>
+            <div class="download-check-result empty" id="systemDownloadCheckResult">
+              点击测试下载源后，会从控制面服务器检查安装脚本、release 包、sha256 和 GitHub API 是否可访问。
+            </div>
           </section>
 
           <section class="panel">
@@ -3831,6 +3920,7 @@
         auditLogs: [],
         adminUsers: [],
         systemDiagnostics: null,
+        systemDownloadCheck: null,
         systemSettings: {
           node_install_url: "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh",
           node_artifact_url: null,
@@ -4035,6 +4125,8 @@
         systemPurgeCommand: document.getElementById("systemPurgeCommand"),
         systemDownloadForm: document.getElementById("systemDownloadForm"),
         systemDownloadError: document.getElementById("systemDownloadError"),
+        runDownloadCheck: document.getElementById("runDownloadCheck"),
+        systemDownloadCheckResult: document.getElementById("systemDownloadCheckResult"),
         settingsNodeInstallUrl: document.getElementById("settingsNodeInstallUrl"),
         settingsNodeArtifactUrl: document.getElementById("settingsNodeArtifactUrl"),
         settingsNodeSha256Url: document.getElementById("settingsNodeSha256Url"),
@@ -4309,6 +4401,7 @@
         }
         if (state.activeView === "settings") {
           renderSystemSettings();
+          renderSystemDownloadCheck();
           loadSystemSettings({ silent: true }).catch(showError);
           loadSystemDiagnostics({ silent: Boolean(state.systemDiagnostics) }).catch(showError);
         }
@@ -4572,6 +4665,13 @@
         return new Date(unix * 1000).toLocaleTimeString("zh-CN", {
           hour12: false,
         });
+      }
+
+      function formatDuration(ms) {
+        const value = Number(ms);
+        if (!Number.isFinite(value)) return "--";
+        if (value >= 1000) return `${(value / 1000).toFixed(1)}s`;
+        return `${Math.max(0, Math.round(value))}ms`;
       }
 
       function ageText(unix) {
@@ -5381,6 +5481,55 @@
         if (els.settingsReleaseDownloadMode) {
           els.settingsReleaseDownloadMode.value = settings.release_download_mode || "github_api_first";
         }
+      }
+
+      function renderSystemDownloadCheck() {
+        const target = els.systemDownloadCheckResult;
+        if (!target) return;
+        const data = state.systemDownloadCheck;
+        if (!data) {
+          target.className = "download-check-result empty";
+          target.textContent = "点击测试下载源后，会从控制面服务器检查安装脚本、release 包、sha256 和 GitHub API 是否可访问。";
+          return;
+        }
+
+        const summary = data.summary || {};
+        const checks = data.checks || [];
+        target.className = "download-check-result";
+        target.innerHTML = `
+          <div class="download-check-summary">
+            <span class="chip ${data.status === "ok" ? "ok" : "warn"}">${data.status === "ok" ? "全部可用" : "存在异常"}</span>
+            <span class="chip">总数 ${summary.total || checks.length}</span>
+            <span class="chip ok">成功 ${summary.ok || 0}</span>
+            <span class="chip ${summary.failed ? "bad" : "ok"}">失败 ${summary.failed || 0}</span>
+            <span class="chip">耗时 ${formatDuration(summary.duration_ms || 0)}</span>
+            <span class="muted">刷新 ${formatClock(data.server_time)}</span>
+          </div>
+          <div class="download-check-list">
+            ${checks.map((item) => {
+              const ok = item.status === "ok";
+              return `
+                <div class="download-check-item ${ok ? "ok" : "bad"}">
+                  <div class="download-check-main">
+                    <div class="download-check-title">${escapeHtml(item.label || item.key || "--")}</div>
+                    <div class="download-check-url">${escapeHtml(item.url || "--")}</div>
+                    <div class="download-check-meta">${escapeHtml(item.source || "--")} / ${escapeHtml(item.method || "--")}</div>
+                  </div>
+                  <div class="download-check-message">
+                    <span class="chip ${ok ? "ok" : "bad"}">${ok ? "正常" : "失败"}</span>
+                    <div>${escapeHtml(item.message || "--")}</div>
+                    ${item.suggestion ? `<div class="download-check-suggestion">${escapeHtml(item.suggestion)}</div>` : ""}
+                  </div>
+                  <div class="download-check-meta">
+                    <div>HTTP ${escapeHtml(item.http_code || "--")}</div>
+                    <div>退出 ${escapeHtml(item.exit_code ?? "--")}</div>
+                    <div>${escapeHtml(formatDuration(item.duration_ms || 0))}</div>
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        `;
       }
 
       function systemStatusText(status) {
@@ -7014,10 +7163,41 @@
           }),
         });
         state.systemSettings = data.settings || state.systemSettings;
+        state.systemDownloadCheck = null;
         renderSystemSettings();
+        renderSystemDownloadCheck();
         els.statusLine.textContent = "下载源配置已保存";
         els.statusLine.classList.add("connected");
         els.statusLine.classList.remove("error-state");
+      }
+
+      async function runSystemDownloadCheck() {
+        if (els.runDownloadCheck) {
+          els.runDownloadCheck.disabled = true;
+          els.runDownloadCheck.textContent = "检测中...";
+        }
+        if (els.systemDownloadCheckResult) {
+          els.systemDownloadCheckResult.className = "download-check-result empty";
+          els.systemDownloadCheckResult.innerHTML = `<span class="skeleton"></span>`;
+        }
+        try {
+          const data = await api("/api/admin/v1/system/download-check", {
+            method: "POST",
+          });
+          state.systemDownloadCheck = data;
+          renderSystemDownloadCheck();
+          const failed = data.summary?.failed || 0;
+          els.statusLine.textContent = failed
+            ? `下载源检测完成：${failed} 项异常`
+            : "下载源检测完成：全部可访问";
+          els.statusLine.classList.toggle("error-state", failed > 0);
+          els.statusLine.classList.toggle("connected", failed === 0);
+        } finally {
+          if (els.runDownloadCheck) {
+            els.runDownloadCheck.disabled = false;
+            els.runDownloadCheck.textContent = "测试下载源";
+          }
+        }
       }
 
       async function updateHealthAlert(alertId, status) {
@@ -7961,6 +8141,10 @@
         saveSystemDownloadSettings().catch((error) => {
           showInlineError(els.systemDownloadError, error.message);
         });
+      });
+
+      els.runDownloadCheck.addEventListener("click", () => {
+        runSystemDownloadCheck().catch(showError);
       });
 
       els.refreshNow.addEventListener("click", () => {

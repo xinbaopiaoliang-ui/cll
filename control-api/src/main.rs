@@ -55,6 +55,10 @@ const DEFAULT_INSTALL_URL: &str =
     "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/install.sh";
 const DEFAULT_CONTROL_INSTALL_URL: &str =
     "https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh";
+const GITHUB_REPO: &str = "xinbaopiaoliang-ui/cll";
+const NODE_RELEASE_ARTIFACT: &str = "xaccel-node-linux-x86_64.tar.gz";
+const CONTROL_RELEASE_ARTIFACT: &str = "xaccel-control-api-linux-x86_64.tar.gz";
+const DOWNLOAD_CHECK_TIMEOUT_SEC: u64 = 28;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const MIN_NODE_VERSION: &str = "0.1.0";
 const ADMIN_DASHBOARD_HTML: &str = include_str!("../static/admin-dashboard.html");
@@ -741,6 +745,37 @@ struct AdminSystemSettingsResponse {
     status: &'static str,
     settings: AdminSystemSettingsSummary,
     server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminSystemDownloadCheckResponse {
+    status: &'static str,
+    summary: AdminSystemDownloadCheckSummary,
+    checks: Vec<AdminSystemDownloadCheckItem>,
+    server_time: u64,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct AdminSystemDownloadCheckSummary {
+    total: u32,
+    ok: u32,
+    failed: u32,
+    duration_ms: u128,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminSystemDownloadCheckItem {
+    key: &'static str,
+    label: &'static str,
+    source: &'static str,
+    url: String,
+    method: &'static str,
+    status: &'static str,
+    http_code: Option<u16>,
+    exit_code: Option<i32>,
+    duration_ms: u128,
+    message: String,
+    suggestion: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1810,6 +1845,10 @@ async fn main() -> anyhow::Result<()> {
             get(admin_get_system_settings).patch(admin_update_system_settings),
         )
         .route(
+            "/api/admin/v1/system/download-check",
+            post(admin_system_download_check),
+        )
+        .route(
             "/api/admin/v1/games",
             get(admin_list_games).post(admin_create_game),
         )
@@ -2877,6 +2916,16 @@ async fn admin_update_system_settings(
         settings,
         server_time: now_unix(),
     }))
+}
+
+async fn admin_system_download_check(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<AdminSystemDownloadCheckResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let settings = select_system_settings(&state.pool).await?;
+    let response = run_system_download_check(&settings).await;
+    Ok(Json(response))
 }
 
 async fn node_bootstrap(
@@ -5375,6 +5424,309 @@ ON DUPLICATE KEY UPDATE
     }
 
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum DownloadCheckMethod {
+    Head,
+    GetJson,
+}
+
+impl DownloadCheckMethod {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Head => "HEAD",
+            Self::GetJson => "GET",
+        }
+    }
+}
+
+struct SystemDownloadCheckTarget {
+    key: &'static str,
+    label: &'static str,
+    source: &'static str,
+    url: String,
+    method: DownloadCheckMethod,
+    suggestion: Option<&'static str>,
+}
+
+struct CurlProbeResult {
+    exit_code: Option<i32>,
+    stdout: String,
+    stderr: String,
+    timed_out: bool,
+}
+
+async fn run_system_download_check(
+    settings: &AdminSystemSettingsSummary,
+) -> AdminSystemDownloadCheckResponse {
+    let started = Instant::now();
+    let targets = system_download_check_targets(settings);
+    let mut checks = Vec::with_capacity(targets.len());
+
+    for target in targets {
+        checks.push(run_download_check_target(target).await);
+    }
+
+    let ok = checks.iter().filter(|item| item.status == "ok").count() as u32;
+    let failed = checks.len() as u32 - ok;
+
+    AdminSystemDownloadCheckResponse {
+        status: if failed == 0 { "ok" } else { "warning" },
+        summary: AdminSystemDownloadCheckSummary {
+            total: checks.len() as u32,
+            ok,
+            failed,
+            duration_ms: started.elapsed().as_millis(),
+        },
+        checks,
+        server_time: now_unix(),
+    }
+}
+
+fn system_download_check_targets(
+    settings: &AdminSystemSettingsSummary,
+) -> Vec<SystemDownloadCheckTarget> {
+    vec![
+        SystemDownloadCheckTarget {
+            key: "node_install_url",
+            label: "节点安装脚本",
+            source: "系统配置",
+            url: settings.node_install_url.clone(),
+            method: DownloadCheckMethod::Head,
+            suggestion: Some(
+                "检查 raw.githubusercontent.com 或自定义脚本地址是否能从控制面服务器访问。",
+            ),
+        },
+        SystemDownloadCheckTarget {
+            key: "control_install_url",
+            label: "控制面安装脚本",
+            source: "系统配置",
+            url: settings.control_install_url.clone(),
+            method: DownloadCheckMethod::Head,
+            suggestion: Some("检查控制面安装脚本地址，或在下载源配置里切换到可访问的镜像。"),
+        },
+        SystemDownloadCheckTarget {
+            key: "node_artifact_url",
+            label: "节点 release 包",
+            source: settings
+                .node_artifact_url
+                .as_ref()
+                .map(|_| "自定义包地址")
+                .unwrap_or("默认 GitHub Release"),
+            url: settings
+                .node_artifact_url
+                .clone()
+                .unwrap_or_else(|| latest_download_url(NODE_RELEASE_ARTIFACT)),
+            method: DownloadCheckMethod::Head,
+            suggestion: Some(
+                "如果 GitHub latest/download 偶发 504，可改成 GitHub API 优先或填写自定义包地址。",
+            ),
+        },
+        SystemDownloadCheckTarget {
+            key: "node_sha256_url",
+            label: "节点 sha256 校验",
+            source: settings
+                .node_sha256_url
+                .as_ref()
+                .map(|_| "自定义校验地址")
+                .unwrap_or("默认 GitHub Release"),
+            url: settings
+                .node_sha256_url
+                .clone()
+                .unwrap_or_else(|| latest_download_url(&format!("{NODE_RELEASE_ARTIFACT}.sha256"))),
+            method: DownloadCheckMethod::Head,
+            suggestion: Some("sha256 文件必须和节点 release 包同版本，否则安装器会拒绝安装。"),
+        },
+        SystemDownloadCheckTarget {
+            key: "control_artifact_url",
+            label: "控制面 release 包",
+            source: settings
+                .control_artifact_url
+                .as_ref()
+                .map(|_| "自定义包地址")
+                .unwrap_or("默认 GitHub Release"),
+            url: settings
+                .control_artifact_url
+                .clone()
+                .unwrap_or_else(|| latest_download_url(CONTROL_RELEASE_ARTIFACT)),
+            method: DownloadCheckMethod::Head,
+            suggestion: Some("控制面升级失败时，优先检查这个包地址和服务器出网。"),
+        },
+        SystemDownloadCheckTarget {
+            key: "control_sha256_url",
+            label: "控制面 sha256 校验",
+            source: settings
+                .control_sha256_url
+                .as_ref()
+                .map(|_| "自定义校验地址")
+                .unwrap_or("默认 GitHub Release"),
+            url: settings.control_sha256_url.clone().unwrap_or_else(|| {
+                latest_download_url(&format!("{CONTROL_RELEASE_ARTIFACT}.sha256"))
+            }),
+            method: DownloadCheckMethod::Head,
+            suggestion: Some("sha256 文件下载失败会导致控制面升级中断。"),
+        },
+        SystemDownloadCheckTarget {
+            key: "github_release_api",
+            label: "GitHub API 最新 Release",
+            source: "安装器兜底通道",
+            url: github_latest_release_api_url(),
+            method: DownloadCheckMethod::GetJson,
+            suggestion: Some(
+                "如果这里失败，说明控制面服务器访问 api.github.com 有问题，可使用自定义包地址。",
+            ),
+        },
+    ]
+}
+
+fn latest_download_url(asset_name: &str) -> String {
+    format!("https://github.com/{GITHUB_REPO}/releases/latest/download/{asset_name}")
+}
+
+fn github_latest_release_api_url() -> String {
+    format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest")
+}
+
+async fn run_download_check_target(
+    target: SystemDownloadCheckTarget,
+) -> AdminSystemDownloadCheckItem {
+    let started = Instant::now();
+    match run_curl_probe(&target.url, target.method).await {
+        Ok(probe) if probe.timed_out => AdminSystemDownloadCheckItem {
+            key: target.key,
+            label: target.label,
+            source: target.source,
+            url: target.url,
+            method: target.method.label(),
+            status: "failed",
+            http_code: None,
+            exit_code: probe.exit_code,
+            duration_ms: started.elapsed().as_millis(),
+            message: format!(
+                "检测超过 {DOWNLOAD_CHECK_TIMEOUT_SEC} 秒，服务器访问这个地址太慢或无响应。"
+            ),
+            suggestion: target.suggestion.map(ToOwned::to_owned),
+        },
+        Ok(probe) => {
+            let http_code = parse_curl_http_code(&probe.stdout);
+            let ok = probe.exit_code == Some(0)
+                && http_code
+                    .map(|code| (200..400).contains(&code))
+                    .unwrap_or(false);
+            let error_detail = first_non_empty_line(&probe.stderr)
+                .or_else(|| first_non_empty_line(&probe.stdout))
+                .unwrap_or_else(|| "curl did not return a successful response".to_string());
+            AdminSystemDownloadCheckItem {
+                key: target.key,
+                label: target.label,
+                source: target.source,
+                url: target.url,
+                method: target.method.label(),
+                status: if ok { "ok" } else { "failed" },
+                http_code,
+                exit_code: probe.exit_code,
+                duration_ms: started.elapsed().as_millis(),
+                message: if ok {
+                    format!("访问正常，HTTP {}", http_code.unwrap_or(0))
+                } else {
+                    format!(
+                        "访问失败{}：{}",
+                        http_code
+                            .map(|code| format!("，HTTP {code}"))
+                            .unwrap_or_default(),
+                        truncate_chars(&error_detail, 180)
+                    )
+                },
+                suggestion: (!ok)
+                    .then(|| target.suggestion.map(ToOwned::to_owned))
+                    .flatten(),
+            }
+        }
+        Err(error) => AdminSystemDownloadCheckItem {
+            key: target.key,
+            label: target.label,
+            source: target.source,
+            url: target.url,
+            method: target.method.label(),
+            status: "failed",
+            http_code: None,
+            exit_code: None,
+            duration_ms: started.elapsed().as_millis(),
+            message: if error.kind() == ErrorKind::NotFound {
+                "控制面服务器没有安装 curl，无法检测下载源。".to_string()
+            } else {
+                format!("执行 curl 失败：{error}")
+            },
+            suggestion: Some("先在控制面服务器安装 curl，再重新检测。".to_string()),
+        },
+    }
+}
+
+async fn run_curl_probe(
+    url: &str,
+    method: DownloadCheckMethod,
+) -> std::io::Result<CurlProbeResult> {
+    let mut command = Command::new("curl");
+    command.args([
+        "-fsSL",
+        "--connect-timeout",
+        "8",
+        "--max-time",
+        "24",
+        "-o",
+        "/dev/null",
+        "-w",
+        "%{http_code}",
+    ]);
+    match method {
+        DownloadCheckMethod::Head => {
+            command.arg("-I");
+        }
+        DownloadCheckMethod::GetJson => {
+            command.args(["-H", "Accept: application/vnd.github+json"]);
+        }
+    }
+    command.arg(url);
+
+    match timeout(
+        Duration::from_secs(DOWNLOAD_CHECK_TIMEOUT_SEC),
+        command.output(),
+    )
+    .await
+    {
+        Ok(output) => {
+            let output = output?;
+            Ok(CurlProbeResult {
+                exit_code: output.status.code(),
+                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                timed_out: false,
+            })
+        }
+        Err(_) => Ok(CurlProbeResult {
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            timed_out: true,
+        }),
+    }
+}
+
+fn parse_curl_http_code(output: &str) -> Option<u16> {
+    output
+        .trim()
+        .rsplit(|character: char| !character.is_ascii_digit())
+        .find(|part| !part.is_empty())
+        .and_then(|part| part.parse::<u16>().ok())
+}
+
+fn first_non_empty_line(value: &str) -> Option<String> {
+    value
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 async fn select_admin_users(pool: &MySqlPool) -> Result<Vec<AdminUserRow>, AppError> {
@@ -10161,6 +10513,43 @@ mod tests {
     }
 
     #[test]
+    fn builds_system_download_check_targets() {
+        let settings = AdminSystemSettingsSummary {
+            node_install_url: "https://mirror.test/install.sh".to_string(),
+            node_artifact_url: Some("https://mirror.test/node.tar.gz".to_string()),
+            node_sha256_url: None,
+            control_install_url: DEFAULT_CONTROL_INSTALL_URL.to_string(),
+            control_artifact_url: None,
+            control_sha256_url: Some("https://mirror.test/control.sha256".to_string()),
+            release_download_mode: "github_api_first".to_string(),
+        };
+
+        let targets = system_download_check_targets(&settings);
+        assert_eq!(targets.len(), 7);
+        assert_eq!(targets[0].key, "node_install_url");
+        assert_eq!(targets[0].url, "https://mirror.test/install.sh");
+        assert_eq!(targets[2].url, "https://mirror.test/node.tar.gz");
+        assert!(targets[3]
+            .url
+            .ends_with("/xaccel-node-linux-x86_64.tar.gz.sha256"));
+        assert!(targets[4]
+            .url
+            .ends_with("/xaccel-control-api-linux-x86_64.tar.gz"));
+        assert_eq!(targets[5].url, "https://mirror.test/control.sha256");
+        assert_eq!(
+            targets[6].url,
+            "https://api.github.com/repos/xinbaopiaoliang-ui/cll/releases/latest"
+        );
+    }
+
+    #[test]
+    fn parses_curl_http_codes() {
+        assert_eq!(parse_curl_http_code("200"), Some(200));
+        assert_eq!(parse_curl_http_code("curl: error\n504"), Some(504));
+        assert_eq!(parse_curl_http_code(""), None);
+    }
+
+    #[test]
     fn parses_operation_task_version_check_summary() {
         let row = OperationTaskRow {
             id: 7,
@@ -10672,9 +11061,12 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("systemPurgeCommand"));
         assert!(ADMIN_DASHBOARD_HTML.contains("下载源配置"));
         assert!(ADMIN_DASHBOARD_HTML.contains("systemDownloadForm"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("runDownloadCheck"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("systemDownloadCheckResult"));
         assert!(ADMIN_DASHBOARD_HTML.contains("settingsNodeInstallUrl"));
         assert!(ADMIN_DASHBOARD_HTML.contains("settingsControlArtifactUrl"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/system/settings"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/system/download-check"));
         assert!(ADMIN_DASHBOARD_HTML.contains("--init-mysql"));
         assert!(ADMIN_DASHBOARD_HTML.contains("control-api-uninstall.sh"));
         assert!(ADMIN_DASHBOARD_HTML.contains("data-copy-system-command"));
