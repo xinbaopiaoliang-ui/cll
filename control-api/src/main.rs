@@ -28,10 +28,11 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::Path as FsPath,
     process::Stdio,
-    sync::Arc,
+    sync::{Arc, RwLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
+    fs,
     io::AsyncWriteExt,
     net::{TcpListener, UdpSocket},
     process::Command,
@@ -87,6 +88,8 @@ const SYSTEM_DIAGNOSTIC_CORE_TABLES: [&str; 7] = [
     "node_operation_tasks",
     "system_settings",
 ];
+const CONTROL_API_ENV_FILE: &str = "/etc/xaccel-control-api/control-api.env";
+const BUSINESS_SYNC_TOKEN_ENV_KEY: &str = "XACCEL_BUSINESS_SYNC_TOKEN";
 
 #[derive(Debug, Parser)]
 #[command(name = "xaccel-control-api")]
@@ -117,14 +120,13 @@ struct Cli {
     credential_key: Option<String>,
 }
 
-#[derive(Clone)]
 struct AppState {
     pool: MySqlPool,
     listen: SocketAddr,
     token_ttl_sec: u64,
     admin_token: Option<String>,
     public_base_url: Option<String>,
-    business_sync_token: Option<String>,
+    business_sync_token: RwLock<Option<String>>,
     credential_key: Option<String>,
 }
 
@@ -797,6 +799,11 @@ struct AdminBusinessTokenResponse {
     configured: bool,
     token: Option<String>,
     server_time: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminUpdateBusinessTokenRequest {
+    token: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1824,12 +1831,13 @@ async fn main() -> anyhow::Result<()> {
             .map(str::trim)
             .filter(|url| !url.is_empty())
             .map(trim_trailing_slash),
-        business_sync_token: cli
-            .business_sync_token
-            .as_deref()
-            .map(str::trim)
-            .filter(|token| !token.is_empty())
-            .map(ToOwned::to_owned),
+        business_sync_token: RwLock::new(
+            cli.business_sync_token
+                .as_deref()
+                .map(str::trim)
+                .filter(|token| !token.is_empty())
+                .map(ToOwned::to_owned),
+        ),
         credential_key: cli
             .credential_key
             .as_deref()
@@ -1925,7 +1933,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/api/admin/v1/system/business-token",
-            get(admin_get_business_token),
+            get(admin_get_business_token).patch(admin_update_business_token),
         )
         .route(
             "/api/admin/v1/system/download-check",
@@ -3008,7 +3016,7 @@ async fn business_status(
     Ok(Json(BusinessStatusResponse {
         status: "ok",
         version: VERSION,
-        business_api_enabled: state.business_sync_token.is_some(),
+        business_api_enabled: current_business_sync_token(&state)?.is_some(),
         nodes_total,
         nodes_online,
         games_enabled,
@@ -3045,7 +3053,7 @@ async fn admin_get_system_settings(
     Ok(Json(AdminSystemSettingsResponse {
         status: "ok",
         settings,
-        business_sync_token_configured: state.business_sync_token.is_some(),
+        business_sync_token_configured: current_business_sync_token(&state)?.is_some(),
         server_time: now_unix(),
     }))
 }
@@ -3061,7 +3069,7 @@ async fn admin_update_system_settings(
     Ok(Json(AdminSystemSettingsResponse {
         status: "ok",
         settings,
-        business_sync_token_configured: state.business_sync_token.is_some(),
+        business_sync_token_configured: current_business_sync_token(&state)?.is_some(),
         server_time: now_unix(),
     }))
 }
@@ -3071,7 +3079,25 @@ async fn admin_get_business_token(
     headers: HeaderMap,
 ) -> Result<Json<AdminBusinessTokenResponse>, AppError> {
     require_admin_super(&state, &headers)?;
-    let token = state.business_sync_token.clone();
+    let token = current_business_sync_token(&state)?;
+
+    Ok(Json(AdminBusinessTokenResponse {
+        status: "ok",
+        configured: token.is_some(),
+        token,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_update_business_token(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<AdminUpdateBusinessTokenRequest>,
+) -> Result<Json<AdminBusinessTokenResponse>, AppError> {
+    require_admin_super(&state, &headers)?;
+    let token = normalize_business_sync_token(request.token.as_deref())?;
+    persist_business_sync_token(token.as_deref()).await?;
+    set_business_sync_token(&state, token.clone())?;
 
     Ok(Json(AdminBusinessTokenResponse {
         status: "ok",
@@ -5586,6 +5612,89 @@ ON DUPLICATE KEY UPDATE
         .map_err(AppError::database)?;
     }
 
+    Ok(())
+}
+
+fn current_business_sync_token(state: &AppState) -> Result<Option<String>, AppError> {
+    state
+        .business_sync_token
+        .read()
+        .map(|token| token.clone())
+        .map_err(|_| {
+            AppError::internal(anyhow::anyhow!(
+                "business sync token state lock is poisoned"
+            ))
+        })
+}
+
+fn set_business_sync_token(state: &AppState, token: Option<String>) -> Result<(), AppError> {
+    let mut guard = state.business_sync_token.write().map_err(|_| {
+        AppError::internal(anyhow::anyhow!(
+            "business sync token state lock is poisoned"
+        ))
+    })?;
+    *guard = token;
+    Ok(())
+}
+
+async fn persist_business_sync_token(token: Option<&str>) -> Result<(), AppError> {
+    let path = FsPath::new(CONTROL_API_ENV_FILE);
+    let current = match fs::read_to_string(path).await {
+        Ok(value) => value,
+        Err(error) if error.kind() == ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(AppError::internal(anyhow::anyhow!(error))),
+    };
+    let next = render_env_with_business_sync_token(&current, token);
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .await
+            .map_err(|error| AppError::internal(anyhow::anyhow!(error)))?;
+    }
+    fs::write(path, next)
+        .await
+        .map_err(|error| AppError::internal(anyhow::anyhow!(error)))?;
+    set_env_file_permissions(path).await?;
+    Ok(())
+}
+
+fn render_env_with_business_sync_token(current: &str, token: Option<&str>) -> String {
+    let mut lines = current
+        .lines()
+        .filter(|line| {
+            !line
+                .trim_start()
+                .starts_with(&format!("{BUSINESS_SYNC_TOKEN_ENV_KEY}="))
+        })
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+
+    if let Some(token) = token {
+        lines.push(format!("{BUSINESS_SYNC_TOKEN_ENV_KEY}='{token}'"));
+    }
+
+    let mut output = lines.join("\n");
+    output.push('\n');
+    output
+}
+
+#[cfg(unix)]
+async fn set_env_file_permissions(path: &FsPath) -> Result<(), AppError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = fs::metadata(path)
+        .await
+        .map_err(|error| AppError::internal(anyhow::anyhow!(error)))?
+        .permissions();
+    permissions.set_mode(0o600);
+    fs::set_permissions(path, permissions)
+        .await
+        .map_err(|error| AppError::internal(anyhow::anyhow!(error)))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+async fn set_env_file_permissions(_path: &FsPath) -> Result<(), AppError> {
     Ok(())
 }
 
@@ -9316,6 +9425,38 @@ fn normalize_system_settings_request(
     })
 }
 
+fn normalize_business_sync_token(value: Option<&str>) -> Result<Option<String>, AppError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.chars().count() < 16 {
+        return Err(AppError::bad_request(
+            "invalid_business_sync_token",
+            "business sync token must be at least 16 characters",
+        ));
+    }
+    if value.chars().count() > 256 {
+        return Err(AppError::bad_request(
+            "invalid_business_sync_token",
+            "business sync token must be at most 256 characters",
+        ));
+    }
+    if value
+        .chars()
+        .any(|ch| ch.is_control() || ch.is_whitespace() || ch == '\'' || ch == '"')
+    {
+        return Err(AppError::bad_request(
+            "invalid_business_sync_token",
+            "business sync token must not contain spaces, quotes, or control characters",
+        ));
+    }
+    Ok(Some(value.to_string()))
+}
+
 fn normalize_ip_text(value: &str, field: &'static str) -> Result<String, AppError> {
     let value = normalize_required_text(value, field, 64)?;
     value.parse::<IpAddr>().map_err(|_| {
@@ -9403,7 +9544,7 @@ fn require_admin_super(state: &AppState, headers: &HeaderMap) -> Result<AdminAct
 }
 
 fn require_business_sync(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
-    let configured = state.business_sync_token.as_deref().ok_or_else(|| {
+    let configured = current_business_sync_token(state)?.ok_or_else(|| {
         AppError::service_unavailable(
             "business_sync_disabled",
             "business sync API is disabled because XACCEL_BUSINESS_SYNC_TOKEN is not configured",
@@ -10646,6 +10787,43 @@ mod tests {
     }
 
     #[test]
+    fn validates_business_sync_token() {
+        assert_eq!(
+            normalize_business_sync_token(Some("  xbs.abcdefghijklmnopqrstuvwxyz  "))
+                .expect("token")
+                .as_deref(),
+            Some("xbs.abcdefghijklmnopqrstuvwxyz")
+        );
+        assert_eq!(
+            normalize_business_sync_token(Some("   ")).expect("empty token"),
+            None
+        );
+
+        let error = normalize_business_sync_token(Some("too-short")).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_business_sync_token");
+
+        let error = normalize_business_sync_token(Some("token with spaces 123456")).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_business_sync_token");
+    }
+
+    #[test]
+    fn renders_business_sync_token_env_updates() {
+        let current =
+            "DATABASE_URL='mysql://db'\nXACCEL_BUSINESS_SYNC_TOKEN='old-token'\nRUST_LOG='info'\n";
+        let updated = render_env_with_business_sync_token(current, Some("xbs.new-token-123456"));
+
+        assert!(updated.contains("DATABASE_URL='mysql://db'"));
+        assert!(updated.contains("RUST_LOG='info'"));
+        assert!(updated.contains("XACCEL_BUSINESS_SYNC_TOKEN='xbs.new-token-123456'"));
+        assert!(!updated.contains("old-token"));
+
+        let cleared = render_env_with_business_sync_token(&updated, None);
+        assert!(!cleared.contains("XACCEL_BUSINESS_SYNC_TOKEN="));
+    }
+
+    #[test]
     fn truncates_stored_errors_on_character_boundaries() {
         let value = "连接失败".repeat(8);
         let truncated = truncate_chars(&value, 5);
@@ -11302,6 +11480,9 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("systemPurgeCommand"));
         assert!(ADMIN_DASHBOARD_HTML.contains("业务后台对接 Token"));
         assert!(ADMIN_DASHBOARD_HTML.contains("businessTokenValue"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("businessTokenForm"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("businessTokenInput"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("generateBusinessToken"));
         assert!(ADMIN_DASHBOARD_HTML.contains("revealBusinessToken"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/system/business-token"));
         assert!(ADMIN_DASHBOARD_HTML.contains("下载源配置"));

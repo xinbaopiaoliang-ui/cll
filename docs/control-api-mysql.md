@@ -144,8 +144,10 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
   --business-sync-token 'change-this-business-sync-token'
 ```
 
-The same token can be viewed in `/admin` under 系统设置 -> 业务后台对接
-Token. Plaintext is only returned to super administrators.
+The same token can be viewed and changed in `/admin` under 系统设置 -> 业务后台对接
+Token. Plaintext and edits are only available to super administrators. Saving
+from the panel updates `/etc/xaccel-control-api/control-api.env` and applies the
+new token immediately.
 
 Then sync catalog data from the business backend:
 

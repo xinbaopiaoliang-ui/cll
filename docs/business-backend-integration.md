@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 sudo sed -n "s/^XACCEL_BUSINESS_SYNC_TOKEN='\(.*\)'$/\1/p" /etc/xaccel-control-api/control-api.env
 ```
 
-控制台也可以查看：登录 `/admin` 后进入“系统设置 -> 业务后台对接 Token”。明文只对超级管理员显示，运维和只读账号只能确认是否已配置。
+控制台也可以查看和修改：登录 `/admin` 后进入“系统设置 -> 业务后台对接 Token”。明文、复制、生成、保存和清空只对超级管理员开放，运维和只读账号只能确认是否已配置。后台保存后会写入 `/etc/xaccel-control-api/control-api.env`，并立即用于业务 API 鉴权。
 
 业务 API 支持两种鉴权头，推荐 `Authorization`：
 
@@ -59,7 +59,7 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 ```json
 {
   "status": "ok",
-  "version": "0.54.0",
+  "version": "0.55.0",
   "business_api_enabled": true,
   "nodes_total": 2,
   "nodes_online": 2,

@@ -1226,6 +1226,22 @@
         gap: 10px;
       }
 
+      .secret-form {
+        display: grid;
+        gap: 12px;
+      }
+
+      .secret-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .secret-actions .primary {
+        min-width: 106px;
+      }
+
       .secret-value {
         min-height: 48px;
         display: flex;
@@ -2682,7 +2698,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.54.0</span>
+          <span class="mono">v0.55.0</span>
         </div>
       </aside>
 
@@ -3355,7 +3371,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.54.0</div>
+              <div class="insight-value">0.55.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -3388,12 +3404,24 @@
                   <span class="chip warn" id="businessTokenStatus">未加载</span>
                 </div>
                 <div class="secret-value masked" id="businessTokenValue">点击“显示 Token”后查看明文</div>
+                <form class="secret-form" id="businessTokenForm" data-super-only>
+                  <div class="field">
+                    <label for="businessTokenInput">修改 Token</label>
+                    <input id="businessTokenInput" name="token" autocomplete="off" placeholder="输入至少 16 位的新 Token，或点击生成" />
+                    <div class="form-help">保存后写入控制面配置文件，并立即用于业务 API 鉴权；留空保存会清空 Token。</div>
+                  </div>
+                  <div class="secret-actions">
+                    <button id="generateBusinessToken" type="button">生成随机 Token</button>
+                    <button class="primary" type="submit">保存 Token</button>
+                    <button class="danger" id="clearBusinessToken" type="button">清空 Token</button>
+                  </div>
+                </form>
                 <div class="message error-text hidden" id="businessTokenError"></div>
               </div>
               <div class="secret-guidance">
                 <strong>使用方式</strong>
                 <p>只放在业务后台服务端配置里，客户端不能看到。业务后台请求控制面时带上 Authorization: Bearer。</p>
-                <p>只有超级管理员能显示明文；运维和只读账号只能确认是否已配置。</p>
+                <p>只有超级管理员能显示、复制和修改；运维和只读账号只能确认是否已配置。</p>
               </div>
             </div>
           </section>
@@ -4218,8 +4246,12 @@
         businessTokenStatus: document.getElementById("businessTokenStatus"),
         businessTokenValue: document.getElementById("businessTokenValue"),
         businessTokenError: document.getElementById("businessTokenError"),
+        businessTokenForm: document.getElementById("businessTokenForm"),
+        businessTokenInput: document.getElementById("businessTokenInput"),
         revealBusinessToken: document.getElementById("revealBusinessToken"),
         copyBusinessToken: document.getElementById("copyBusinessToken"),
+        generateBusinessToken: document.getElementById("generateBusinessToken"),
+        clearBusinessToken: document.getElementById("clearBusinessToken"),
         systemUpgradeCommand: document.getElementById("systemUpgradeCommand"),
         systemInstallMysqlCommand: document.getElementById("systemInstallMysqlCommand"),
         systemUninstallCommand: document.getElementById("systemUninstallCommand"),
@@ -5602,12 +5634,16 @@
             ? "已配置业务后台 Token；只有超级管理员能查看明文。"
             : "当前没有配置 XACCEL_BUSINESS_SYNC_TOKEN。";
           els.copyBusinessToken?.classList.add("hidden");
+          if (els.businessTokenInput) els.businessTokenInput.value = "";
           return;
         }
 
         if (loaded && token) {
           els.businessTokenValue.className = "secret-value";
           els.businessTokenValue.textContent = token;
+          if (els.businessTokenInput && document.activeElement !== els.businessTokenInput) {
+            els.businessTokenInput.value = token;
+          }
           els.copyBusinessToken?.classList.remove("hidden");
           return;
         }
@@ -5616,6 +5652,9 @@
         els.businessTokenValue.textContent = configured
           ? "点击“显示 Token”后查看明文。"
           : "当前没有配置 XACCEL_BUSINESS_SYNC_TOKEN。";
+        if (els.businessTokenInput && !configured) {
+          els.businessTokenInput.value = "";
+        }
         els.copyBusinessToken?.classList.add("hidden");
       }
 
@@ -5645,6 +5684,37 @@
             els.revealBusinessToken.textContent = "显示 Token";
           }
         }
+      }
+
+      function generateBusinessTokenValue() {
+        if (!window.crypto?.getRandomValues) {
+          throw new Error("当前浏览器不支持安全随机数生成，请手动输入 Token。");
+        }
+        const bytes = new Uint8Array(32);
+        window.crypto.getRandomValues(bytes);
+        const raw = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+        return `xbs.${btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")}`;
+      }
+
+      async function saveBusinessToken(tokenValue) {
+        if (!assertSuperAdmin("修改业务后台 Token")) return;
+        clearInlineError(els.businessTokenError);
+        const token = tokenValue === undefined ? els.businessTokenInput?.value || "" : tokenValue;
+        const data = await api("/api/admin/v1/system/business-token", {
+          method: "PATCH",
+          body: JSON.stringify({ token }),
+        });
+        state.businessToken = {
+          loaded: true,
+          configured: Boolean(data.configured),
+          token: data.token || "",
+        };
+        renderBusinessToken();
+        els.statusLine.textContent = data.configured
+          ? "业务后台 Token 已保存，业务 API 已立即使用新 Token。"
+          : "业务后台 Token 已清空，业务 API 已关闭。";
+        els.statusLine.classList.toggle("connected", Boolean(data.configured));
+        els.statusLine.classList.toggle("error-state", !data.configured);
       }
 
       function renderSystemDownloadCheck() {
@@ -8328,6 +8398,36 @@
       els.copyBusinessToken.addEventListener("click", (event) => {
         if (!assertSuperAdmin("复制业务后台 Token")) return;
         copyToClipboard(state.businessToken?.token || "", event.currentTarget);
+      });
+
+      els.businessTokenForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        saveBusinessToken().catch((error) => {
+          showInlineError(els.businessTokenError, error.message);
+        });
+      });
+
+      els.generateBusinessToken.addEventListener("click", () => {
+        try {
+          if (!assertSuperAdmin("生成业务后台 Token")) return;
+          clearInlineError(els.businessTokenError);
+          els.businessTokenInput.value = generateBusinessTokenValue();
+          els.businessTokenInput.focus();
+          els.statusLine.textContent = "已生成新 Token，点击保存后才会生效。";
+          els.statusLine.classList.add("connected");
+          els.statusLine.classList.remove("error-state");
+        } catch (error) {
+          showInlineError(els.businessTokenError, error.message);
+        }
+      });
+
+      els.clearBusinessToken.addEventListener("click", () => {
+        if (!assertSuperAdmin("清空业务后台 Token")) return;
+        const confirmed = window.confirm("清空后业务后台同步和 connect-intent API 会立即不可用，确定继续吗？");
+        if (!confirmed) return;
+        saveBusinessToken("").catch((error) => {
+          showInlineError(els.businessTokenError, error.message);
+        });
       });
 
       els.refreshNow.addEventListener("click", () => {
