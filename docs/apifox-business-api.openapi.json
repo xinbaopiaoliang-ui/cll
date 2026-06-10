@@ -1,0 +1,971 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "XAccel 控制面 - 业务后台对接 API",
+    "description": "业务后台调用控制面的专用接口。游戏、区服、线路主数据由业务后台维护；控制面只保存调度和节点执行副本。",
+    "version": "0.56.0"
+  },
+  "servers": [
+    {
+      "url": "http://103.201.131.99:18080",
+      "description": "当前控制面公网地址"
+    },
+    {
+      "url": "http://127.0.0.1:18080",
+      "description": "控制面本机调试地址"
+    }
+  ],
+  "tags": [
+    {
+      "name": "业务后台对接",
+      "description": "业务后台同步游戏/区服/线路、签发 connect-intent、检查控制面状态。"
+    }
+  ],
+  "paths": {
+    "/api/business/v1/status": {
+      "get": {
+        "tags": ["业务后台对接"],
+        "summary": "业务 API 状态检查",
+        "description": "业务后台启动或定时探活时调用。需要业务后台 Token。",
+        "operationId": "businessStatus",
+        "security": [
+          {
+            "BusinessBearerAuth": []
+          },
+          {
+            "BusinessSyncTokenHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "控制面业务 API 可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessStatusResponse"
+                },
+                "example": {
+                  "status": "ok",
+                  "version": "0.56.0",
+                  "catalog_owner": "business_backend",
+                  "control_role": "node_operations",
+                  "business_api_enabled": true,
+                  "nodes_total": 2,
+                  "nodes_online": 2,
+                  "games_enabled": 1,
+                  "routes_enabled": 2,
+                  "server_time": 1781070000
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/business/v1/sync-catalog": {
+      "post": {
+        "tags": ["业务后台对接"],
+        "summary": "同步游戏、区服和线路",
+        "description": "业务后台把游戏、区服、线路的执行副本同步到控制面。日常新增/编辑游戏、区服、线路都应该从业务后台发起。",
+        "operationId": "businessSyncCatalog",
+        "security": [
+          {
+            "BusinessBearerAuth": []
+          },
+          {
+            "BusinessSyncTokenHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusinessSyncCatalogRequest"
+              },
+              "example": {
+                "source": "business-admin",
+                "revision": "2026-06-10T11:40:00+08:00",
+                "games": [
+                  {
+                    "game_id": 8888,
+                    "name": "本地 UDP 测试",
+                    "platform": "pc",
+                    "category": "test",
+                    "status": "enabled",
+                    "remark": "联调用游戏"
+                  }
+                ],
+                "regions": [
+                  {
+                    "game_id": 8888,
+                    "region_id": 1,
+                    "name": "默认区服",
+                    "area": "HK",
+                    "status": "enabled",
+                    "remark": "默认线路"
+                  }
+                ],
+                "route_rules": [
+                  {
+                    "external_id": "route-8888-hk-node2",
+                    "game_id": 8888,
+                    "game_name": "本地 UDP 测试",
+                    "region_id": 1,
+                    "region_name": "默认区服",
+                    "node_id": 2,
+                    "target_addr": "127.0.0.1:7777",
+                    "protocol": "udp",
+                    "area": "HK",
+                    "tag": "default",
+                    "priority": 10,
+                    "status": "enabled"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "同步完成",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessSyncCatalogResponse"
+                },
+                "example": {
+                  "status": "ok",
+                  "source": "business-admin",
+                  "revision": "2026-06-10T11:40:00+08:00",
+                  "games_upserted": 1,
+                  "regions_upserted": 1,
+                  "route_rules_upserted": 1,
+                  "server_time": 1781070000
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/business/v1/connect-intent": {
+      "post": {
+        "tags": ["业务后台对接"],
+        "summary": "业务后台签发加速意图",
+        "description": "业务后台完成登录、套餐、设备和游戏权限校验后调用。控制面返回候选节点、节点 token 和路由目标。",
+        "operationId": "businessConnectIntent",
+        "security": [
+          {
+            "BusinessBearerAuth": []
+          },
+          {
+            "BusinessSyncTokenHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusinessConnectIntentRequest"
+              },
+              "example": {
+                "request_id": "req-20260610-0001",
+                "entitlement_id": "vip-order-1001",
+                "user_id": 1001,
+                "device_id": "pc-001",
+                "game_id": 8888,
+                "region_id": 1,
+                "platform": "pc",
+                "client_isp": "telecom",
+                "client_ip": "127.0.0.1",
+                "bandwidth_quality": "fast",
+                "client_version": "0.1.0"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "签发成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessConnectIntentResponse"
+                },
+                "example": {
+                  "status": "ok",
+                  "request_id": "req-20260610-0001",
+                  "entitlement_id": "vip-order-1001",
+                  "client_version": "0.1.0",
+                  "connect_intent": {
+                    "intent_id": "intent-1001-8888-1781070000-2",
+                    "ttl_sec": 120,
+                    "client": {
+                      "platform": "pc",
+                      "client_isp": "telecom",
+                      "client_ip": "127.0.0.1",
+                      "bandwidth_quality": "fast",
+                      "region_id": 1
+                    },
+                    "candidates": [
+                      {
+                        "node_id": 2,
+                        "area": "HK",
+                        "tag": "default",
+                        "host": "47.83.160.126",
+                        "port": 666,
+                        "transports": ["udp"],
+                        "bandwidth_quality": "normal",
+                        "probe": {
+                          "udp": true,
+                          "tcp": true,
+                          "protocol": "xaccel/1"
+                        },
+                        "route": {
+                          "target_addr": "127.0.0.1:7777",
+                          "protocol": "udp",
+                          "region_id": 1,
+                          "region_name": "默认区服"
+                        },
+                        "credential": {
+                          "token": "xat.v1.xxx",
+                          "expires_at": 1781070120,
+                          "intent_id": "intent-1001-8888-1781070000-2",
+                          "route": {
+                            "target_addr": "127.0.0.1:7777",
+                            "protocol": "udp",
+                            "region_id": 1,
+                            "region_name": "默认区服"
+                          }
+                        },
+                        "scheduler": {
+                          "route_priority": 10,
+                          "latest_active_sessions": 0,
+                          "latest_udp_sessions": 0,
+                          "latest_tcp_sessions": 0,
+                          "latest_reported_at": 1781069990,
+                          "latest_report_age_sec": 10,
+                          "report_fresh": true
+                        }
+                      }
+                    ]
+                  },
+                  "server_time": 1781070000
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NoCandidate"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BusinessBearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "XACCEL_BUSINESS_SYNC_TOKEN",
+        "description": "推荐方式：Authorization: Bearer <业务后台 Token>"
+      },
+      "BusinessSyncTokenHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Business-Sync-Token",
+        "description": "兼容方式：X-Business-Sync-Token: <业务后台 Token>"
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "请求参数错误",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": {
+                "code": "invalid_game",
+                "message": "game_id is invalid"
+              }
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "业务后台 Token 缺失或错误",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "required": {
+                "summary": "未传 Token",
+                "value": {
+                  "error": {
+                    "code": "business_sync_auth_required",
+                    "message": "business sync token is required"
+                  }
+                }
+              },
+              "failed": {
+                "summary": "Token 错误",
+                "value": {
+                  "error": {
+                    "code": "business_sync_auth_failed",
+                    "message": "business sync token is invalid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "NoCandidate": {
+        "description": "没有可用候选节点或路由",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": {
+                "code": "no_candidate",
+                "message": "no available node candidate"
+              }
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "控制面内部错误",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": {
+                "code": "internal_error",
+                "message": "database operation failed"
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "BusinessStatusResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "catalog_owner",
+          "control_role",
+          "business_api_enabled",
+          "nodes_total",
+          "nodes_online",
+          "games_enabled",
+          "routes_enabled",
+          "server_time"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "version": {
+            "type": "string",
+            "example": "0.56.0"
+          },
+          "catalog_owner": {
+            "type": "string",
+            "enum": ["business_backend"],
+            "description": "游戏、区服、线路主数据归属。"
+          },
+          "control_role": {
+            "type": "string",
+            "enum": ["node_operations"],
+            "description": "控制面职责：节点运维、调度和执行副本。"
+          },
+          "business_api_enabled": {
+            "type": "boolean"
+          },
+          "nodes_total": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "nodes_online": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "games_enabled": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "routes_enabled": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "server_time": {
+            "type": "integer",
+            "format": "uint64",
+            "description": "Unix 秒级时间戳。"
+          }
+        }
+      },
+      "BusinessSyncCatalogRequest": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "maxLength": 64,
+            "default": "business"
+          },
+          "revision": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "业务后台自己的同步版本号或时间戳。"
+          },
+          "games": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncGame"
+            },
+            "default": []
+          },
+          "regions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRegion"
+            },
+            "default": []
+          },
+          "route_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRouteRule"
+            },
+            "default": []
+          }
+        }
+      },
+      "BusinessSyncGame": {
+        "type": "object",
+        "required": ["game_id", "name"],
+        "properties": {
+          "game_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "platform": {
+            "type": "string",
+            "enum": ["pc", "android", "ios", "multi"],
+            "default": "pc"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "icon_url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 512
+          },
+          "status": {
+            "type": "string",
+            "enum": ["enabled", "disabled"],
+            "default": "enabled"
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      },
+      "BusinessSyncRegion": {
+        "type": "object",
+        "required": ["game_id", "region_id", "name"],
+        "properties": {
+          "game_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1
+          },
+          "region_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "area": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "enum": ["enabled", "disabled"],
+            "default": "enabled"
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      },
+      "BusinessSyncRouteRule": {
+        "type": "object",
+        "required": ["game_id", "node_id", "target_addr"],
+        "properties": {
+          "external_id": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "业务后台自己的线路唯一 ID。建议固定传入，后续更新同一条线路时复用。"
+          },
+          "game_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1
+          },
+          "game_name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "region_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1
+          },
+          "region_name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "node_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1,
+            "description": "控制面节点 ID。"
+          },
+          "target_addr": {
+            "type": "string",
+            "maxLength": 255,
+            "example": "127.0.0.1:7777"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": ["udp", "tcp"],
+            "default": "udp"
+          },
+          "area": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "tag": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "priority": {
+            "type": "integer",
+            "format": "uint32",
+            "default": 100,
+            "description": "数字越小优先级越高。"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["enabled", "disabled"],
+            "default": "enabled"
+          }
+        }
+      },
+      "BusinessSyncCatalogResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "source",
+          "games_upserted",
+          "regions_upserted",
+          "route_rules_upserted",
+          "server_time"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "source": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string",
+            "nullable": true
+          },
+          "games_upserted": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "regions_upserted": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "route_rules_upserted": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "server_time": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
+      "BusinessConnectIntentRequest": {
+        "type": "object",
+        "required": ["user_id", "device_id", "game_id"],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "业务后台请求 ID，方便串日志。"
+          },
+          "entitlement_id": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "业务后台权益/订单/套餐 ID。"
+          },
+          "user_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1
+          },
+          "device_id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "game_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1
+          },
+          "region_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1
+          },
+          "platform": {
+            "type": "string",
+            "enum": ["pc", "android", "ios", "multi"]
+          },
+          "client_isp": {
+            "type": "string",
+            "enum": ["telecom", "unicom", "mobile", "other"]
+          },
+          "client_ip": {
+            "type": "string",
+            "description": "客户端公网 IP，可由业务后台可信地填入。"
+          },
+          "bandwidth_quality": {
+            "type": "string",
+            "enum": ["fast", "normal", "slow"],
+            "default": "normal"
+          },
+          "client_version": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      },
+      "BusinessConnectIntentResponse": {
+        "type": "object",
+        "required": ["status", "connect_intent", "server_time"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "request_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "entitlement_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "client_version": {
+            "type": "string",
+            "nullable": true
+          },
+          "connect_intent": {
+            "$ref": "#/components/schemas/ConnectIntent"
+          },
+          "server_time": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
+      "ConnectIntent": {
+        "type": "object",
+        "required": ["intent_id", "ttl_sec", "client", "candidates"],
+        "properties": {
+          "intent_id": {
+            "type": "string"
+          },
+          "ttl_sec": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "client": {
+            "$ref": "#/components/schemas/ClientContext"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeCandidate"
+            }
+          }
+        }
+      },
+      "ClientContext": {
+        "type": "object",
+        "required": ["bandwidth_quality"],
+        "properties": {
+          "platform": {
+            "type": "string",
+            "nullable": true
+          },
+          "client_isp": {
+            "type": "string",
+            "nullable": true
+          },
+          "client_ip": {
+            "type": "string",
+            "nullable": true
+          },
+          "bandwidth_quality": {
+            "type": "string",
+            "enum": ["fast", "normal", "slow"]
+          },
+          "region_id": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true
+          }
+        }
+      },
+      "NodeCandidate": {
+        "type": "object",
+        "required": [
+          "node_id",
+          "area",
+          "tag",
+          "host",
+          "port",
+          "transports",
+          "bandwidth_quality",
+          "probe",
+          "route",
+          "credential",
+          "scheduler"
+        ],
+        "properties": {
+          "node_id": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "area": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["udp", "tcp"]
+            }
+          },
+          "bandwidth_quality": {
+            "type": "string",
+            "enum": ["fast", "normal", "slow"]
+          },
+          "probe": {
+            "$ref": "#/components/schemas/ProbeInfo"
+          },
+          "route": {
+            "$ref": "#/components/schemas/ClientRoute"
+          },
+          "credential": {
+            "$ref": "#/components/schemas/CredentialInfo"
+          },
+          "scheduler": {
+            "$ref": "#/components/schemas/CandidateSchedulerInfo"
+          }
+        }
+      },
+      "ProbeInfo": {
+        "type": "object",
+        "required": ["udp", "tcp", "protocol"],
+        "properties": {
+          "udp": {
+            "type": "boolean"
+          },
+          "tcp": {
+            "type": "boolean"
+          },
+          "protocol": {
+            "type": "string",
+            "example": "xaccel/1"
+          }
+        }
+      },
+      "ClientRoute": {
+        "type": "object",
+        "required": ["target_addr", "protocol"],
+        "properties": {
+          "target_addr": {
+            "type": "string",
+            "example": "127.0.0.1:7777"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": ["udp", "tcp"]
+          },
+          "region_id": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true
+          },
+          "region_name": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "CredentialInfo": {
+        "type": "object",
+        "required": ["token", "expires_at", "intent_id", "route"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "客户端连接节点时使用的短期 xat.v1 token。"
+          },
+          "expires_at": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "intent_id": {
+            "type": "string"
+          },
+          "route": {
+            "$ref": "#/components/schemas/ClientRoute"
+          }
+        }
+      },
+      "CandidateSchedulerInfo": {
+        "type": "object",
+        "required": [
+          "route_priority",
+          "latest_active_sessions",
+          "latest_udp_sessions",
+          "latest_tcp_sessions",
+          "report_fresh"
+        ],
+        "properties": {
+          "route_priority": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "latest_active_sessions": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "latest_udp_sessions": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "latest_tcp_sessions": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "latest_reported_at": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true
+          },
+          "latest_report_age_sec": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true
+          },
+          "report_fresh": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

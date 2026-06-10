@@ -62,6 +62,11 @@ X-Business-Sync-Token: <XACCEL_BUSINESS_SYNC_TOKEN>
 
 用于业务后台启动时或定时探活。
 
+Apifox 可直接导入 OpenAPI 文件：[apifox-business-api.openapi.json](apifox-business-api.openapi.json)。导入后在环境变量里配置：
+
+- `baseUrl`：例如 `http://103.201.131.99:18080`
+- `XACCEL_BUSINESS_SYNC_TOKEN`：系统设置里保存的业务后台 Token
+
 ```bash
 curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
   -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}"
