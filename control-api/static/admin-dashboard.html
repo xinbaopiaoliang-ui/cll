@@ -2183,6 +2183,15 @@
         gap: 12px;
       }
 
+      .business-action-grid {
+        grid-template-columns: repeat(2, minmax(320px, 1fr));
+        align-items: start;
+      }
+
+      .business-action-grid .wide-card {
+        grid-column: 1 / -1;
+      }
+
       .node-actions-grid {
         grid-template-columns: repeat(2, minmax(260px, 1fr));
         align-items: start;
@@ -2662,6 +2671,7 @@
         .diagnostic-strip,
         .node-detail-panel .detail-grid,
         .node-actions-grid .operation-card:first-child .form-grid,
+        .business-action-grid,
         .catalog-toolbar,
         .audit-toolbar,
         .deploy-status-grid,
@@ -2766,7 +2776,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.61.0</span>
+          <span class="mono">v0.62.0</span>
         </div>
       </aside>
 
@@ -3242,7 +3252,7 @@
                 </div>
               </div>
               <div class="panel-body">
-                <div class="action-grid">
+                <div class="action-grid business-action-grid">
                   <div class="operation-card">
                     <div class="operation-title">同步游戏、区服和线路</div>
                     <div class="message">用于验证业务后台推送 catalog 的格式。会写入控制面的同步快照和路由副本。</div>
@@ -3280,7 +3290,87 @@
 }</textarea>
                     <div class="message error-text hidden" id="businessSyncError"></div>
                     <div class="form-actions">
-                      <button class="primary" type="button" id="businessRunSync" data-write-action>发送同步</button>
+                      <button class="primary" type="button" id="businessRunSync" data-write-action>POST 同步目录</button>
+                      <button type="button" id="businessRunCatalogUpdate" data-write-action>PUT 更新目录</button>
+                    </div>
+                  </div>
+
+                  <div class="operation-card">
+                    <div class="operation-title">节点接口 CRUD</div>
+                    <div class="message">用于验证业务后台新增、查询、修改、删除节点基础信息。安装部署仍在节点管理里执行。</div>
+                    <div class="form-grid">
+                      <div class="field">
+                        <label for="businessNodeIdInput">节点 ID</label>
+                        <input id="businessNodeIdInput" type="number" min="1" placeholder="详情、修改、删除使用" />
+                      </div>
+                      <div class="field">
+                        <label for="businessNodeLimitInput">列表数量</label>
+                        <input id="businessNodeLimitInput" type="number" min="1" max="500" value="200" />
+                      </div>
+                    </div>
+                    <textarea id="businessNodePayload" spellcheck="false">{
+  "name": "debug-node-01",
+  "server_ip": "47.83.160.126",
+  "server_port": 666,
+  "area": "HK",
+  "tag": "debug",
+  "bandwidth_quality": "normal",
+  "disable_quic": false,
+  "is_support_ipv6": false
+}</textarea>
+                    <div class="message error-text hidden" id="businessNodeError"></div>
+                    <div class="form-actions">
+                      <button type="button" id="businessRunNodeList">查询列表</button>
+                      <button type="button" id="businessRunNodeDetail">查询详情</button>
+                      <button class="primary" type="button" id="businessRunNodeCreate" data-write-action>新增节点</button>
+                      <button type="button" id="businessRunNodeUpdate" data-write-action>修改节点</button>
+                      <button class="danger" type="button" id="businessRunNodeDelete" data-write-action>删除节点</button>
+                    </div>
+                  </div>
+
+                  <div class="operation-card">
+                    <div class="operation-title">目录快照 / 删除</div>
+                    <div class="message">用于验证业务后台查询当前游戏、区服、线路快照，以及按游戏、区服或线路删除同步数据。</div>
+                    <div class="form-grid">
+                      <div class="field">
+                        <label for="businessCatalogGameIdInput">游戏 ID</label>
+                        <input id="businessCatalogGameIdInput" type="number" min="1" placeholder="可选" />
+                      </div>
+                      <div class="field">
+                        <label for="businessCatalogNodeIdInput">节点 ID</label>
+                        <input id="businessCatalogNodeIdInput" type="number" min="1" placeholder="可选" />
+                      </div>
+                      <div class="field">
+                        <label for="businessCatalogStatusInput">状态</label>
+                        <select id="businessCatalogStatusInput">
+                          <option value="">全部</option>
+                          <option value="enabled">启用</option>
+                          <option value="disabled">禁用</option>
+                        </select>
+                      </div>
+                      <div class="field">
+                        <label for="businessCatalogLimitInput">数量</label>
+                        <input id="businessCatalogLimitInput" type="number" min="1" max="500" value="200" />
+                      </div>
+                    </div>
+                    <textarea id="businessCatalogDeletePayload" spellcheck="false">{
+  "source": "business-debug",
+  "game_ids": [],
+  "regions": [
+    {
+      "game_id": 8888,
+      "region_id": 1
+    }
+  ],
+  "route_rule_ids": [],
+  "route_external_ids": [
+    "debug-8888-hk-node-2"
+  ]
+}</textarea>
+                    <div class="message error-text hidden" id="businessCatalogError"></div>
+                    <div class="form-actions">
+                      <button type="button" id="businessRunCatalogGet">查询快照</button>
+                      <button class="danger" type="button" id="businessRunCatalogDelete" data-write-action>删除目录数据</button>
                     </div>
                   </div>
 
@@ -3599,7 +3689,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.61.0</div>
+              <div class="insight-value">0.62.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -4457,10 +4547,28 @@
         refreshAuditLogs: document.getElementById("refreshAuditLogs"),
         businessStatusCheck: document.getElementById("businessStatusCheck"),
         businessRunSync: document.getElementById("businessRunSync"),
+        businessRunCatalogUpdate: document.getElementById("businessRunCatalogUpdate"),
+        businessRunCatalogGet: document.getElementById("businessRunCatalogGet"),
+        businessRunCatalogDelete: document.getElementById("businessRunCatalogDelete"),
+        businessRunNodeList: document.getElementById("businessRunNodeList"),
+        businessRunNodeDetail: document.getElementById("businessRunNodeDetail"),
+        businessRunNodeCreate: document.getElementById("businessRunNodeCreate"),
+        businessRunNodeUpdate: document.getElementById("businessRunNodeUpdate"),
+        businessRunNodeDelete: document.getElementById("businessRunNodeDelete"),
         businessRunIntent: document.getElementById("businessRunIntent"),
         businessSyncPayload: document.getElementById("businessSyncPayload"),
+        businessCatalogGameIdInput: document.getElementById("businessCatalogGameIdInput"),
+        businessCatalogNodeIdInput: document.getElementById("businessCatalogNodeIdInput"),
+        businessCatalogStatusInput: document.getElementById("businessCatalogStatusInput"),
+        businessCatalogLimitInput: document.getElementById("businessCatalogLimitInput"),
+        businessCatalogDeletePayload: document.getElementById("businessCatalogDeletePayload"),
+        businessNodeIdInput: document.getElementById("businessNodeIdInput"),
+        businessNodeLimitInput: document.getElementById("businessNodeLimitInput"),
+        businessNodePayload: document.getElementById("businessNodePayload"),
         businessIntentPayload: document.getElementById("businessIntentPayload"),
         businessSyncError: document.getElementById("businessSyncError"),
+        businessCatalogError: document.getElementById("businessCatalogError"),
+        businessNodeError: document.getElementById("businessNodeError"),
         businessIntentError: document.getElementById("businessIntentError"),
         businessDebugMeta: document.getElementById("businessDebugMeta"),
         businessDebugResult: document.getElementById("businessDebugResult"),
@@ -7074,8 +7182,22 @@
 
       function businessApiEndpointText(endpoint) {
         if (endpoint === "status") return "状态检查";
-        if (endpoint === "nodes") return "新增节点";
+        if (endpoint === "nodes") return "节点接口";
+        if (endpoint === "nodes-list") return "查询节点列表";
+        if (endpoint === "node-detail") return "查询节点详情";
+        if (endpoint === "node-create") return "新增节点";
+        if (endpoint === "node-update") return "修改节点";
+        if (endpoint === "node-delete") return "删除节点";
+        if (endpoint === "nodes.list") return "查询节点列表";
+        if (endpoint === "nodes.get") return "查询节点详情";
+        if (endpoint === "nodes.create") return "新增节点";
+        if (endpoint === "nodes.update") return "修改节点";
+        if (endpoint === "nodes.delete") return "删除节点";
         if (endpoint === "sync-catalog") return "同步目录";
+        if (endpoint === "catalog-get") return "查询目录快照";
+        if (endpoint === "catalog-delete") return "删除目录数据";
+        if (endpoint === "sync-catalog.get") return "查询目录快照";
+        if (endpoint === "sync-catalog.delete") return "删除目录数据";
         if (endpoint === "connect-intent") return "签发意图";
         if (endpoint === "probe") return "节点探测";
         return endpoint || "--";
@@ -7155,6 +7277,66 @@
               ${metric("来源", result.source || "--")}
               ${metric("版本标记", result.revision || "--")}
               ${metric("服务时间", formatTime(result.server_time || data.server_time))}
+            </div>
+            ${businessRawJson(data)}
+          </div>
+        `;
+      }
+
+      function renderBusinessNodesResult(data) {
+        const result = data.result || {};
+        const nodes = result.nodes || (result.node ? [result.node] : []);
+        const node = result.node || nodes[0] || {};
+        return `
+          <div class="business-result-layout">
+            <div class="business-result-summary">
+              ${businessResultCard("接口动作", businessApiEndpointText(data.action || "nodes"), "节点基础信息 CRUD")}
+              ${businessResultCard("节点总数", result.total ?? nodes.length ?? "--", "列表接口返回的数量")}
+              ${businessResultCard("节点 ID", result.node_id ?? node.id ?? "--", "详情、修改、删除会关注这个 ID")}
+              ${businessResultCard("执行结果", result.deleted === false ? "未删除" : result.status || data.status || "ok", "来自业务 API 兼容响应")}
+            </div>
+            <div class="detail-grid">
+              ${metric("节点名称", node.name || "--")}
+              ${metric("入口", node.endpoint || (node.server_ip ? `${node.server_ip}:${node.server_port}` : "--"))}
+              ${metric("状态", node.status || "--")}
+              ${metric("区域 / 标签", [node.area, node.tag].filter(Boolean).join(" / ") || "--")}
+            </div>
+            ${businessRawJson(data)}
+          </div>
+        `;
+      }
+
+      function renderBusinessCatalogSnapshotResult(data) {
+        const result = data.result || {};
+        const firstRoute = result.route_rules?.[0] || {};
+        return `
+          <div class="business-result-layout">
+            <div class="business-result-summary">
+              ${businessResultCard("游戏", result.total_games ?? result.games?.length ?? 0, "当前快照命中的游戏")}
+              ${businessResultCard("区服", result.total_regions ?? result.regions?.length ?? 0, "当前快照命中的区服")}
+              ${businessResultCard("路由", result.total_route_rules ?? result.route_rules?.length ?? 0, "客户端调度依赖的线路")}
+              ${businessResultCard("服务时间", formatTime(result.server_time || data.server_time), "控制面返回时间")}
+            </div>
+            <div class="detail-grid">
+              ${metric("首条路由游戏", firstRoute.game_name || firstRoute.game_id || "--")}
+              ${metric("首条路由节点", firstRoute.node_name || firstRoute.node_id || "--")}
+              ${metric("目标地址", firstRoute.target_addr || "--")}
+              ${metric("协议 / 状态", [firstRoute.protocol, firstRoute.status].filter(Boolean).join(" / ") || "--")}
+            </div>
+            ${businessRawJson(data)}
+          </div>
+        `;
+      }
+
+      function renderBusinessCatalogDeleteResult(data) {
+        const result = data.result || {};
+        return `
+          <div class="business-result-layout">
+            <div class="business-result-summary">
+              ${businessResultCard("删除状态", result.status || data.status || "--", "按请求范围删除目录数据")}
+              ${businessResultCard("游戏", result.games_deleted || 0, "删除的游戏数")}
+              ${businessResultCard("区服", result.regions_deleted || 0, "删除的区服数")}
+              ${businessResultCard("路由", result.route_rules_deleted || 0, "删除的线路数")}
             </div>
             ${businessRawJson(data)}
           </div>
@@ -7294,6 +7476,12 @@
           els.businessDebugResult.innerHTML = renderBusinessStatusResult(data);
         } else if (action === "sync-catalog") {
           els.businessDebugResult.innerHTML = renderBusinessSyncResult(data);
+        } else if (["nodes-list", "node-detail", "node-create", "node-update", "node-delete"].includes(action)) {
+          els.businessDebugResult.innerHTML = renderBusinessNodesResult(data);
+        } else if (action === "catalog-get") {
+          els.businessDebugResult.innerHTML = renderBusinessCatalogSnapshotResult(data);
+        } else if (action === "catalog-delete") {
+          els.businessDebugResult.innerHTML = renderBusinessCatalogDeleteResult(data);
         } else if (action === "connect-intent") {
           els.businessDebugResult.innerHTML = renderBusinessConnectIntentResult(data);
         } else if (action === "probe") {
@@ -7873,6 +8061,135 @@
         });
         state.businessIntentProbePayload = null;
         renderBusinessDebugResult("sync-catalog", data);
+        await Promise.all([
+          loadGames({ silent: true }),
+          loadRouteRules({ silent: true }),
+          loadBusinessApiLogs({ silent: true }),
+        ]);
+      }
+
+      async function runBusinessCatalogUpdateDebug() {
+        if (!assertCanWrite("更新业务目录联调")) return;
+        const payload = parseBusinessJson(els.businessSyncPayload, els.businessSyncError);
+        const data = await api("/api/admin/v1/business-api/sync-catalog", {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        state.businessIntentProbePayload = null;
+        renderBusinessDebugResult("sync-catalog", data);
+        await Promise.all([
+          loadGames({ silent: true }),
+          loadRouteRules({ silent: true }),
+          loadBusinessApiLogs({ silent: true }),
+        ]);
+      }
+
+      function businessOptionalNumber(element) {
+        const value = textOrNull(element?.value);
+        if (!value) return null;
+        const parsed = Number(value);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      }
+
+      function requireBusinessNodeId() {
+        clearInlineError(els.businessNodeError);
+        const nodeId = businessOptionalNumber(els.businessNodeIdInput);
+        if (!nodeId) {
+          showInlineError(els.businessNodeError, "请先填写节点 ID。详情、修改和删除都需要明确节点。");
+          throw new Error("node id is required");
+        }
+        return nodeId;
+      }
+
+      function businessCatalogQueryString() {
+        clearInlineError(els.businessCatalogError);
+        const params = new URLSearchParams();
+        const gameId = businessOptionalNumber(els.businessCatalogGameIdInput);
+        const nodeId = businessOptionalNumber(els.businessCatalogNodeIdInput);
+        const status = textOrNull(els.businessCatalogStatusInput?.value);
+        const limit = businessOptionalNumber(els.businessCatalogLimitInput) || 200;
+        if (gameId) params.set("game_id", String(gameId));
+        if (nodeId) params.set("node_id", String(nodeId));
+        if (status) params.set("status", status);
+        params.set("limit", String(limit));
+        return params.toString();
+      }
+
+      async function runBusinessNodeListDebug() {
+        clearInlineError(els.businessNodeError);
+        const limit = businessOptionalNumber(els.businessNodeLimitInput) || 200;
+        const data = await api(`/api/admin/v1/business-api/nodes?limit=${encodeURIComponent(String(limit))}`);
+        state.businessIntentProbePayload = null;
+        renderBusinessDebugResult("nodes-list", data);
+        await loadBusinessApiLogs({ silent: true });
+      }
+
+      async function runBusinessNodeDetailDebug() {
+        const nodeId = requireBusinessNodeId();
+        const data = await api(`/api/admin/v1/business-api/nodes/${nodeId}`);
+        state.businessIntentProbePayload = null;
+        renderBusinessDebugResult("node-detail", data);
+        await loadBusinessApiLogs({ silent: true });
+      }
+
+      async function runBusinessNodeCreateDebug() {
+        if (!assertCanWrite("新增业务节点联调")) return;
+        const payload = parseBusinessJson(els.businessNodePayload, els.businessNodeError);
+        const data = await api("/api/admin/v1/business-api/nodes", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        state.businessIntentProbePayload = null;
+        renderBusinessDebugResult("node-create", data);
+        await Promise.all([loadNodes({ silent: true }), loadBusinessApiLogs({ silent: true })]);
+      }
+
+      async function runBusinessNodeUpdateDebug() {
+        if (!assertCanWrite("修改业务节点联调")) return;
+        const nodeId = requireBusinessNodeId();
+        const payload = parseBusinessJson(els.businessNodePayload, els.businessNodeError);
+        const data = await api(`/api/admin/v1/business-api/nodes/${nodeId}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        state.businessIntentProbePayload = null;
+        renderBusinessDebugResult("node-update", data);
+        await Promise.all([loadNodes({ silent: true }), loadBusinessApiLogs({ silent: true })]);
+      }
+
+      async function runBusinessNodeDeleteDebug() {
+        if (!assertCanWrite("删除业务节点联调")) return;
+        const nodeId = requireBusinessNodeId();
+        if (!window.confirm(`确定删除节点 ID ${nodeId} 吗？这个动作会影响调度和节点列表。`)) {
+          return;
+        }
+        const data = await api(`/api/admin/v1/business-api/nodes/${nodeId}`, {
+          method: "DELETE",
+        });
+        state.businessIntentProbePayload = null;
+        renderBusinessDebugResult("node-delete", data);
+        await Promise.all([loadNodes({ silent: true }), loadBusinessApiLogs({ silent: true })]);
+      }
+
+      async function runBusinessCatalogGetDebug() {
+        const data = await api(`/api/admin/v1/business-api/sync-catalog?${businessCatalogQueryString()}`);
+        state.businessIntentProbePayload = null;
+        renderBusinessDebugResult("catalog-get", data);
+        await loadBusinessApiLogs({ silent: true });
+      }
+
+      async function runBusinessCatalogDeleteDebug() {
+        if (!assertCanWrite("删除业务目录联调")) return;
+        const payload = parseBusinessJson(els.businessCatalogDeletePayload, els.businessCatalogError);
+        if (!window.confirm("确定按当前 JSON 删除目录数据吗？这个动作会影响业务快照和路由副本。")) {
+          return;
+        }
+        const data = await api("/api/admin/v1/business-api/sync-catalog", {
+          method: "DELETE",
+          body: JSON.stringify(payload),
+        });
+        state.businessIntentProbePayload = null;
+        renderBusinessDebugResult("catalog-delete", data);
         await Promise.all([
           loadGames({ silent: true }),
           loadRouteRules({ silent: true }),
@@ -8987,6 +9304,58 @@
         runBusinessSyncDebug().catch((error) => {
           if (error instanceof SyntaxError) return;
           showInlineError(els.businessSyncError, error.message);
+        });
+      });
+
+      els.businessRunCatalogUpdate.addEventListener("click", () => {
+        runBusinessCatalogUpdateDebug().catch((error) => {
+          if (error instanceof SyntaxError) return;
+          showInlineError(els.businessSyncError, error.message);
+        });
+      });
+
+      els.businessRunNodeList.addEventListener("click", () => {
+        runBusinessNodeListDebug().catch((error) => {
+          showInlineError(els.businessNodeError, error.message);
+        });
+      });
+
+      els.businessRunNodeDetail.addEventListener("click", () => {
+        runBusinessNodeDetailDebug().catch((error) => {
+          showInlineError(els.businessNodeError, error.message);
+        });
+      });
+
+      els.businessRunNodeCreate.addEventListener("click", () => {
+        runBusinessNodeCreateDebug().catch((error) => {
+          if (error instanceof SyntaxError) return;
+          showInlineError(els.businessNodeError, error.message);
+        });
+      });
+
+      els.businessRunNodeUpdate.addEventListener("click", () => {
+        runBusinessNodeUpdateDebug().catch((error) => {
+          if (error instanceof SyntaxError) return;
+          showInlineError(els.businessNodeError, error.message);
+        });
+      });
+
+      els.businessRunNodeDelete.addEventListener("click", () => {
+        runBusinessNodeDeleteDebug().catch((error) => {
+          showInlineError(els.businessNodeError, error.message);
+        });
+      });
+
+      els.businessRunCatalogGet.addEventListener("click", () => {
+        runBusinessCatalogGetDebug().catch((error) => {
+          showInlineError(els.businessCatalogError, error.message);
+        });
+      });
+
+      els.businessRunCatalogDelete.addEventListener("click", () => {
+        runBusinessCatalogDeleteDebug().catch((error) => {
+          if (error instanceof SyntaxError) return;
+          showInlineError(els.businessCatalogError, error.message);
         });
       });
 

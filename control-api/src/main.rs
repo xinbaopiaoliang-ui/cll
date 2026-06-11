@@ -2158,8 +2158,21 @@ async fn main() -> anyhow::Result<()> {
             get(admin_business_api_status),
         )
         .route(
+            "/api/admin/v1/business-api/nodes",
+            get(admin_business_api_list_nodes).post(admin_business_api_create_node),
+        )
+        .route(
+            "/api/admin/v1/business-api/nodes/:node_id",
+            get(admin_business_api_get_node)
+                .put(admin_business_api_update_node)
+                .delete(admin_business_api_delete_node),
+        )
+        .route(
             "/api/admin/v1/business-api/sync-catalog",
-            post(admin_business_api_sync_catalog),
+            get(admin_business_api_get_catalog)
+                .post(admin_business_api_sync_catalog)
+                .put(admin_business_api_sync_catalog)
+                .delete(admin_business_api_delete_catalog),
         )
         .route(
             "/api/admin/v1/business-api/connect-intent",
@@ -4209,6 +4222,569 @@ async fn admin_business_api_status(
     }))
 }
 
+async fn admin_business_api_list_nodes(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<AdminListNodesQuery>,
+) -> Result<Json<AdminBusinessApiDebugResponse<BusinessListNodesResponse>>, AppError> {
+    require_admin(&state, &headers)?;
+    let limit = clamp_limit(query.limit, 200, 500);
+    let rows = match select_admin_nodes(&state.pool, limit).await {
+        Ok(rows) => rows,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "admin.business.node.list",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let nodes = rows
+        .into_iter()
+        .map(AdminNodeSummary::from_row)
+        .collect::<Vec<_>>();
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "nodes",
+            action: "admin.business.node.list",
+            source: "admin_debug",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "limit": limit,
+                "total": nodes.len(),
+            }),
+        },
+    )
+    .await;
+    Ok(Json(AdminBusinessApiDebugResponse {
+        status: "ok",
+        action: "nodes.list",
+        result: BusinessListNodesResponse {
+            total: nodes.len(),
+            nodes,
+            server_time: now_unix(),
+        },
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_business_api_get_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+) -> Result<Json<AdminBusinessApiDebugResponse<BusinessNodeResponse>>, AppError> {
+    require_admin(&state, &headers)?;
+    let node = match select_admin_node(&state.pool, node_id).await {
+        Ok(Some(node)) => node,
+        Ok(None) => {
+            let error = AppError::not_found("node_not_found", "node does not exist");
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "admin.business.node.get",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "admin.business.node.get",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let node_summary = AdminNodeSummary::from_row(node);
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "nodes",
+            action: "admin.business.node.get",
+            source: "admin_debug",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "node_id": node_summary.id,
+                "endpoint": node_summary.endpoint.clone(),
+                "status": node_summary.status.clone(),
+            }),
+        },
+    )
+    .await;
+    Ok(Json(AdminBusinessApiDebugResponse {
+        status: "ok",
+        action: "nodes.get",
+        result: BusinessNodeResponse {
+            status: "ok",
+            node: node_summary,
+            server_time: now_unix(),
+        },
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_business_api_create_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<BusinessCreateNodeRequest>,
+) -> Result<Json<AdminBusinessApiDebugResponse<BusinessCreateNodeResponse>>, AppError> {
+    let actor = require_admin_write(&state, &headers)?;
+    let detail = json!({
+        "name": request.name.clone(),
+        "server_ip": request.server_ip.clone(),
+        "server_port": request.server_port,
+        "area": request.area.clone(),
+        "tag": request.tag.clone(),
+        "bandwidth_quality": request.bandwidth_quality.clone(),
+    });
+    let node_id = match insert_admin_node(&state.pool, request).await {
+        Ok(node_id) => node_id,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "admin.business.node.create",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let node = match select_admin_node(&state.pool, node_id).await {
+        Ok(Some(node)) => node,
+        Ok(None) => {
+            let error = AppError::not_found("node_not_found", "created node does not exist");
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "admin.business.node.create",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "admin.business.node.create",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    if let Err(error) = insert_node_audit_log(
+        &state.pool,
+        node_id,
+        "admin_api",
+        actor.id,
+        "node.business_debug_create",
+        detail.clone(),
+    )
+    .await
+    {
+        error!(
+            error = %error.message,
+            node_id,
+            "failed to record admin business node create audit log"
+        );
+    }
+    let node_summary = AdminNodeSummary::from_row(node);
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "nodes",
+            action: "admin.business.node.create",
+            source: "admin_debug",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "request": detail,
+                "node_id": node_summary.id,
+                "endpoint": node_summary.endpoint.clone(),
+                "status": node_summary.status.clone(),
+            }),
+        },
+    )
+    .await;
+    Ok(Json(AdminBusinessApiDebugResponse {
+        status: "ok",
+        action: "nodes.create",
+        result: BusinessCreateNodeResponse {
+            status: "ok",
+            node: node_summary,
+            install_state: "pending_install",
+            next_step: "generate bootstrap token or deploy node from control panel",
+            server_time: now_unix(),
+        },
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_business_api_update_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+    Json(request): Json<BusinessUpdateNodeRequest>,
+) -> Result<Json<AdminBusinessApiDebugResponse<BusinessNodeResponse>>, AppError> {
+    let actor = require_admin_write(&state, &headers)?;
+    let detail = json!({
+        "node_id": node_id,
+        "name": request.name.clone(),
+        "server_ip": request.server_ip.clone(),
+        "server_port": request.server_port,
+        "area": request.area.clone(),
+        "tag": request.tag.clone(),
+        "bandwidth_quality": request.bandwidth_quality.clone(),
+    });
+    if let Err(error) = update_admin_node_config(&state.pool, node_id, request).await {
+        record_business_api_failure_best_effort(
+            &state.pool,
+            "nodes",
+            "admin.business.node.update",
+            "admin_debug",
+            None,
+            None,
+            None,
+            None,
+            &error,
+        )
+        .await;
+        return Err(error);
+    }
+    let node = match select_admin_node(&state.pool, node_id).await {
+        Ok(Some(node)) => node,
+        Ok(None) => {
+            let error = AppError::not_found("node_not_found", "updated node does not exist");
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "admin.business.node.update",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "admin.business.node.update",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    if let Err(error) = insert_node_audit_log(
+        &state.pool,
+        node_id,
+        "admin_api",
+        actor.id,
+        "node.business_debug_update",
+        detail.clone(),
+    )
+    .await
+    {
+        error!(
+            error = %error.message,
+            node_id,
+            "failed to record admin business node update audit log"
+        );
+    }
+    let node_summary = AdminNodeSummary::from_row(node);
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "nodes",
+            action: "admin.business.node.update",
+            source: "admin_debug",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail,
+        },
+    )
+    .await;
+    Ok(Json(AdminBusinessApiDebugResponse {
+        status: "ok",
+        action: "nodes.update",
+        result: BusinessNodeResponse {
+            status: "ok",
+            node: node_summary,
+            server_time: now_unix(),
+        },
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_business_api_delete_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+) -> Result<Json<AdminBusinessApiDebugResponse<BusinessDeleteNodeResponse>>, AppError> {
+    require_admin_write(&state, &headers)?;
+    let deleted = match delete_admin_node(&state.pool, node_id).await {
+        Ok(deleted) => deleted,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "admin.business.node.delete",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "nodes",
+            action: "admin.business.node.delete",
+            source: "admin_debug",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "node_id": node_id,
+                "deleted": deleted,
+            }),
+        },
+    )
+    .await;
+    Ok(Json(AdminBusinessApiDebugResponse {
+        status: "ok",
+        action: "nodes.delete",
+        result: BusinessDeleteNodeResponse {
+            status: "ok",
+            node_id,
+            deleted,
+            server_time: now_unix(),
+        },
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_business_api_get_catalog(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<BusinessCatalogSnapshotQuery>,
+) -> Result<Json<AdminBusinessApiDebugResponse<BusinessCatalogSnapshotResponse>>, AppError> {
+    require_admin(&state, &headers)?;
+    let query = match normalize_business_catalog_snapshot_query(query) {
+        Ok(query) => query,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "admin.business.catalog.get",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let limit = clamp_limit(query.limit, 200, 500);
+    let games = match select_business_catalog_games(&state.pool, &query, limit).await {
+        Ok(games) => games
+            .into_iter()
+            .map(AdminGameSummary::from_row)
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "admin.business.catalog.get",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let regions = match select_business_catalog_regions(&state.pool, &query, limit).await {
+        Ok(regions) => regions
+            .into_iter()
+            .map(BusinessCatalogRegionSummary::from_row)
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "admin.business.catalog.get",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let route_query = AdminListRouteRulesQuery {
+        game_id: query.game_id,
+        region_id: None,
+        node_id: query.node_id,
+        status: query.status.clone(),
+        limit: Some(limit),
+    };
+    let route_rules = match select_admin_route_rules(&state.pool, &route_query, limit).await {
+        Ok(route_rules) => route_rules
+            .into_iter()
+            .map(AdminRouteRuleSummary::from_row)
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "admin.business.catalog.get",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "sync-catalog",
+            action: "admin.business.catalog.get",
+            source: "admin_debug",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: query.game_id,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "node_id": query.node_id,
+                "status_filter": query.status,
+                "limit": limit,
+                "total_games": games.len(),
+                "total_regions": regions.len(),
+                "total_route_rules": route_rules.len(),
+            }),
+        },
+    )
+    .await;
+    Ok(Json(AdminBusinessApiDebugResponse {
+        status: "ok",
+        action: "sync-catalog.get",
+        result: BusinessCatalogSnapshotResponse {
+            total_games: games.len(),
+            total_regions: regions.len(),
+            total_route_rules: route_rules.len(),
+            games,
+            regions,
+            route_rules,
+            server_time: now_unix(),
+        },
+        server_time: now_unix(),
+    }))
+}
+
 async fn admin_business_api_sync_catalog(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -4285,6 +4861,93 @@ async fn admin_business_api_sync_catalog(
     Ok(Json(AdminBusinessApiDebugResponse {
         status: "ok",
         action: "sync-catalog",
+        result: response,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_business_api_delete_catalog(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<BusinessDeleteCatalogRequest>,
+) -> Result<Json<AdminBusinessApiDebugResponse<BusinessDeleteCatalogResponse>>, AppError> {
+    require_admin_write(&state, &headers)?;
+    let request = match normalize_business_delete_catalog(request) {
+        Ok(request) => request,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "admin.business.catalog.delete",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let log_detail = json!({
+        "game_ids": request.game_ids,
+        "regions": request
+            .regions
+            .iter()
+            .map(|region| json!({
+                "game_id": region.game_id,
+                "region_id": region.region_id,
+            }))
+            .collect::<Vec<_>>(),
+        "route_rule_ids": request.route_rule_ids,
+        "route_external_ids": request.route_external_ids,
+        "source": request.source,
+    });
+    let response = match delete_business_catalog(&state.pool, &request).await {
+        Ok(response) => response,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "admin.business.catalog.delete",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "sync-catalog",
+            action: "admin.business.catalog.delete",
+            source: "admin_debug",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "request": log_detail,
+                "games_deleted": response.games_deleted,
+                "regions_deleted": response.regions_deleted,
+                "route_rules_deleted": response.route_rules_deleted,
+            }),
+        },
+    )
+    .await;
+    Ok(Json(AdminBusinessApiDebugResponse {
+        status: "ok",
+        action: "sync-catalog.delete",
         result: response,
         server_time: now_unix(),
     }))
@@ -13771,9 +14434,15 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("businessApiLogRows"));
         assert!(ADMIN_DASHBOARD_HTML.contains("businessApiLogPager"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/business-api/status"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/business-api/nodes"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/business-api/sync-catalog"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/business-api/connect-intent"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/business-api/logs"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("businessRunNodeList"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("businessRunNodeCreate"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("businessRunNodeDelete"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("businessRunCatalogGet"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("businessRunCatalogDelete"));
         assert!(ADMIN_DASHBOARD_HTML.contains("businessRunProbe"));
         assert!(ADMIN_DASHBOARD_HTML.contains("business-result-summary"));
         assert!(ADMIN_DASHBOARD_HTML.contains("diagnosticPayloadFromBusinessIntentPayload"));

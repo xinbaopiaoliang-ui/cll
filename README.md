@@ -62,8 +62,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.61.0
-git push origin v0.61.0
+git tag v0.62.0
+git push origin v0.62.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -81,7 +81,10 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.61.0` completes business API CRUD for `nodes` and
+next stage. Version `0.62.0` expands the control-panel business API console so
+operators can test node list/detail/create/update/delete and catalog
+snapshot/delete flows directly from the UI. Version `0.61.0` completes
+business API CRUD for `nodes` and
 `sync-catalog`: the business system can list, read, create, update, and delete
 node basics, read catalog snapshots, replay catalog updates, and delete games,
 regions, or route rules by explicit ids.
