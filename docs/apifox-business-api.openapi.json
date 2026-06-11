@@ -3,7 +3,7 @@
   "info": {
     "title": "XAccel 控制面 - 业务后台对接 API",
     "description": "业务后台调用控制面的专用接口。游戏、区服、线路主数据由业务后台维护；控制面只保存调度和节点执行副本。导入 Apifox 后请在环境变量中配置 baseUrl 和 XACCEL_BUSINESS_SYNC_TOKEN。所有业务接口都需要鉴权，推荐使用 Authorization: Bearer <Token>。",
-    "version": "0.57.0"
+    "version": "0.57.1"
   },
   "servers": [
     {
@@ -52,7 +52,7 @@
                 },
                 "example": {
                   "status": "ok",
-                  "version": "0.57.0",
+                  "version": "0.57.1",
                   "catalog_owner": "business_backend",
                   "control_role": "node_operations",
                   "business_api_enabled": true,
@@ -418,7 +418,7 @@
           },
           "version": {
             "type": "string",
-            "example": "0.57.0",
+            "example": "0.57.1",
             "description": "控制面当前版本号，用于业务后台记录兼容版本。"
           },
           "catalog_owner": {

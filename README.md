@@ -62,8 +62,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.57.0
-git push origin v0.57.0
+git tag v0.57.1
+git push origin v0.57.1
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -81,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.57.0` moves game and route daily operations out of the
+next stage. Version `0.57.1` moves game and route daily operations out of the
 control dashboard: the sidebar now focuses on node operations, games are shown
 as business sync snapshots, routes are shown as operations fallback snapshots,
 and health checks guide operators to `sync-catalog` instead of local game/route

@@ -88,7 +88,7 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 ```json
 {
   "status": "ok",
-  "version": "0.57.0",
+  "version": "0.57.1",
   "catalog_owner": "business_backend",
   "control_role": "node_operations",
   "business_api_enabled": true,

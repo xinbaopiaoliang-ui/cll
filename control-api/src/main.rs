@@ -2861,39 +2861,36 @@ async fn build_system_diagnostics(state: &AppState) -> AdminSystemDiagnosticsRes
         }
     }
 
-    counts.nodes_total = system_count(
-        &state.pool,
-        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM accel_nodes",
-    )
-    .await
-    .unwrap_or_default();
+    counts.nodes_total = system_count(&state.pool, "SELECT COUNT(*) FROM accel_nodes")
+        .await
+        .unwrap_or_default();
     counts.nodes_online = system_count(
         &state.pool,
-        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM accel_nodes WHERE status = 'online'",
+        "SELECT COUNT(*) FROM accel_nodes WHERE status = 'online'",
     )
     .await
     .unwrap_or_default();
     counts.nodes_reporting = system_count(
         &state.pool,
-        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM accel_nodes WHERE last_report_at >= DATE_SUB(NOW(), INTERVAL 120 SECOND)",
+        "SELECT COUNT(*) FROM accel_nodes WHERE last_report_at >= DATE_SUB(NOW(), INTERVAL 120 SECOND)",
     )
     .await
     .unwrap_or_default();
     counts.games_enabled = system_count(
         &state.pool,
-        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM accel_games WHERE status = 'enabled'",
+        "SELECT COUNT(*) FROM accel_games WHERE status = 'enabled'",
     )
     .await
     .unwrap_or_default();
     counts.routes_enabled = system_count(
         &state.pool,
-        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM game_route_rules WHERE status = 'enabled'",
+        "SELECT COUNT(*) FROM game_route_rules WHERE status = 'enabled'",
     )
     .await
     .unwrap_or_default();
     counts.active_alerts = system_count(
         &state.pool,
-        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM node_health_alerts WHERE status IN ('open', 'acknowledged')",
+        "SELECT COUNT(*) FROM node_health_alerts WHERE status IN ('open', 'acknowledged')",
     )
     .await
     .unwrap_or_default();
@@ -3034,7 +3031,8 @@ async fn build_system_diagnostics(state: &AppState) -> AdminSystemDiagnosticsRes
 }
 
 async fn system_count(pool: &MySqlPool, sql: &str) -> Result<u64, sqlx::Error> {
-    sqlx::query_scalar::<_, u64>(sql).fetch_one(pool).await
+    let count = sqlx::query_scalar::<_, i64>(sql).fetch_one(pool).await?;
+    Ok(count.max(0) as u64)
 }
 
 async fn system_core_table_count(pool: &MySqlPool) -> Result<u64, sqlx::Error> {
