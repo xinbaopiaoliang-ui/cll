@@ -2766,7 +2766,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.58.0</span>
+          <span class="mono">v0.59.0</span>
         </div>
       </aside>
 
@@ -3246,38 +3246,35 @@
                   <div class="operation-card">
                     <div class="operation-title">同步游戏、区服和线路</div>
                     <div class="message">用于验证业务后台推送 catalog 的格式。会写入控制面的同步快照和路由副本。</div>
-                    <textarea id="businessSyncPayload" spellcheck="false">{
+<textarea id="businessSyncPayload" spellcheck="false">{
   "source": "business-debug",
   "revision": "debug-001",
   "games": [
     {
       "game_id": 8888,
-      "name": "测试游戏",
+      "name": "Debug Game",
       "platform": "pc",
-      "status": "enabled"
-    }
-  ],
-  "regions": [
-    {
-      "game_id": 8888,
-      "region_id": 1,
-      "name": "默认区服",
-      "area": "HK",
-      "status": "enabled"
-    }
-  ],
-  "route_rules": [
-    {
-      "external_id": "debug-8888-hk-node-2",
-      "game_id": 8888,
-      "game_name": "测试游戏",
-      "region_id": 1,
-      "region_name": "默认区服",
-      "node_id": 2,
-      "target_addr": "127.0.0.1:7777",
-      "protocol": "udp",
-      "priority": 100,
-      "status": "enabled"
+      "category": "test",
+      "categories": ["moba", "fps"],
+      "status": "enabled",
+      "regions": [
+        {
+          "region_id": 1,
+          "name": "Default Region",
+          "area": "HK",
+          "status": "enabled",
+          "routes": [
+            {
+              "external_id": "debug-8888-hk-node-2",
+              "node_id": 2,
+              "target_addr": "127.0.0.1:7777",
+              "protocol": "udp",
+              "priority": 100,
+              "status": "enabled"
+            }
+          ]
+        }
+      ]
     }
   ]
 }</textarea>
@@ -3601,7 +3598,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.58.0</div>
+              <div class="insight-value">0.59.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -7148,6 +7145,7 @@
             <div class="business-result-summary">
               ${businessResultCard("同步状态", result.status || data.status || "--", "目录数据已写入控制面执行副本")}
               ${businessResultCard("游戏", result.games_upserted || 0, "本次写入或更新")}
+              ${businessResultCard("分类", result.categories_upserted || 0, "本次同步的游戏分类关系")}
               ${businessResultCard("区服", result.regions_upserted || 0, "本次写入或更新")}
               ${businessResultCard("路由", result.route_rules_upserted || 0, "本次写入或更新")}
             </div>

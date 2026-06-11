@@ -3,7 +3,7 @@
   "info": {
     "title": "XAccel 控制面 - 业务后台对接 API",
     "description": "业务后台调用控制面的专用接口。游戏、区服、线路主数据由业务后台维护；控制面只保存调度和节点执行副本。导入 Apifox 后请在环境变量中配置 baseUrl 和 XACCEL_BUSINESS_SYNC_TOKEN。所有业务接口都需要鉴权，推荐使用 Authorization: Bearer <Token>。",
-    "version": "0.58.0"
+    "version": "0.59.0"
   },
   "servers": [
     {
@@ -52,7 +52,7 @@
                 },
                 "example": {
                   "status": "ok",
-                  "version": "0.58.0",
+                  "version": "0.59.0",
                   "catalog_owner": "business_backend",
                   "control_role": "node_operations",
                   "business_api_enabled": true,
@@ -80,7 +80,7 @@
           "业务后台对接"
         ],
         "summary": "同步游戏、区服和线路",
-        "description": "业务后台把游戏、区服、线路的执行副本同步到控制面。日常新增、编辑、下线游戏/区服/线路都应该从业务后台发起。支持分步同步：可以只传 games、只传 regions、只传 route_rules，也可以一次全量传。未传的数据不会被删除，下线请传 status=disabled。\n\n鉴权：推荐在请求头传 Authorization: Bearer {{XACCEL_BUSINESS_SYNC_TOKEN}}；也兼容 X-Business-Sync-Token: {{XACCEL_BUSINESS_SYNC_TOKEN}}。",
+        "description": "业务后台把游戏、分类、区服、线路的执行副本同步到控制面。推荐新版嵌套格式：一个 game 可以带多个 categories、多个 regions，每个 region 可以带多个 routes。旧版顶层 regions 和 route_rules 数组仍然兼容，适合分步同步。未传的数据不会被删除，下线请传 status=disabled。\n\n鉴权：推荐在请求头传 Authorization: Bearer {{XACCEL_BUSINESS_SYNC_TOKEN}}；也兼容 X-Business-Sync-Token: {{XACCEL_BUSINESS_SYNC_TOKEN}}。",
         "operationId": "businessSyncCatalog",
         "security": [
           {
@@ -103,37 +103,40 @@
                 "games": [
                   {
                     "game_id": 8888,
-                    "name": "本地 UDP 测试",
+                    "name": "英雄联盟",
                     "platform": "pc",
-                    "category": "test",
+                    "category": "moba",
+                    "categories": [
+                      "moba",
+                      "competitive"
+                    ],
                     "status": "enabled",
-                    "remark": "联调用游戏"
-                  }
-                ],
-                "regions": [
-                  {
-                    "game_id": 8888,
-                    "region_id": 1,
-                    "name": "默认区服",
-                    "area": "HK",
-                    "status": "enabled",
-                    "remark": "默认线路"
-                  }
-                ],
-                "route_rules": [
-                  {
-                    "external_id": "route-8888-hk-node2",
-                    "game_id": 8888,
-                    "game_name": "本地 UDP 测试",
-                    "region_id": 1,
-                    "region_name": "默认区服",
-                    "node_id": 2,
-                    "target_addr": "127.0.0.1:7777",
-                    "protocol": "udp",
-                    "area": "HK",
-                    "tag": "default",
-                    "priority": 10,
-                    "status": "enabled"
+                    "regions": [
+                      {
+                        "region_id": 1,
+                        "name": "电信一区",
+                        "area": "HK",
+                        "status": "enabled",
+                        "routes": [
+                          {
+                            "external_id": "route-8888-hk-node2",
+                            "node_id": 2,
+                            "target_addr": "127.0.0.1:7777",
+                            "protocol": "udp",
+                            "priority": 10,
+                            "status": "enabled"
+                          },
+                          {
+                            "external_id": "route-8888-hk-node3",
+                            "node_id": 3,
+                            "target_addr": "127.0.0.1:7777",
+                            "protocol": "udp",
+                            "priority": 20,
+                            "status": "enabled"
+                          }
+                        ]
+                      }
+                    ]
                   }
                 ]
               }
@@ -153,8 +156,9 @@
                   "source": "business-admin",
                   "revision": "2026-06-10T11:40:00+08:00",
                   "games_upserted": 1,
+                  "categories_upserted": 2,
                   "regions_upserted": 1,
-                  "route_rules_upserted": 1,
+                  "route_rules_upserted": 2,
                   "server_time": 1781070000
                 }
               }
@@ -418,7 +422,7 @@
           },
           "version": {
             "type": "string",
-            "example": "0.58.0",
+            "example": "0.59.0",
             "description": "控制面当前版本号，用于业务后台记录兼容版本。"
           },
           "catalog_owner": {
@@ -496,7 +500,7 @@
               "$ref": "#/components/schemas/BusinessSyncGame"
             },
             "default": [],
-            "description": "游戏列表。可单独只传 games，接口会按 game_id upsert，不会删除未传的旧游戏。"
+            "description": "游戏列表。推荐每个 game 内嵌 categories、regions 和 routes；也可单独只传 games，接口会按 game_id upsert，不会删除未传的旧游戏。"
           },
           "regions": {
             "type": "array",
@@ -504,7 +508,7 @@
               "$ref": "#/components/schemas/BusinessSyncRegion"
             },
             "default": [],
-            "description": "区服列表。可单独只传 regions，接口会按 game_id + region_id upsert，不会删除未传的旧区服。"
+            "description": "兼容旧版的顶层区服列表。顶层传入时 game_id 必填；新版推荐放到 games[].regions 里，此时 game_id 可省略。"
           },
           "route_rules": {
             "type": "array",
@@ -512,7 +516,7 @@
               "$ref": "#/components/schemas/BusinessSyncRouteRule"
             },
             "default": [],
-            "description": "线路规则列表。可单独只传 route_rules，接口会按 source + external_id 或默认唯一键 upsert，不会删除未传的旧线路。也兼容字段名 routes。"
+            "description": "兼容旧版的顶层线路规则列表，也兼容字段名 routes。顶层传入时 game_id 必填；新版推荐放到 games[].regions[].routes 里，此时 game_id、game_name、region_id、region_name 可由父级自动补齐。"
           }
         }
       },
@@ -551,7 +555,7 @@
           "category": {
             "type": "string",
             "maxLength": 64,
-            "description": "游戏分类，可填 moba、fps、rpg、test 等，控制面只展示不参与调度。",
+            "description": "兼容旧版的单分类字段。若同时传 categories，category 会作为主分类并排在第一位。",
             "example": "moba"
           },
           "icon_url": {
@@ -576,13 +580,49 @@
             "maxLength": 512,
             "description": "备注，可记录业务说明、测试说明或同步来源。",
             "example": "正式游戏"
+          },
+          "categories": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "description": "游戏可同时归属多个分类。控制面会去空、去重，并写入多分类关系表；第一个分类会同步到旧的 category 字段作为主分类展示。",
+            "example": [
+              "moba",
+              "competitive"
+            ]
+          },
+          "regions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRegion"
+            },
+            "default": [],
+            "description": "新版推荐的游戏内嵌区服列表。放在 game 下时，region.game_id 可以省略，控制面会使用父级 game_id。"
+          },
+          "route_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRouteRule"
+            },
+            "default": [],
+            "description": "游戏级线路列表，也兼容字段名 routes。适合没有区服或线路不绑定区服的游戏。"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRouteRule"
+            },
+            "deprecated": false,
+            "description": "route_rules 的别名。JSON 里传 routes 即可被控制面解析为 route_rules。"
           }
         }
       },
       "BusinessSyncRegion": {
         "type": "object",
         "required": [
-          "game_id",
           "region_id",
           "name"
         ],
@@ -591,7 +631,7 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 1,
-            "description": "所属游戏 ID，必须对应 games 中的 game_id。",
+            "description": "所属游戏 ID。顶层 regions 里必填；放在 games[].regions 里时可省略，控制面会使用父级 game_id。",
             "example": 8888
           },
           "region_id": {
@@ -628,13 +668,27 @@
             "maxLength": 512,
             "description": "区服备注。",
             "example": "香港入口默认区服"
+          },
+          "route_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRouteRule"
+            },
+            "default": [],
+            "description": "区服下的多节点线路列表，也兼容字段名 routes。放在 region 下时，route.game_id、route.region_id、route.region_name 可省略。"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRouteRule"
+            },
+            "description": "route_rules 的别名。推荐业务后台在区服下直接传 routes。"
           }
         }
       },
       "BusinessSyncRouteRule": {
         "type": "object",
         "required": [
-          "game_id",
           "node_id",
           "target_addr"
         ],
@@ -649,26 +703,26 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 1,
-            "description": "所属游戏 ID。connect-intent 会按 game_id 查找启用线路。",
+            "description": "所属游戏 ID。顶层 route_rules 里必填；放在 games[].route_rules 或 games[].regions[].routes 里时可省略。",
             "example": 8888
           },
           "game_name": {
             "type": "string",
             "maxLength": 128,
-            "description": "游戏名称快照。可选；传入后控制面路由列表展示更清楚。",
+            "description": "游戏名称。嵌套在 game 下时可省略，控制面会使用父级 game.name。",
             "example": "英雄联盟"
           },
           "region_id": {
             "type": "integer",
             "format": "uint64",
             "minimum": 1,
-            "description": "所属区服 ID。可选；传入后 connect-intent 可按指定区服调度线路。",
+            "description": "所属区服 ID。若线路嵌套在 region 下可省略；不区分区服时可为空。",
             "example": 1
           },
           "region_name": {
             "type": "string",
             "maxLength": 128,
-            "description": "区服名称快照。可选。",
+            "description": "区服名称。若线路嵌套在 region 下可省略，控制面会使用父级 region.name。",
             "example": "电信一区"
           },
           "node_id": {
@@ -731,6 +785,7 @@
           "status",
           "source",
           "games_upserted",
+          "categories_upserted",
           "regions_upserted",
           "route_rules_upserted",
           "server_time"
@@ -775,6 +830,12 @@
             "format": "uint64",
             "description": "控制面 Unix 秒级时间戳。",
             "example": 1781070000
+          },
+          "categories_upserted": {
+            "type": "integer",
+            "format": "uint64",
+            "description": "本次写入的游戏分类关系数量。分类为空时为 0。",
+            "example": 2
           }
         }
       },

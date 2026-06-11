@@ -62,8 +62,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.58.0
-git push origin v0.58.0
+git tag v0.59.0
+git push origin v0.59.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -81,7 +81,10 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.58.0` polishes the business integration console with
+next stage. Version `0.59.0` expands `sync-catalog` for business backends:
+games can now carry multiple categories, nested regions, and nested per-node
+routes while the older top-level `regions` and `route_rules` arrays stay
+compatible. Version `0.58.0` polishes the business integration console with
 card-based status, sync, and connect-intent results, plus a one-click node probe
 that reuses the signed intent request to run UDP probe and session relay checks.
 Version `0.57.1` fixes MySQL COUNT decoding for status checks. Version `0.57.0`

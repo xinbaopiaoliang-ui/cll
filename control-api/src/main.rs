@@ -23,7 +23,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{mysql::MySqlPoolOptions, FromRow, MySql, MySqlPool, QueryBuilder};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::ErrorKind,
     net::{IpAddr, SocketAddr},
     path::Path as FsPath,
@@ -71,6 +71,7 @@ const DEFAULT_DIAGNOSTIC_RESPONSE_TIMEOUT_MS: u64 = 500;
 const SSH_KNOWN_HOSTS_FILE: &str = "/var/lib/xaccel-control-api/known_hosts";
 const SSH_ACTION_TIMEOUT_SEC: u64 = 120;
 const MAX_STORED_LAST_ERROR_CHARS: usize = 4096;
+const MAX_GAME_CATEGORIES: usize = 16;
 const SSH_BOOTSTRAP_TTL_SEC: u64 = 3600;
 const SSH_UPGRADE_REPORT_WAIT_SEC: u64 = 45;
 const SSH_UPGRADE_REPORT_POLL_SEC: u64 = 3;
@@ -79,9 +80,10 @@ const ADMIN_SESSION_VERSION: &str = "v1";
 const ADMIN_SESSION_TTL_SEC: u64 = 8 * 60 * 60;
 const ADMIN_PASSWORD_SCHEME: &str = "pbkdf2-sha256";
 const ADMIN_PASSWORD_ITERATIONS: u32 = 120_000;
-const SYSTEM_DIAGNOSTIC_CORE_TABLES: [&str; 8] = [
+const SYSTEM_DIAGNOSTIC_CORE_TABLES: [&str; 9] = [
     "accel_nodes",
     "accel_games",
+    "accel_game_categories",
     "game_route_rules",
     "node_runtime_reports",
     "node_health_alerts",
@@ -1075,25 +1077,32 @@ struct BusinessSyncGame {
     name: String,
     platform: Option<String>,
     category: Option<String>,
+    categories: Option<Vec<String>>,
     icon_url: Option<String>,
     status: Option<String>,
     remark: Option<String>,
+    #[serde(default)]
+    regions: Vec<BusinessSyncRegion>,
+    #[serde(default, alias = "routes")]
+    route_rules: Vec<BusinessSyncRouteRule>,
 }
 
 #[derive(Debug, Deserialize)]
 struct BusinessSyncRegion {
-    game_id: u64,
+    game_id: Option<u64>,
     region_id: u64,
     name: String,
     area: Option<String>,
     status: Option<String>,
     remark: Option<String>,
+    #[serde(default, alias = "routes")]
+    route_rules: Vec<BusinessSyncRouteRule>,
 }
 
 #[derive(Debug, Deserialize)]
 struct BusinessSyncRouteRule {
     external_id: Option<String>,
-    game_id: u64,
+    game_id: Option<u64>,
     game_name: Option<String>,
     region_id: Option<u64>,
     region_name: Option<String>,
@@ -1239,6 +1248,7 @@ struct BusinessSyncCatalogResponse {
     source: String,
     revision: Option<String>,
     games_upserted: usize,
+    categories_upserted: usize,
     regions_upserted: usize,
     route_rules_upserted: usize,
     server_time: u64,
@@ -1739,6 +1749,7 @@ struct NormalizedGame {
     name: String,
     platform: String,
     category: Option<String>,
+    categories: Vec<String>,
     icon_url: Option<String>,
     status: String,
     remark: Option<String>,
@@ -2213,6 +2224,7 @@ async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
     ensure_system_settings_table(pool).await?;
     ensure_game_route_game_name_column(pool).await?;
     ensure_game_catalog_table(pool).await?;
+    ensure_game_categories_table(pool).await?;
     ensure_game_region_table(pool).await?;
     ensure_game_route_business_columns(pool).await?;
     ensure_game_route_region_indexes(pool).await?;
@@ -2567,6 +2579,52 @@ CREATE TABLE IF NOT EXISTS accel_games (
     .execute(pool)
     .await
     .context("failed to create accel_games")?;
+    Ok(())
+}
+
+async fn ensure_game_categories_table(pool: &MySqlPool) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+CREATE TABLE IF NOT EXISTS accel_game_categories (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  game_id BIGINT UNSIGNED NOT NULL,
+  category VARCHAR(64) NOT NULL,
+  sort_order INT UNSIGNED NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_game_category (game_id, category),
+  INDEX idx_category (category),
+  INDEX idx_game_sort (game_id, sort_order)
+)
+"#,
+    )
+    .execute(pool)
+    .await
+    .context("failed to create accel_game_categories")?;
+
+    sqlx::query(
+        r#"
+INSERT IGNORE INTO accel_game_categories (
+  game_id,
+  category,
+  sort_order,
+  created_at,
+  updated_at
+)
+SELECT
+  game_id,
+  category,
+  0,
+  CURRENT_TIMESTAMP,
+  CURRENT_TIMESTAMP
+FROM accel_games
+WHERE category IS NOT NULL AND category <> ''
+"#,
+    )
+    .execute(pool)
+    .await
+    .context("failed to seed accel_game_categories from accel_games")?;
+
     Ok(())
 }
 
@@ -3100,6 +3158,7 @@ async fn business_sync_catalog(
     let log_source = catalog.source.clone();
     let log_revision = catalog.revision.clone();
     let log_games = catalog.games.len();
+    let log_categories: usize = catalog.games.iter().map(|game| game.categories.len()).sum();
     let log_regions = catalog.regions.len();
     let log_routes = catalog.route_rules.len();
     let response = match sync_business_catalog(&state.pool, catalog).await {
@@ -3136,6 +3195,7 @@ async fn business_sync_catalog(
             error_message: None,
             detail: json!({
                 "games_upserted": log_games,
+                "categories_upserted": log_categories,
                 "regions_upserted": log_regions,
                 "route_rules_upserted": log_routes,
                 "revision": log_revision,
@@ -3401,6 +3461,7 @@ async fn admin_business_api_sync_catalog(
     let log_source = catalog.source.clone();
     let log_revision = catalog.revision.clone();
     let log_games = catalog.games.len();
+    let log_categories: usize = catalog.games.iter().map(|game| game.categories.len()).sum();
     let log_regions = catalog.regions.len();
     let log_routes = catalog.route_rules.len();
     let response = match sync_business_catalog(&state.pool, catalog).await {
@@ -3439,6 +3500,7 @@ async fn admin_business_api_sync_catalog(
                 "source": log_source,
                 "revision": log_revision,
                 "games_upserted": log_games,
+                "categories_upserted": log_categories,
                 "regions_upserted": log_regions,
                 "route_rules_upserted": log_routes,
             }),
@@ -6939,15 +7001,16 @@ SELECT
   g.game_id,
   g.name,
   g.platform,
-  g.category,
+  COALESCE(GROUP_CONCAT(gc.category ORDER BY gc.sort_order ASC, gc.category ASC SEPARATOR ' / '), g.category) AS category,
   g.icon_url,
   g.status,
   g.remark,
-  CAST(COUNT(r.id) AS UNSIGNED) AS route_count,
+  CAST(COUNT(DISTINCT r.id) AS UNSIGNED) AS route_count,
   CAST(UNIX_TIMESTAMP(g.created_at) AS UNSIGNED) AS created_at,
   CAST(UNIX_TIMESTAMP(g.updated_at) AS UNSIGNED) AS updated_at
 FROM accel_games g
 LEFT JOIN game_route_rules r ON r.game_id = g.game_id
+LEFT JOIN accel_game_categories gc ON gc.game_id = g.game_id
 WHERE 1 = 1
 "#,
     );
@@ -6980,6 +7043,8 @@ WHERE 1 = 1
         builder.push(" AND (g.name LIKE ");
         builder.push_bind(like.clone());
         builder.push(" OR CAST(g.game_id AS CHAR) LIKE ");
+        builder.push_bind(like.clone());
+        builder.push(" OR gc.category LIKE ");
         builder.push_bind(like);
         builder.push(")");
     }
@@ -7021,15 +7086,16 @@ SELECT
   g.game_id,
   g.name,
   g.platform,
-  g.category,
+  COALESCE(GROUP_CONCAT(gc.category ORDER BY gc.sort_order ASC, gc.category ASC SEPARATOR ' / '), g.category) AS category,
   g.icon_url,
   g.status,
   g.remark,
-  CAST(COUNT(r.id) AS UNSIGNED) AS route_count,
+  CAST(COUNT(DISTINCT r.id) AS UNSIGNED) AS route_count,
   CAST(UNIX_TIMESTAMP(g.created_at) AS UNSIGNED) AS created_at,
   CAST(UNIX_TIMESTAMP(g.updated_at) AS UNSIGNED) AS updated_at
 FROM accel_games g
 LEFT JOIN game_route_rules r ON r.game_id = g.game_id
+LEFT JOIN accel_game_categories gc ON gc.game_id = g.game_id
 WHERE g.game_id = ?
 GROUP BY
   g.id,
@@ -7163,6 +7229,7 @@ LIMIT 1
 
 async fn insert_admin_game(pool: &MySqlPool, request: AdminGameRequest) -> Result<u64, AppError> {
     let game = normalize_game_request(&request)?;
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
     sqlx::query(
         r#"
 INSERT INTO accel_games (
@@ -7185,9 +7252,11 @@ INSERT INTO accel_games (
     .bind(&game.icon_url)
     .bind(&game.status)
     .bind(&game.remark)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(map_game_write_error)?;
+    replace_business_game_categories(&mut tx, &game).await?;
+    tx.commit().await.map_err(AppError::database)?;
 
     Ok(game.game_id)
 }
@@ -7238,10 +7307,25 @@ WHERE game_id = ?
     if result.rows_affected() == 0 {
         return Err(AppError::not_found("game_not_found", "game does not exist"));
     }
+
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
+    replace_business_game_categories(&mut tx, &game).await?;
+    tx.commit().await.map_err(AppError::database)?;
     Ok(())
 }
 
 async fn delete_admin_game(pool: &MySqlPool, game_id: u64) -> Result<bool, AppError> {
+    sqlx::query(
+        r#"
+DELETE FROM accel_game_categories
+WHERE game_id = ?
+"#,
+    )
+    .bind(game_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+
     let result = sqlx::query(
         r#"
 DELETE FROM accel_games
@@ -7376,6 +7460,7 @@ async fn sync_business_catalog(
     catalog: BusinessSyncCatalog,
 ) -> Result<BusinessSyncCatalogResponse, AppError> {
     let games_upserted = catalog.games.len();
+    let categories_upserted = catalog.games.iter().map(|game| game.categories.len()).sum();
     let regions_upserted = catalog.regions.len();
     let route_rules_upserted = catalog.route_rules.len();
     let mut tx = pool.begin().await.map_err(AppError::database)?;
@@ -7397,6 +7482,7 @@ async fn sync_business_catalog(
         source: catalog.source,
         revision: catalog.revision,
         games_upserted,
+        categories_upserted,
         regions_upserted,
         route_rules_upserted,
         server_time: now_unix(),
@@ -7440,6 +7526,47 @@ ON DUPLICATE KEY UPDATE
     .execute(&mut **tx)
     .await
     .map_err(map_game_write_error)?;
+    replace_business_game_categories(tx, game).await?;
+    Ok(())
+}
+
+async fn replace_business_game_categories(
+    tx: &mut sqlx::Transaction<'_, MySql>,
+    game: &NormalizedGame,
+) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+DELETE FROM accel_game_categories
+WHERE game_id = ?
+"#,
+    )
+    .bind(game.game_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(AppError::database)?;
+
+    for (index, category) in game.categories.iter().enumerate() {
+        sqlx::query(
+            r#"
+INSERT INTO accel_game_categories (
+  game_id,
+  category,
+  sort_order,
+  created_at,
+  updated_at
+) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  sort_order = VALUES(sort_order),
+  updated_at = CURRENT_TIMESTAMP
+"#,
+        )
+        .bind(game.game_id)
+        .bind(category)
+        .bind(index as u32)
+        .execute(&mut **tx)
+        .await
+        .map_err(AppError::database)?;
+    }
     Ok(())
 }
 
@@ -8744,10 +8871,64 @@ fn normalize_game_request(request: &AdminGameRequest) -> Result<NormalizedGame, 
         name: normalize_required_text(&request.name, "name", 128)?,
         platform: platform.to_string(),
         category: normalize_optional_text(request.category.as_deref(), 64)?,
+        categories: normalize_business_game_categories(request.category.as_deref(), None)?,
         icon_url,
         status: status.to_string(),
         remark: normalize_optional_text(request.remark.as_deref(), 512)?,
     })
+}
+
+fn normalize_business_game_categories(
+    primary_category: Option<&str>,
+    categories: Option<&[String]>,
+) -> Result<Vec<String>, AppError> {
+    if categories.is_some_and(|items| items.len() > MAX_GAME_CATEGORIES) {
+        return Err(AppError::bad_request(
+            "invalid_game_categories",
+            "categories must contain at most 16 items",
+        ));
+    }
+
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+    let mut push_category = |value: Option<&str>| -> Result<(), AppError> {
+        if let Some(category) = normalize_optional_text(value, 64)? {
+            let key = category.to_ascii_lowercase();
+            if seen.insert(key) {
+                normalized.push(category);
+            }
+        }
+        Ok(())
+    };
+
+    push_category(primary_category)?;
+    if let Some(categories) = categories {
+        for category in categories {
+            push_category(Some(category.as_str()))?;
+        }
+    }
+
+    Ok(normalized)
+}
+
+fn normalize_nested_game_id(
+    request_game_id: Option<u64>,
+    parent_game_id: Option<u64>,
+    scope: &str,
+) -> Result<u64, AppError> {
+    match (request_game_id, parent_game_id) {
+        (Some(game_id), Some(parent_game_id)) if game_id != parent_game_id => {
+            Err(AppError::bad_request(
+                "invalid_game",
+                format!("nested {scope}.game_id must match parent game_id"),
+            ))
+        }
+        (Some(game_id), _) | (None, Some(game_id)) => Ok(game_id),
+        (None, None) => Err(AppError::bad_request(
+            "invalid_game",
+            format!("{scope}.game_id is required when it is not nested under a game"),
+        )),
+    }
 }
 
 fn normalize_business_sync_catalog(
@@ -8762,21 +8943,64 @@ fn normalize_business_sync_catalog(
     let source = normalize_optional_text(request.source.as_deref(), 32)?
         .unwrap_or_else(|| "business".to_string());
     let revision = normalize_optional_text(request.revision.as_deref(), 128)?;
-    let games = request
-        .games
-        .iter()
-        .map(normalize_business_game)
-        .collect::<Result<Vec<_>, _>>()?;
-    let regions = request
-        .regions
-        .iter()
-        .map(normalize_business_region)
-        .collect::<Result<Vec<_>, _>>()?;
-    let route_rules = request
-        .route_rules
-        .iter()
-        .map(|rule| normalize_business_route_rule(rule, &source))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut games = Vec::with_capacity(request.games.len());
+    let mut regions = Vec::new();
+    let mut route_rules = Vec::new();
+
+    for game_request in &request.games {
+        let game = normalize_business_game(game_request)?;
+        for region_request in &game_request.regions {
+            let region = normalize_business_region(region_request, Some(game.game_id))?;
+            for rule_request in &region_request.route_rules {
+                route_rules.push(normalize_business_route_rule(
+                    rule_request,
+                    &source,
+                    Some(game.game_id),
+                    Some(&game.name),
+                    Some(region.region_id),
+                    Some(&region.name),
+                )?);
+            }
+            regions.push(region);
+        }
+        for rule_request in &game_request.route_rules {
+            route_rules.push(normalize_business_route_rule(
+                rule_request,
+                &source,
+                Some(game.game_id),
+                Some(&game.name),
+                None,
+                None,
+            )?);
+        }
+        games.push(game);
+    }
+
+    for region_request in &request.regions {
+        let region = normalize_business_region(region_request, None)?;
+        for rule_request in &region_request.route_rules {
+            route_rules.push(normalize_business_route_rule(
+                rule_request,
+                &source,
+                Some(region.game_id),
+                None,
+                Some(region.region_id),
+                Some(&region.name),
+            )?);
+        }
+        regions.push(region);
+    }
+
+    for rule_request in &request.route_rules {
+        route_rules.push(normalize_business_route_rule(
+            rule_request,
+            &source,
+            None,
+            None,
+            None,
+            None,
+        )?);
+    }
 
     Ok(BusinessSyncCatalog {
         source,
@@ -8814,21 +9038,30 @@ fn normalize_business_log_status_filter(value: Option<&str>) -> Result<Option<St
 }
 
 fn normalize_business_game(request: &BusinessSyncGame) -> Result<NormalizedGame, AppError> {
-    normalize_game_request(&AdminGameRequest {
+    let categories = normalize_business_game_categories(
+        request.category.as_deref(),
+        request.categories.as_deref(),
+    )?;
+    let primary_category = categories.first().cloned();
+    let mut game = normalize_game_request(&AdminGameRequest {
         game_id: request.game_id,
         name: request.name.clone(),
         platform: request.platform.clone(),
-        category: request.category.clone(),
+        category: primary_category,
         icon_url: request.icon_url.clone(),
         status: request.status.clone(),
         remark: request.remark.clone(),
-    })
+    })?;
+    game.categories = categories;
+    Ok(game)
 }
 
 fn normalize_business_region(
     request: &BusinessSyncRegion,
+    parent_game_id: Option<u64>,
 ) -> Result<NormalizedGameRegion, AppError> {
-    if request.game_id == 0 {
+    let game_id = normalize_nested_game_id(request.game_id, parent_game_id, "region")?;
+    if game_id == 0 {
         return Err(AppError::bad_request(
             "invalid_game",
             "game_id must be positive",
@@ -8842,7 +9075,7 @@ fn normalize_business_region(
     }
 
     Ok(NormalizedGameRegion {
-        game_id: request.game_id,
+        game_id,
         region_id: request.region_id,
         name: normalize_required_text(&request.name, "name", 128)?,
         area: normalize_optional_text(request.area.as_deref(), 32)?,
@@ -8854,8 +9087,13 @@ fn normalize_business_region(
 fn normalize_business_route_rule(
     request: &BusinessSyncRouteRule,
     source: &str,
+    parent_game_id: Option<u64>,
+    parent_game_name: Option<&str>,
+    parent_region_id: Option<u64>,
+    parent_region_name: Option<&str>,
 ) -> Result<NormalizedRouteRule, AppError> {
-    if request.game_id == 0 {
+    let game_id = normalize_nested_game_id(request.game_id, parent_game_id, "route_rule")?;
+    if game_id == 0 {
         return Err(AppError::bad_request(
             "invalid_game",
             "game_id must be positive",
@@ -8873,6 +9111,14 @@ fn normalize_business_route_rule(
             "region_id must be positive",
         ));
     }
+    if let (Some(route_region_id), Some(parent_region_id)) = (request.region_id, parent_region_id) {
+        if route_region_id != parent_region_id {
+            return Err(AppError::bad_request(
+                "invalid_region",
+                "nested route_rule.region_id must match parent region_id",
+            ));
+        }
+    }
 
     let protocol = request
         .protocol
@@ -8889,11 +9135,13 @@ fn normalize_business_route_rule(
 
     let target_addr = validate_target_addr(&request.target_addr)?;
     let game_name = normalize_optional_text(request.game_name.as_deref(), 128)?
-        .unwrap_or_else(|| format!("Game {}", request.game_id));
+        .or_else(|| parent_game_name.map(ToOwned::to_owned))
+        .unwrap_or_else(|| format!("Game {game_id}"));
+    let region_id = request.region_id.or(parent_region_id);
     let external_id = normalize_optional_text(request.external_id.as_deref(), 128)?.or_else(|| {
         Some(default_business_route_external_id(
-            request.game_id,
-            request.region_id,
+            game_id,
+            region_id,
             request.node_id,
             &target_addr,
             protocol,
@@ -8901,10 +9149,11 @@ fn normalize_business_route_rule(
     });
 
     Ok(NormalizedRouteRule {
-        game_id: request.game_id,
+        game_id,
         game_name,
-        region_id: request.region_id,
-        region_name: normalize_optional_text(request.region_name.as_deref(), 128)?,
+        region_id,
+        region_name: normalize_optional_text(request.region_name.as_deref(), 128)?
+            .or_else(|| parent_region_name.map(ToOwned::to_owned)),
         node_id: request.node_id,
         target_addr,
         protocol: protocol.to_string(),
@@ -11989,21 +12238,46 @@ mod tests {
                 name: "Local Echo Test".to_string(),
                 platform: Some("pc".to_string()),
                 category: Some("test".to_string()),
+                categories: Some(vec!["moba".to_string(), "竞技".to_string()]),
                 icon_url: None,
                 status: Some("enabled".to_string()),
                 remark: None,
+                regions: vec![BusinessSyncRegion {
+                    game_id: None,
+                    region_id: 2,
+                    name: "Hong Kong Region".to_string(),
+                    area: Some("HK".to_string()),
+                    status: Some("enabled".to_string()),
+                    remark: None,
+                    route_rules: vec![BusinessSyncRouteRule {
+                        external_id: Some("route-8888-hk-node2".to_string()),
+                        game_id: None,
+                        game_name: None,
+                        region_id: None,
+                        region_name: None,
+                        node_id: 2,
+                        target_addr: "127.0.0.1:8888".to_string(),
+                        protocol: Some("udp".to_string()),
+                        area: Some("HK".to_string()),
+                        tag: Some("hk".to_string()),
+                        priority: Some(20),
+                        status: Some("enabled".to_string()),
+                    }],
+                }],
+                route_rules: vec![],
             }],
             regions: vec![BusinessSyncRegion {
-                game_id: 8888,
+                game_id: Some(8888),
                 region_id: 1,
                 name: "Default Region".to_string(),
                 area: Some("UNKNOWN".to_string()),
                 status: Some("enabled".to_string()),
                 remark: None,
+                route_rules: vec![],
             }],
             route_rules: vec![BusinessSyncRouteRule {
                 external_id: Some("route-8888-default".to_string()),
-                game_id: 8888,
+                game_id: Some(8888),
                 game_name: Some("Local Echo Test".to_string()),
                 region_id: Some(1),
                 region_name: Some("Default Region".to_string()),
@@ -12021,16 +12295,58 @@ mod tests {
         assert_eq!(catalog.source, "billing");
         assert_eq!(catalog.revision.as_deref(), Some("rev-1"));
         assert_eq!(catalog.games[0].name, "Local Echo Test");
-        assert_eq!(catalog.regions[0].region_id, 1);
-        assert_eq!(catalog.route_rules[0].region_id, Some(1));
+        assert_eq!(catalog.games[0].category.as_deref(), Some("test"));
         assert_eq!(
-            catalog.route_rules[0].sync_source.as_deref(),
+            catalog.games[0].categories,
+            vec!["test".to_string(), "moba".to_string(), "竞技".to_string()]
+        );
+        assert_eq!(catalog.regions[0].region_id, 2);
+        assert_eq!(catalog.regions[1].region_id, 1);
+        assert_eq!(catalog.route_rules[0].region_id, Some(2));
+        assert_eq!(catalog.route_rules[0].game_name, "Local Echo Test");
+        assert_eq!(catalog.route_rules[1].region_id, Some(1));
+        assert_eq!(
+            catalog.route_rules[1].sync_source.as_deref(),
             Some("billing")
         );
         assert_eq!(
-            catalog.route_rules[0].external_id.as_deref(),
+            catalog.route_rules[1].external_id.as_deref(),
             Some("route-8888-default")
         );
+    }
+
+    #[test]
+    fn rejects_nested_business_catalog_game_id_mismatch() {
+        let request = BusinessSyncCatalogRequest {
+            source: Some("billing".to_string()),
+            revision: None,
+            games: vec![BusinessSyncGame {
+                game_id: 8888,
+                name: "Mismatch Test".to_string(),
+                platform: Some("pc".to_string()),
+                category: None,
+                categories: None,
+                icon_url: None,
+                status: Some("enabled".to_string()),
+                remark: None,
+                regions: vec![BusinessSyncRegion {
+                    game_id: Some(9999),
+                    region_id: 1,
+                    name: "Wrong Parent".to_string(),
+                    area: None,
+                    status: Some("enabled".to_string()),
+                    remark: None,
+                    route_rules: vec![],
+                }],
+                route_rules: vec![],
+            }],
+            regions: vec![],
+            route_rules: vec![],
+        };
+
+        let error = normalize_business_sync_catalog(request).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_game");
     }
 
     #[test]
@@ -12066,7 +12382,7 @@ mod tests {
     fn generates_business_route_external_id_when_missing() {
         let request = BusinessSyncRouteRule {
             external_id: None,
-            game_id: 8888,
+            game_id: Some(8888),
             game_name: Some("Local Echo Test".to_string()),
             region_id: Some(1),
             region_name: Some("Default Region".to_string()),
@@ -12079,8 +12395,10 @@ mod tests {
             status: None,
         };
 
-        let first = normalize_business_route_rule(&request, "billing").expect("route is valid");
-        let second = normalize_business_route_rule(&request, "billing").expect("route is valid");
+        let first = normalize_business_route_rule(&request, "billing", None, None, None, None)
+            .expect("route is valid");
+        let second = normalize_business_route_rule(&request, "billing", None, None, None, None)
+            .expect("route is valid");
 
         assert_eq!(first.external_id, second.external_id);
         assert!(first
@@ -12262,8 +12580,9 @@ mod tests {
         assert!(SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"node_operation_tasks"));
         assert!(SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"system_settings"));
         assert!(SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"business_api_logs"));
+        assert!(SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"accel_game_categories"));
         assert!(!SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"operation_tasks"));
-        assert_eq!(SYSTEM_DIAGNOSTIC_CORE_TABLES.len(), 8);
+        assert_eq!(SYSTEM_DIAGNOSTIC_CORE_TABLES.len(), 9);
     }
 
     #[test]

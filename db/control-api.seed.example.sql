@@ -60,6 +60,18 @@ INSERT INTO accel_games (
   status = VALUES(status),
   remark = VALUES(remark);
 
+INSERT INTO accel_game_categories (
+  game_id,
+  category,
+  sort_order
+) VALUES (
+  8888,
+  'test',
+  0
+) ON DUPLICATE KEY UPDATE
+  sort_order = VALUES(sort_order),
+  updated_at = CURRENT_TIMESTAMP;
+
 INSERT INTO accel_game_regions (
   game_id,
   region_id,

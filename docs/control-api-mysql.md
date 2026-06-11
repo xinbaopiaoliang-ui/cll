@@ -158,15 +158,37 @@ curl -fsSL -X POST http://127.0.0.1:18080/api/business/v1/sync-catalog \
   -d '{
     "source":"business-admin",
     "revision":"2026-06-01T10:00:00Z",
-    "games":[{"game_id":8888,"name":"Local Echo Test","platform":"pc","status":"enabled"}],
-    "regions":[{"game_id":8888,"region_id":1,"name":"Default Region","area":"UNKNOWN","status":"enabled"}],
-    "route_rules":[{"external_id":"route-8888-default","game_id":8888,"game_name":"Local Echo Test","region_id":1,"region_name":"Default Region","node_id":1,"target_addr":"127.0.0.1:7777","protocol":"udp","priority":10,"status":"enabled"}]
+    "games":[{
+      "game_id":8888,
+      "name":"Local Echo Test",
+      "platform":"pc",
+      "category":"test",
+      "categories":["test","local"],
+      "status":"enabled",
+      "regions":[{
+        "region_id":1,
+        "name":"Default Region",
+        "area":"UNKNOWN",
+        "status":"enabled",
+        "routes":[{
+          "external_id":"route-8888-default",
+          "node_id":1,
+          "target_addr":"127.0.0.1:7777",
+          "protocol":"udp",
+          "priority":10,
+          "status":"enabled"
+        }]
+      }]
+    }]
   }'
 ```
 
-`external_id` should be provided by the business backend when possible. If it is
-omitted, the control API derives a stable id from the route fields so repeated
-catalog syncs update the same execution route instead of creating duplicates.
+`categories`, nested `regions`, and nested `routes` are the recommended shape.
+The older top-level `regions` and `route_rules` arrays still work for stepped
+syncs. `external_id` should be provided by the business backend when possible.
+If it is omitted, the control API derives a stable id from the route fields so
+repeated catalog syncs update the same execution route instead of creating
+duplicates.
 
 The business backend can also verify the protected integration surface:
 

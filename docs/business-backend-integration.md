@@ -69,7 +69,7 @@ Apifox 可直接导入 OpenAPI 文件：[apifox-business-api.openapi.json](apifo
 
 ## 控制面联调入口
 
-从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台。`0.58.0` 起，联调结果会以卡片展示，并支持一键探测节点：
+从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台。`0.58.0` 起，联调结果会以卡片展示，并支持一键探测节点。`0.59.0` 起，`sync-catalog` 支持游戏内嵌多个分类、区服和节点线路：
 
 - “状态检查”会调用控制面内部业务状态接口，确认业务 API Token、节点、游戏和路由是否可用。
 - “同步目录”可以粘贴业务后台准备下发的 `sync-catalog` JSON，先验证游戏、区服和线路执行副本是否能写入。
@@ -89,7 +89,7 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 ```json
 {
   "status": "ok",
-  "version": "0.58.0",
+  "version": "0.59.0",
   "catalog_owner": "business_backend",
   "control_role": "node_operations",
   "business_api_enabled": true,
@@ -105,7 +105,9 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 
 ## 2. 同步游戏、区服和路由
 
-业务后台把游戏和路由执行副本同步到控制面。建议业务后台保存自己的 `external_id`，后续修改同一路由时使用同一个 `external_id`。
+业务后台把游戏、分类、区服和路由执行副本同步到控制面。建议业务后台保存自己的 `external_id`，后续修改同一路由时使用同一个 `external_id`。
+
+推荐使用新版嵌套格式：一个 `game` 里可以带多个 `categories`、多个 `regions`，每个区服下面可以带多个 `routes`，这样更贴近业务后台里的“游戏 -> 区服 -> 节点线路”结构。旧版顶层 `regions` 和 `route_rules` 数组仍然兼容，适合分步同步。
 
 ```bash
 curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/sync-catalog \
@@ -120,30 +122,34 @@ curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/sync-catalog \
         "name": "本地 UDP 测试",
         "platform": "pc",
         "category": "test",
-        "status": "enabled"
-      }
-    ],
-    "regions": [
-      {
-        "game_id": 8888,
-        "region_id": 1,
-        "name": "默认区服",
-        "area": "HK",
-        "status": "enabled"
-      }
-    ],
-    "route_rules": [
-      {
-        "external_id": "route-8888-hk-node2",
-        "game_id": 8888,
-        "game_name": "本地 UDP 测试",
-        "region_id": 1,
-        "region_name": "默认区服",
-        "node_id": 2,
-        "target_addr": "127.0.0.1:7777",
-        "protocol": "udp",
-        "priority": 10,
-        "status": "enabled"
+        "categories": ["test", "fps"],
+        "status": "enabled",
+        "regions": [
+          {
+            "region_id": 1,
+            "name": "默认区服",
+            "area": "HK",
+            "status": "enabled",
+            "routes": [
+              {
+                "external_id": "route-8888-hk-node2",
+                "node_id": 2,
+                "target_addr": "127.0.0.1:7777",
+                "protocol": "udp",
+                "priority": 10,
+                "status": "enabled"
+              },
+              {
+                "external_id": "route-8888-hk-node3",
+                "node_id": 3,
+                "target_addr": "127.0.0.1:7777",
+                "protocol": "udp",
+                "priority": 20,
+                "status": "enabled"
+              }
+            ]
+          }
+        ]
       }
     ]
   }'
@@ -157,8 +163,9 @@ curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/sync-catalog \
   "source": "business-admin",
   "revision": "2026-06-10T11:40:00+08:00",
   "games_upserted": 1,
+  "categories_upserted": 2,
   "regions_upserted": 1,
-  "route_rules_upserted": 1,
+  "route_rules_upserted": 2,
   "server_time": 1781070000
 }
 ```

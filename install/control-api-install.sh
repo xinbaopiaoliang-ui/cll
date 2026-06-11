@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.58.0"
+INSTALLER_VERSION="0.59.0"
 SERVICE_NAME="xaccel-control-api"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-control-api"

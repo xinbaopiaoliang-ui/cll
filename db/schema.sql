@@ -62,6 +62,18 @@ CREATE TABLE accel_games (
   INDEX idx_category (category)
 );
 
+CREATE TABLE accel_game_categories (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  game_id BIGINT UNSIGNED NOT NULL,
+  category VARCHAR(64) NOT NULL,
+  sort_order INT UNSIGNED NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_game_category (game_id, category),
+  INDEX idx_category (category),
+  INDEX idx_game_sort (game_id, sort_order)
+);
+
 CREATE TABLE accel_game_regions (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   game_id BIGINT UNSIGNED NOT NULL,
