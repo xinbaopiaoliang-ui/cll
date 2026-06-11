@@ -303,3 +303,24 @@ CREATE TABLE node_audit_logs (
     FOREIGN KEY (node_id) REFERENCES accel_nodes(id)
     ON DELETE CASCADE
 );
+
+CREATE TABLE business_api_logs (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  endpoint VARCHAR(64) NOT NULL,
+  action VARCHAR(64) NOT NULL,
+  source VARCHAR(64) NOT NULL DEFAULT 'business_api',
+  request_id VARCHAR(128) NULL,
+  status ENUM('succeeded', 'failed') NOT NULL,
+  http_status SMALLINT UNSIGNED NULL,
+  user_id BIGINT UNSIGNED NULL,
+  game_id BIGINT UNSIGNED NULL,
+  region_id BIGINT UNSIGNED NULL,
+  detail_json JSON NULL,
+  error_code VARCHAR(64) NULL,
+  error_message TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_endpoint_created (endpoint, created_at),
+  INDEX idx_status_created (status, created_at),
+  INDEX idx_game_created (game_id, created_at),
+  INDEX idx_request_id (request_id)
+);

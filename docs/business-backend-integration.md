@@ -67,6 +67,17 @@ Apifox 可直接导入 OpenAPI 文件：[apifox-business-api.openapi.json](apifo
 - `baseUrl`：例如 `http://103.201.131.99:18080`
 - `XACCEL_BUSINESS_SYNC_TOKEN`：系统设置里保存的业务后台 Token
 
+## 控制面联调入口
+
+从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台：
+
+- “状态检查”会调用控制面内部业务状态接口，确认业务 API Token、节点、游戏和路由是否可用。
+- “同步目录”可以粘贴业务后台准备下发的 `sync-catalog` JSON，先验证游戏、区服和线路执行副本是否能写入。
+- “签发意图”可以粘贴 `connect-intent` JSON，检查能否拿到候选节点和路由凭证。
+- “业务 API 调用日志”会展示业务后台和控制面联调工具调用 `status`、`sync-catalog`、`connect-intent` 的记录，便于联调时定位问题。
+
+日常新增、编辑游戏和区服仍然由业务后台负责；控制面只做联调、排查和节点运维。
+
 ```bash
 curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
   -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}"
@@ -77,7 +88,7 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 ```json
 {
   "status": "ok",
-  "version": "0.56.0",
+  "version": "0.57.0",
   "catalog_owner": "business_backend",
   "control_role": "node_operations",
   "business_api_enabled": true,

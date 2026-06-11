@@ -2204,6 +2204,27 @@
         grid-column: 1 / -1;
       }
 
+      .grid-2 > .span-2 {
+        grid-column: 1 / -1;
+      }
+
+      #businessSyncPayload,
+      #businessIntentPayload {
+        min-height: 248px;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      #businessDebugResult {
+        min-height: 360px;
+        max-height: 620px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
       .task-output-preview {
         max-width: 520px;
         margin-top: 6px;
@@ -2675,6 +2696,10 @@
             <span class="nav-icon"></span>
             <span>运维工具</span>
           </button>
+          <button class="nav-item" type="button" data-view="businessApi">
+            <span class="nav-icon"></span>
+            <span>业务联调</span>
+          </button>
           <button class="nav-item" type="button" data-view="audit">
             <span class="nav-icon"></span>
             <span>操作日志</span>
@@ -2690,7 +2715,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.56.0</span>
+          <span class="mono">v0.57.0</span>
         </div>
       </aside>
 
@@ -3153,6 +3178,169 @@
           </section>
         </section>
 
+        <section class="view hidden" id="viewBusinessApi" data-view-panel="businessApi">
+          <section class="grid-2 ops-grid">
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">业务 API 联调</div>
+                  <div class="panel-meta">使用控制面已配置的业务 Token，模拟业务后台调用。</div>
+                </div>
+                <div class="inline-actions">
+                  <button type="button" id="businessStatusCheck">检查状态</button>
+                </div>
+              </div>
+              <div class="panel-body">
+                <div class="action-grid">
+                  <div class="operation-card">
+                    <div class="operation-title">同步游戏、区服和线路</div>
+                    <div class="message">用于验证业务后台推送 catalog 的格式。会写入控制面的同步快照和路由副本。</div>
+                    <textarea id="businessSyncPayload" spellcheck="false">{
+  "source": "business-debug",
+  "revision": "debug-001",
+  "games": [
+    {
+      "game_id": 8888,
+      "name": "测试游戏",
+      "platform": "pc",
+      "status": "enabled"
+    }
+  ],
+  "regions": [
+    {
+      "game_id": 8888,
+      "region_id": 1,
+      "name": "默认区服",
+      "area": "HK",
+      "status": "enabled"
+    }
+  ],
+  "route_rules": [
+    {
+      "external_id": "debug-8888-hk-node-2",
+      "game_id": 8888,
+      "game_name": "测试游戏",
+      "region_id": 1,
+      "region_name": "默认区服",
+      "node_id": 2,
+      "target_addr": "127.0.0.1:7777",
+      "protocol": "udp",
+      "priority": 100,
+      "status": "enabled"
+    }
+  ]
+}</textarea>
+                    <div class="message error-text hidden" id="businessSyncError"></div>
+                    <div class="form-actions">
+                      <button class="primary" type="button" id="businessRunSync" data-write-action>发送同步</button>
+                    </div>
+                  </div>
+
+                  <div class="operation-card">
+                    <div class="operation-title">签发加速意图</div>
+                    <div class="message">用于验证业务后台下发 connect-intent 后，控制面是否能返回候选节点和凭证。</div>
+                    <textarea id="businessIntentPayload" spellcheck="false">{
+  "request_id": "debug-connect-001",
+  "entitlement_id": "debug-order-001",
+  "user_id": 1001,
+  "device_id": "pc-001",
+  "game_id": 8888,
+  "region_id": 1,
+  "platform": "pc",
+  "client_isp": "telecom",
+  "client_ip": "127.0.0.1",
+  "bandwidth_quality": "fast",
+  "client_version": "debug"
+}</textarea>
+                    <div class="message error-text hidden" id="businessIntentError"></div>
+                    <div class="form-actions">
+                      <button class="primary" type="button" id="businessRunIntent" data-write-action>签发意图</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">调用结果</div>
+                  <div class="panel-meta" id="businessDebugMeta">等待业务 API 调试请求</div>
+                </div>
+                <div class="inline-actions">
+                  <button type="button" id="businessCopyResult">复制结果</button>
+                </div>
+              </div>
+              <div class="panel-body">
+                <div class="diagnostic-result empty" id="businessDebugResult">
+                  先点击检查状态，或者发送同步 / 签发意图。这里会显示完整 JSON 返回。
+                </div>
+              </div>
+            </div>
+
+            <div class="panel ops-task-panel span-2">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">业务 API 调用日志</div>
+                  <div class="panel-meta" id="businessApiLogMeta">最近 100 条业务接口调用</div>
+                </div>
+                <div class="inline-actions">
+                  <button type="button" id="refreshBusinessApiLogs">刷新日志</button>
+                </div>
+              </div>
+              <div class="audit-toolbar">
+                <div class="field">
+                  <label for="businessApiEndpointFilter">接口</label>
+                  <select id="businessApiEndpointFilter">
+                    <option value="">全部接口</option>
+                    <option value="status">status</option>
+                    <option value="sync-catalog">sync-catalog</option>
+                    <option value="connect-intent">connect-intent</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="businessApiStatusFilter">状态</label>
+                  <select id="businessApiStatusFilter">
+                    <option value="">全部状态</option>
+                    <option value="succeeded">成功</option>
+                    <option value="failed">失败</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="businessApiLimitFilter">数量</label>
+                  <select id="businessApiLimitFilter">
+                    <option value="50">最近 50 条</option>
+                    <option value="100" selected>最近 100 条</option>
+                    <option value="300">最近 300 条</option>
+                    <option value="500">最近 500 条</option>
+                  </select>
+                </div>
+                <button type="button" id="applyBusinessApiLogFilter">筛选</button>
+              </div>
+              <div class="table-wrap">
+                <table class="audit-table">
+                  <thead>
+                    <tr>
+                      <th>接口</th>
+                      <th>来源</th>
+                      <th>状态</th>
+                      <th>业务对象</th>
+                      <th>时间</th>
+                      <th>详情</th>
+                    </tr>
+                  </thead>
+                  <tbody id="businessApiLogRows">
+                    <tr>
+                      <td colspan="6"><span class="skeleton"></span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="pager hidden" id="businessApiLogPager"></div>
+            </div>
+          </section>
+        </section>
+
         <section class="view hidden" id="viewAlerts" data-view-panel="alerts">
           <div class="panel">
             <div class="panel-head">
@@ -3361,7 +3549,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.56.0</div>
+              <div class="insight-value">0.57.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -4006,6 +4194,7 @@
         games: "游戏同步快照",
         routes: "路由运维兜底",
         ops: "运维工具",
+        businessApi: "业务联调",
         audit: "操作日志",
         settings: "系统设置",
         admins: "权限管理",
@@ -4027,6 +4216,8 @@
         routeRules: [],
         operationTasks: [],
         auditLogs: [],
+        businessApiLogs: [],
+        businessDebugResult: null,
         adminUsers: [],
         systemDiagnostics: null,
         systemDownloadCheck: null,
@@ -4058,6 +4249,7 @@
           routes: { page: 1, pageSize: 10 },
           opsTasks: { page: 1, pageSize: 10 },
           audit: { page: 1, pageSize: 10 },
+          businessApiLogs: { page: 1, pageSize: 10 },
           admins: { page: 1, pageSize: 10 },
         },
         serverTime: null,
@@ -4212,6 +4404,24 @@
         auditLimitFilter: document.getElementById("auditLimitFilter"),
         applyAuditFilter: document.getElementById("applyAuditFilter"),
         refreshAuditLogs: document.getElementById("refreshAuditLogs"),
+        businessStatusCheck: document.getElementById("businessStatusCheck"),
+        businessRunSync: document.getElementById("businessRunSync"),
+        businessRunIntent: document.getElementById("businessRunIntent"),
+        businessSyncPayload: document.getElementById("businessSyncPayload"),
+        businessIntentPayload: document.getElementById("businessIntentPayload"),
+        businessSyncError: document.getElementById("businessSyncError"),
+        businessIntentError: document.getElementById("businessIntentError"),
+        businessDebugMeta: document.getElementById("businessDebugMeta"),
+        businessDebugResult: document.getElementById("businessDebugResult"),
+        businessCopyResult: document.getElementById("businessCopyResult"),
+        businessApiLogMeta: document.getElementById("businessApiLogMeta"),
+        businessApiLogRows: document.getElementById("businessApiLogRows"),
+        businessApiLogPager: document.getElementById("businessApiLogPager"),
+        businessApiEndpointFilter: document.getElementById("businessApiEndpointFilter"),
+        businessApiStatusFilter: document.getElementById("businessApiStatusFilter"),
+        businessApiLimitFilter: document.getElementById("businessApiLimitFilter"),
+        applyBusinessApiLogFilter: document.getElementById("applyBusinessApiLogFilter"),
+        refreshBusinessApiLogs: document.getElementById("refreshBusinessApiLogs"),
         permissionCurrentRole: document.getElementById("permissionCurrentRole"),
         permissionCurrentSummary: document.getElementById("permissionCurrentSummary"),
         permissionMatrix: document.getElementById("permissionMatrix"),
@@ -4305,6 +4515,7 @@
         routes: "规则",
         opsTasks: "任务",
         audit: "日志",
+        businessApiLogs: "业务日志",
         admins: "账号",
       };
 
@@ -4416,6 +4627,7 @@
         if (key === "routes") renderRouteRules();
         if (key === "opsTasks") renderOperationTasks();
         if (key === "audit") renderAuditLogs();
+        if (key === "businessApiLogs") renderBusinessApiLogs();
         if (key === "admins") renderAdminUsers();
       }
 
@@ -4516,6 +4728,9 @@
         els.pageTitle.textContent = PAGE_TITLES[state.activeView];
         if (state.activeView === "audit" && state.token) {
           loadAuditLogs({ silent: true }).catch(showError);
+        }
+        if (state.activeView === "businessApi" && state.token) {
+          loadBusinessApiLogs({ silent: true }).catch(showError);
         }
         if (state.activeView === "admins") {
           renderPermissionMatrix();
@@ -6805,6 +7020,93 @@
         renderPager("audit", logs.length, els.auditPager);
       }
 
+      function businessApiEndpointText(endpoint) {
+        if (endpoint === "status") return "状态检查";
+        if (endpoint === "sync-catalog") return "同步目录";
+        if (endpoint === "connect-intent") return "签发意图";
+        return endpoint || "--";
+      }
+
+      function businessApiStatusText(status) {
+        if (status === "succeeded") return "成功";
+        if (status === "failed") return "失败";
+        return status || "--";
+      }
+
+      function businessApiStatusClass(status) {
+        return status === "succeeded" ? "ok" : "bad";
+      }
+
+      function businessApiSourceText(source) {
+        if (source === "business_api") return "业务后台";
+        if (source === "admin_debug") return "控制面联调";
+        return source || "--";
+      }
+
+      function businessApiObjectText(item) {
+        const parts = [];
+        if (item.request_id) parts.push(`请求 ${item.request_id}`);
+        if (item.user_id) parts.push(`用户 ${item.user_id}`);
+        if (item.game_id) parts.push(`游戏 ${item.game_id}`);
+        if (item.region_id) parts.push(`区服 ${item.region_id}`);
+        return parts.length ? parts.join(" / ") : "--";
+      }
+
+      function renderBusinessDebugResult(action, data) {
+        state.businessDebugResult = data;
+        els.businessDebugMeta.textContent = `${businessApiEndpointText(action)} / ${formatClock(data?.server_time || state.serverTime)}`;
+        els.businessDebugResult.classList.remove("empty");
+        els.businessDebugResult.textContent = JSON.stringify(data, null, 2);
+      }
+
+      function renderBusinessApiLogs(serverTime = state.serverTime) {
+        const logs = state.businessApiLogs || [];
+        els.businessApiLogMeta.textContent = logs.length
+          ? `${logs.length} 条业务日志 / 刷新 ${formatClock(serverTime)}`
+          : "暂无业务 API 调用日志";
+        if (!logs.length) {
+          els.businessApiLogRows.innerHTML = `<tr><td colspan="6" class="empty">暂无业务 API 调用日志。业务后台调用 status、sync-catalog、connect-intent 后会在这里留下记录。</td></tr>`;
+          renderPager("businessApiLogs", 0, els.businessApiLogPager);
+          return;
+        }
+
+        const visibleLogs = paginatedItems("businessApiLogs", logs);
+        els.businessApiLogRows.innerHTML = visibleLogs
+          .map((item) => {
+            const detail = JSON.stringify(item.detail || {}, null, 2);
+            const error = item.error_message ? `<div class="error-text">${escapeHtml(item.error_message)}</div>` : "";
+            return `
+              <tr>
+                <td>
+                  <div class="node-name">
+                    <span class="strong">${escapeHtml(businessApiEndpointText(item.endpoint))}</span>
+                    <span class="muted mono">#${item.id} / ${escapeHtml(item.action || "--")}</span>
+                  </div>
+                </td>
+                <td>${escapeHtml(businessApiSourceText(item.source))}</td>
+                <td>
+                  <span class="chip ${businessApiStatusClass(item.status)}">${escapeHtml(businessApiStatusText(item.status))}</span>
+                  <div class="cell-note">${item.http_status ? `HTTP ${item.http_status}` : "--"}</div>
+                </td>
+                <td>${escapeHtml(businessApiObjectText(item))}</td>
+                <td>
+                  <div class="mono age ${ageClass(item.created_at)}">${escapeHtml(ageText(item.created_at))}</div>
+                  <div class="cell-note">${escapeHtml(formatTime(item.created_at))}</div>
+                </td>
+                <td>
+                  ${error}
+                  <details class="audit-detail">
+                    <summary>查看详情</summary>
+                    <pre>${escapeHtml(detail)}</pre>
+                  </details>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+        renderPager("businessApiLogs", logs.length, els.businessApiLogPager);
+      }
+
       function renderAdminUsers(serverTime = state.serverTime) {
         const users = state.adminUsers || [];
         els.adminUserMeta.textContent = users.length
@@ -7281,6 +7583,65 @@
         const data = await api(`/api/admin/v1/audit-logs?${params.toString()}`);
         state.auditLogs = data.logs || [];
         renderAuditLogs(data.server_time);
+      }
+
+      function parseBusinessJson(element, errorElement) {
+        clearInlineError(errorElement);
+        try {
+          return JSON.parse(element.value);
+        } catch (error) {
+          showInlineError(errorElement, `JSON 格式不正确：${error.message}`);
+          throw error;
+        }
+      }
+
+      async function loadBusinessApiLogs({ silent = false } = {}) {
+        if (!silent && els.businessApiLogRows) {
+          els.businessApiLogRows.innerHTML = `<tr><td colspan="6"><span class="skeleton"></span></td></tr>`;
+        }
+        const params = new URLSearchParams({
+          limit: els.businessApiLimitFilter?.value || "100",
+        });
+        const endpoint = textOrNull(els.businessApiEndpointFilter?.value);
+        const status = textOrNull(els.businessApiStatusFilter?.value);
+        if (endpoint) params.set("endpoint", endpoint);
+        if (status) params.set("status", status);
+
+        const data = await api(`/api/admin/v1/business-api/logs?${params.toString()}`);
+        state.businessApiLogs = data.logs || [];
+        renderBusinessApiLogs(data.server_time);
+      }
+
+      async function runBusinessStatusCheck() {
+        const data = await api("/api/admin/v1/business-api/status");
+        renderBusinessDebugResult("status", data);
+        await loadBusinessApiLogs({ silent: true });
+      }
+
+      async function runBusinessSyncDebug() {
+        if (!assertCanWrite("发送业务同步联调")) return;
+        const payload = parseBusinessJson(els.businessSyncPayload, els.businessSyncError);
+        const data = await api("/api/admin/v1/business-api/sync-catalog", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        renderBusinessDebugResult("sync-catalog", data);
+        await Promise.all([
+          loadGames({ silent: true }),
+          loadRouteRules({ silent: true }),
+          loadBusinessApiLogs({ silent: true }),
+        ]);
+      }
+
+      async function runBusinessIntentDebug() {
+        if (!assertCanWrite("签发业务加速意图")) return;
+        const payload = parseBusinessJson(els.businessIntentPayload, els.businessIntentError);
+        const data = await api("/api/admin/v1/business-api/connect-intent", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        renderBusinessDebugResult("connect-intent", data);
+        await loadBusinessApiLogs({ silent: true });
       }
 
       async function loadHealthAlerts({ silent = false } = {}) {
@@ -8329,6 +8690,52 @@
           els.diagnosticResult.classList.add("empty");
           els.diagnosticResult.textContent = "诊断失败，请检查业务路由同步副本、节点状态、UDP 防火墙和请求参数。";
         });
+      });
+
+      els.businessStatusCheck.addEventListener("click", () => {
+        runBusinessStatusCheck().catch(showError);
+      });
+
+      els.businessRunSync.addEventListener("click", () => {
+        runBusinessSyncDebug().catch((error) => {
+          if (error instanceof SyntaxError) return;
+          showInlineError(els.businessSyncError, error.message);
+        });
+      });
+
+      els.businessRunIntent.addEventListener("click", () => {
+        runBusinessIntentDebug().catch((error) => {
+          if (error instanceof SyntaxError) return;
+          showInlineError(els.businessIntentError, error.message);
+        });
+      });
+
+      els.businessCopyResult.addEventListener("click", (event) => {
+        copyToClipboard(JSON.stringify(state.businessDebugResult || {}, null, 2), event.currentTarget);
+      });
+
+      els.refreshBusinessApiLogs.addEventListener("click", () => {
+        loadBusinessApiLogs().catch(showError);
+      });
+
+      els.applyBusinessApiLogFilter.addEventListener("click", () => {
+        resetPagination("businessApiLogs");
+        loadBusinessApiLogs().catch(showError);
+      });
+
+      els.businessApiEndpointFilter.addEventListener("change", () => {
+        resetPagination("businessApiLogs");
+        loadBusinessApiLogs().catch(showError);
+      });
+
+      els.businessApiStatusFilter.addEventListener("change", () => {
+        resetPagination("businessApiLogs");
+        loadBusinessApiLogs().catch(showError);
+      });
+
+      els.businessApiLimitFilter.addEventListener("change", () => {
+        resetPagination("businessApiLogs");
+        loadBusinessApiLogs().catch(showError);
       });
 
       els.systemDownloadForm.addEventListener("submit", (event) => {

@@ -19,7 +19,7 @@ use clap::Parser;
 use hmac::{Hmac, Mac};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{mysql::MySqlPoolOptions, FromRow, MySql, MySqlPool, QueryBuilder};
 use std::{
@@ -79,7 +79,7 @@ const ADMIN_SESSION_VERSION: &str = "v1";
 const ADMIN_SESSION_TTL_SEC: u64 = 8 * 60 * 60;
 const ADMIN_PASSWORD_SCHEME: &str = "pbkdf2-sha256";
 const ADMIN_PASSWORD_ITERATIONS: u32 = 120_000;
-const SYSTEM_DIAGNOSTIC_CORE_TABLES: [&str; 7] = [
+const SYSTEM_DIAGNOSTIC_CORE_TABLES: [&str; 8] = [
     "accel_nodes",
     "accel_games",
     "game_route_rules",
@@ -87,6 +87,7 @@ const SYSTEM_DIAGNOSTIC_CORE_TABLES: [&str; 7] = [
     "node_health_alerts",
     "node_operation_tasks",
     "system_settings",
+    "business_api_logs",
 ];
 const CONTROL_API_ENV_FILE: &str = "/etc/xaccel-control-api/control-api.env";
 const BUSINESS_SYNC_TOKEN_ENV_KEY: &str = "XACCEL_BUSINESS_SYNC_TOKEN";
@@ -931,6 +932,28 @@ struct AdminListAuditLogsResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct AdminListBusinessApiLogsQuery {
+    endpoint: Option<String>,
+    status: Option<String>,
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminListBusinessApiLogsResponse {
+    logs: Vec<AdminBusinessApiLogDetail>,
+    total: usize,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminBusinessApiDebugResponse<T: Serialize> {
+    status: &'static str,
+    action: &'static str,
+    result: T,
+    server_time: u64,
+}
+
+#[derive(Debug, Deserialize)]
 struct AdminListHealthAlertsQuery {
     node_id: Option<u64>,
     status: Option<String>,
@@ -1405,6 +1428,24 @@ struct AdminAuditLogDetail {
 }
 
 #[derive(Debug, Serialize)]
+struct AdminBusinessApiLogDetail {
+    id: u64,
+    endpoint: String,
+    action: String,
+    source: String,
+    request_id: Option<String>,
+    status: String,
+    http_status: Option<u64>,
+    user_id: Option<u64>,
+    game_id: Option<u64>,
+    region_id: Option<u64>,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    created_at: Option<u64>,
+    detail: Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
 struct ErrorBody {
     error: ErrorMessage,
 }
@@ -1509,6 +1550,24 @@ struct AdminAuditLogRow {
     actor_type: String,
     actor_id: Option<u64>,
     action: String,
+    created_at: Option<u64>,
+    detail_json: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct BusinessApiLogRow {
+    id: u64,
+    endpoint: String,
+    action: String,
+    source: String,
+    request_id: Option<String>,
+    status: String,
+    http_status: Option<u64>,
+    user_id: Option<u64>,
+    game_id: Option<u64>,
+    region_id: Option<u64>,
+    error_code: Option<String>,
+    error_message: Option<String>,
     created_at: Option<u64>,
     detail_json: Option<String>,
 }
@@ -1721,6 +1780,21 @@ struct BusinessSyncCatalog {
     route_rules: Vec<NormalizedRouteRule>,
 }
 
+struct NewBusinessApiLog<'a> {
+    endpoint: &'a str,
+    action: &'a str,
+    source: &'a str,
+    request_id: Option<&'a str>,
+    status: &'a str,
+    http_status: Option<u16>,
+    user_id: Option<u64>,
+    game_id: Option<u64>,
+    region_id: Option<u64>,
+    error_code: Option<&'a str>,
+    error_message: Option<&'a str>,
+    detail: Value,
+}
+
 #[derive(Debug)]
 struct HealthAlertSpec {
     key: &'static str,
@@ -1924,6 +1998,22 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/admin/v1/connectivity-diagnostic",
             post(admin_connectivity_diagnostic),
+        )
+        .route(
+            "/api/admin/v1/business-api/status",
+            get(admin_business_api_status),
+        )
+        .route(
+            "/api/admin/v1/business-api/sync-catalog",
+            post(admin_business_api_sync_catalog),
+        )
+        .route(
+            "/api/admin/v1/business-api/connect-intent",
+            post(admin_business_api_connect_intent),
+        )
+        .route(
+            "/api/admin/v1/business-api/logs",
+            get(admin_list_business_api_logs),
         )
         .route(
             "/api/admin/v1/system/diagnostics",
@@ -2131,6 +2221,7 @@ async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
     ensure_node_ssh_credentials_table(pool).await?;
     ensure_node_operation_tasks_table(pool).await?;
     ensure_node_health_alerts_table(pool).await?;
+    ensure_business_api_logs_table(pool).await?;
     seed_game_catalog_from_routes(pool).await?;
     Ok(())
 }
@@ -2173,6 +2264,37 @@ CREATE TABLE IF NOT EXISTS system_settings (
     .execute(pool)
     .await
     .context("failed to create system_settings")?;
+    Ok(())
+}
+
+async fn ensure_business_api_logs_table(pool: &MySqlPool) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+CREATE TABLE IF NOT EXISTS business_api_logs (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  endpoint VARCHAR(64) NOT NULL,
+  action VARCHAR(64) NOT NULL,
+  source VARCHAR(64) NOT NULL DEFAULT 'business_api',
+  request_id VARCHAR(128) NULL,
+  status ENUM('succeeded', 'failed') NOT NULL,
+  http_status SMALLINT UNSIGNED NULL,
+  user_id BIGINT UNSIGNED NULL,
+  game_id BIGINT UNSIGNED NULL,
+  region_id BIGINT UNSIGNED NULL,
+  detail_json JSON NULL,
+  error_code VARCHAR(64) NULL,
+  error_message TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_endpoint_created (endpoint, created_at),
+  INDEX idx_status_created (status, created_at),
+  INDEX idx_game_created (game_id, created_at),
+  INDEX idx_request_id (request_id)
+)
+"#,
+    )
+    .execute(pool)
+    .await
+    .context("failed to create business_api_logs")?;
     Ok(())
 }
 
@@ -2960,7 +3082,35 @@ async fn business_sync_catalog(
 ) -> Result<Json<BusinessSyncCatalogResponse>, AppError> {
     require_business_sync(&state, &headers)?;
     let catalog = normalize_business_sync_catalog(request)?;
+    let log_source = catalog.source.clone();
+    let log_revision = catalog.revision.clone();
+    let log_games = catalog.games.len();
+    let log_regions = catalog.regions.len();
+    let log_routes = catalog.route_rules.len();
     let response = sync_business_catalog(&state.pool, catalog).await?;
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "sync-catalog",
+            action: "business.sync_catalog",
+            source: &log_source,
+            request_id: log_revision.as_deref(),
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "games_upserted": log_games,
+                "regions_upserted": log_regions,
+                "route_rules_upserted": log_routes,
+                "revision": log_revision,
+            }),
+        },
+    )
+    .await;
     Ok(Json(response))
 }
 
@@ -2974,9 +3124,39 @@ async fn business_connect_intent(
     let request_id = request.request_id.clone();
     let entitlement_id = request.entitlement_id.clone();
     let client_version = request.client_version.clone();
+    let log_user_id = request.user_id;
+    let log_game_id = request.game_id;
+    let log_region_id = request.region_id;
     let connect_request = request.into_connect_intent_request();
     let connect_intent =
         issue_connect_intent(&state.pool, state.token_ttl_sec, connect_request).await?;
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "connect-intent",
+            action: "business.connect_intent",
+            source: "business_api",
+            request_id: request_id.as_deref(),
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: Some(log_user_id),
+            game_id: Some(log_game_id),
+            region_id: log_region_id,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "entitlement_id": entitlement_id.clone(),
+                "client_version": client_version.clone(),
+                "candidate_count": connect_intent.candidates.len(),
+                "candidate_node_ids": connect_intent
+                    .candidates
+                    .iter()
+                    .map(|candidate| candidate.node_id)
+                    .collect::<Vec<_>>(),
+            }),
+        },
+    )
+    .await;
 
     Ok(Json(BusinessConnectIntentResponse {
         status: "ok",
@@ -2993,6 +3173,37 @@ async fn business_status(
     headers: HeaderMap,
 ) -> Result<Json<BusinessStatusResponse>, AppError> {
     require_business_sync(&state, &headers)?;
+    let response = build_business_status_response(&state).await?;
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "status",
+            action: "business.status",
+            source: "business_api",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "nodes_total": response.nodes_total,
+                "nodes_online": response.nodes_online,
+                "games_enabled": response.games_enabled,
+                "routes_enabled": response.routes_enabled,
+            }),
+        },
+    )
+    .await;
+
+    Ok(Json(response))
+}
+
+async fn build_business_status_response(
+    state: &AppState,
+) -> Result<BusinessStatusResponse, AppError> {
     let nodes_total = system_count(&state.pool, "SELECT COUNT(*) FROM accel_nodes")
         .await
         .map_err(AppError::database)?;
@@ -3015,7 +3226,7 @@ async fn business_status(
     .await
     .map_err(AppError::database)?;
 
-    Ok(Json(BusinessStatusResponse {
+    Ok(BusinessStatusResponse {
         status: "ok",
         version: VERSION,
         catalog_owner: "business_backend",
@@ -3025,6 +3236,169 @@ async fn business_status(
         nodes_online,
         games_enabled,
         routes_enabled,
+        server_time: now_unix(),
+    })
+}
+
+async fn admin_business_api_status(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<AdminBusinessApiDebugResponse<BusinessStatusResponse>>, AppError> {
+    require_admin(&state, &headers)?;
+    let response = build_business_status_response(&state).await?;
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "status",
+            action: "admin.business.status",
+            source: "admin_debug",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "nodes_total": response.nodes_total,
+                "nodes_online": response.nodes_online,
+                "games_enabled": response.games_enabled,
+                "routes_enabled": response.routes_enabled,
+            }),
+        },
+    )
+    .await;
+    Ok(Json(AdminBusinessApiDebugResponse {
+        status: "ok",
+        action: "status",
+        result: response,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_business_api_sync_catalog(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<BusinessSyncCatalogRequest>,
+) -> Result<Json<AdminBusinessApiDebugResponse<BusinessSyncCatalogResponse>>, AppError> {
+    require_admin_write(&state, &headers)?;
+    let catalog = normalize_business_sync_catalog(request)?;
+    let log_source = catalog.source.clone();
+    let log_revision = catalog.revision.clone();
+    let log_games = catalog.games.len();
+    let log_regions = catalog.regions.len();
+    let log_routes = catalog.route_rules.len();
+    let response = sync_business_catalog(&state.pool, catalog).await?;
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "sync-catalog",
+            action: "admin.business.sync_catalog",
+            source: "admin_debug",
+            request_id: log_revision.as_deref(),
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "source": log_source,
+                "revision": log_revision,
+                "games_upserted": log_games,
+                "regions_upserted": log_regions,
+                "route_rules_upserted": log_routes,
+            }),
+        },
+    )
+    .await;
+    Ok(Json(AdminBusinessApiDebugResponse {
+        status: "ok",
+        action: "sync-catalog",
+        result: response,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_business_api_connect_intent(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<BusinessConnectIntentRequest>,
+) -> Result<Json<AdminBusinessApiDebugResponse<BusinessConnectIntentResponse>>, AppError> {
+    require_admin_write(&state, &headers)?;
+    validate_business_connect_intent_request(&request)?;
+    let request_id = request.request_id.clone();
+    let entitlement_id = request.entitlement_id.clone();
+    let client_version = request.client_version.clone();
+    let log_user_id = request.user_id;
+    let log_game_id = request.game_id;
+    let log_region_id = request.region_id;
+    let connect_request = request.into_connect_intent_request();
+    let connect_intent =
+        issue_connect_intent(&state.pool, state.token_ttl_sec, connect_request).await?;
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "connect-intent",
+            action: "admin.business.connect_intent",
+            source: "admin_debug",
+            request_id: request_id.as_deref(),
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: Some(log_user_id),
+            game_id: Some(log_game_id),
+            region_id: log_region_id,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "entitlement_id": entitlement_id.clone(),
+                "client_version": client_version.clone(),
+                "candidate_count": connect_intent.candidates.len(),
+                "candidate_node_ids": connect_intent
+                    .candidates
+                    .iter()
+                    .map(|candidate| candidate.node_id)
+                    .collect::<Vec<_>>(),
+            }),
+        },
+    )
+    .await;
+    let response = BusinessConnectIntentResponse {
+        status: "ok",
+        request_id,
+        entitlement_id,
+        client_version,
+        connect_intent,
+        server_time: now_unix(),
+    };
+    Ok(Json(AdminBusinessApiDebugResponse {
+        status: "ok",
+        action: "connect-intent",
+        result: response,
+        server_time: now_unix(),
+    }))
+}
+
+async fn admin_list_business_api_logs(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<AdminListBusinessApiLogsQuery>,
+) -> Result<Json<AdminListBusinessApiLogsResponse>, AppError> {
+    require_admin(&state, &headers)?;
+    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    let endpoint = normalize_business_log_endpoint_filter(query.endpoint.as_deref())?;
+    let status = normalize_business_log_status_filter(query.status.as_deref())?;
+    let logs = select_business_api_logs(&state.pool, endpoint.as_deref(), status.as_deref(), limit)
+        .await?
+        .into_iter()
+        .map(AdminBusinessApiLogDetail::from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Json(AdminListBusinessApiLogsResponse {
+        total: logs.len(),
+        logs,
         server_time: now_unix(),
     }))
 }
@@ -5206,6 +5580,51 @@ WHERE 1 = 1
 
     builder
         .build_query_as::<AdminAuditLogRow>()
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::database)
+}
+
+async fn select_business_api_logs(
+    pool: &MySqlPool,
+    endpoint: Option<&str>,
+    status: Option<&str>,
+    limit: u32,
+) -> Result<Vec<BusinessApiLogRow>, AppError> {
+    let mut builder = QueryBuilder::<MySql>::new(
+        r#"
+SELECT
+  id,
+  endpoint,
+  action,
+  source,
+  request_id,
+  status,
+  CAST(http_status AS UNSIGNED) AS http_status,
+  user_id,
+  game_id,
+  region_id,
+  error_code,
+  error_message,
+  CAST(UNIX_TIMESTAMP(created_at) AS UNSIGNED) AS created_at,
+  CAST(detail_json AS CHAR) AS detail_json
+FROM business_api_logs
+WHERE 1 = 1
+"#,
+    );
+    if let Some(endpoint) = endpoint {
+        builder.push(" AND endpoint = ");
+        builder.push_bind(endpoint);
+    }
+    if let Some(status) = status {
+        builder.push(" AND status = ");
+        builder.push_bind(status);
+    }
+    builder.push(" ORDER BY id DESC LIMIT ");
+    builder.push_bind(limit);
+
+    builder
+        .build_query_as::<BusinessApiLogRow>()
         .fetch_all(pool)
         .await
         .map_err(AppError::database)
@@ -7651,6 +8070,56 @@ INSERT INTO node_audit_logs (
     Ok(())
 }
 
+async fn record_business_api_log_best_effort(pool: &MySqlPool, log: NewBusinessApiLog<'_>) {
+    if let Err(error) = insert_business_api_log(pool, log).await {
+        error!(error = %error.message, "failed to record business api log");
+    }
+}
+
+async fn insert_business_api_log(
+    pool: &MySqlPool,
+    log: NewBusinessApiLog<'_>,
+) -> Result<(), AppError> {
+    let error_message = log
+        .error_message
+        .map(|message| truncate_chars(message, MAX_STORED_LAST_ERROR_CHARS));
+    sqlx::query(
+        r#"
+INSERT INTO business_api_logs (
+  endpoint,
+  action,
+  source,
+  request_id,
+  status,
+  http_status,
+  user_id,
+  game_id,
+  region_id,
+  detail_json,
+  error_code,
+  error_message,
+  created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+"#,
+    )
+    .bind(log.endpoint)
+    .bind(log.action)
+    .bind(log.source)
+    .bind(log.request_id)
+    .bind(log.status)
+    .bind(log.http_status)
+    .bind(log.user_id)
+    .bind(log.game_id)
+    .bind(log.region_id)
+    .bind(log.detail.to_string())
+    .bind(log.error_code)
+    .bind(error_message.as_deref())
+    .execute(pool)
+    .await
+    .map_err(AppError::database)?;
+    Ok(())
+}
+
 async fn select_node_secret(pool: &MySqlPool, node_id: u64) -> Result<Option<String>, AppError> {
     sqlx::query_scalar::<_, String>(
         r#"
@@ -8120,6 +8589,32 @@ fn normalize_business_sync_catalog(
         regions,
         route_rules,
     })
+}
+
+fn normalize_business_log_endpoint_filter(value: Option<&str>) -> Result<Option<String>, AppError> {
+    let Some(value) = normalize_optional_text(value, 64)? else {
+        return Ok(None);
+    };
+    match value.as_str() {
+        "status" | "sync-catalog" | "connect-intent" => Ok(Some(value)),
+        _ => Err(AppError::bad_request(
+            "invalid_business_log_endpoint",
+            "endpoint must be status, sync-catalog, or connect-intent",
+        )),
+    }
+}
+
+fn normalize_business_log_status_filter(value: Option<&str>) -> Result<Option<String>, AppError> {
+    let Some(value) = normalize_optional_text(value, 32)? else {
+        return Ok(None);
+    };
+    match value.as_str() {
+        "succeeded" | "failed" => Ok(Some(value)),
+        _ => Err(AppError::bad_request(
+            "invalid_business_log_status",
+            "status must be succeeded or failed",
+        )),
+    }
 }
 
 fn normalize_business_game(request: &BusinessSyncGame) -> Result<NormalizedGame, AppError> {
@@ -10426,6 +10921,38 @@ impl AdminAuditLogDetail {
     }
 }
 
+impl AdminBusinessApiLogDetail {
+    fn from_row(row: BusinessApiLogRow) -> Result<Self, AppError> {
+        let detail = row
+            .detail_json
+            .as_deref()
+            .map(serde_json::from_str::<Value>)
+            .transpose()
+            .map_err(|error| {
+                AppError::internal(anyhow::anyhow!(
+                    "failed to decode business api log detail_json: {error}"
+                ))
+            })?;
+
+        Ok(Self {
+            id: row.id,
+            endpoint: row.endpoint,
+            action: row.action,
+            source: row.source,
+            request_id: row.request_id,
+            status: row.status,
+            http_status: row.http_status,
+            user_id: row.user_id,
+            game_id: row.game_id,
+            region_id: row.region_id,
+            error_code: row.error_code,
+            error_message: row.error_message,
+            created_at: row.created_at,
+            detail,
+        })
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         (
@@ -11519,14 +12046,22 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("method: \"PATCH\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("method: \"DELETE\""));
         assert!(ADMIN_DASHBOARD_HTML.contains("bootstrap-token"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("data-view=\"businessApi\""));
+        assert!(ADMIN_DASHBOARD_HTML.contains("businessApiLogRows"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("businessApiLogPager"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/business-api/status"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/business-api/sync-catalog"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/business-api/connect-intent"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/business-api/logs"));
     }
 
     #[test]
     fn system_diagnostics_use_current_core_table_names() {
         assert!(SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"node_operation_tasks"));
         assert!(SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"system_settings"));
+        assert!(SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"business_api_logs"));
         assert!(!SYSTEM_DIAGNOSTIC_CORE_TABLES.contains(&"operation_tasks"));
-        assert_eq!(SYSTEM_DIAGNOSTIC_CORE_TABLES.len(), 7);
+        assert_eq!(SYSTEM_DIAGNOSTIC_CORE_TABLES.len(), 8);
     }
 
     #[test]
