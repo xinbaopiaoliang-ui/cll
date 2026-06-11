@@ -1,0 +1,1593 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "XAccel 控制面 - 业务后台对接 API",
+    "description": "业务后台调用控制面的专用接口。业务后台负责游戏、分类、区服、线路、用户、订单和权益；控制面负责节点运维、调度、节点凭证签发和转发执行副本。",
+    "version": "0.60.0"
+  },
+  "servers": [
+    {
+      "url": "{{baseUrl}}",
+      "description": "Apifox 环境变量，例如 http://103.201.131.99:18080"
+    },
+    {
+      "url": "http://103.201.131.99:18080",
+      "description": "当前控制面公网地址"
+    },
+    {
+      "url": "http://127.0.0.1:18080",
+      "description": "控制面本机调试地址"
+    }
+  ],
+  "tags": [
+    {
+      "name": "业务后台对接",
+      "description": "业务后台同步节点、游戏、区服、线路，并签发客户端加速意图。"
+    }
+  ],
+  "paths": {
+    "/api/business/v1/status": {
+      "get": {
+        "tags": ["业务后台对接"],
+        "summary": "业务 API 状态检查",
+        "description": "业务后台启动或定时探活时调用，用于确认业务 Token、控制面、节点和路由执行副本是否可用。",
+        "operationId": "businessStatus",
+        "security": [
+          {
+            "BusinessBearerAuth": []
+          },
+          {
+            "BusinessSyncTokenHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "控制面业务 API 可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessStatusResponse"
+                },
+                "example": {
+                  "status": "ok",
+                  "version": "0.60.0",
+                  "catalog_owner": "business_backend",
+                  "control_role": "node_operations",
+                  "business_api_enabled": true,
+                  "nodes_total": 2,
+                  "nodes_online": 2,
+                  "games_enabled": 1,
+                  "routes_enabled": 2,
+                  "server_time": 1781070000
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/business/v1/nodes": {
+      "post": {
+        "tags": ["业务后台对接"],
+        "summary": "新增节点基础信息",
+        "description": "业务后台登记节点基础资料。这个接口只创建节点记录，不保存 SSH 密码，也不远程安装节点内核。创建成功后节点状态为 pending_install，后续由控制面生成安装令牌或执行一键部署。",
+        "operationId": "businessCreateNode",
+        "security": [
+          {
+            "BusinessBearerAuth": []
+          },
+          {
+            "BusinessSyncTokenHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusinessCreateNodeRequest"
+              },
+              "example": {
+                "name": "香港节点-01",
+                "server_ip": "47.83.160.126",
+                "server_port": 666,
+                "area": "HK",
+                "tag": "default",
+                "bandwidth_quality": "normal",
+                "disable_quic": false,
+                "is_support_ipv6": false,
+                "relay_server_ip": null,
+                "relay_server_port": null,
+                "telecom_ip": null,
+                "mobile_ip": null,
+                "unicom_ip": null
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "节点基础信息创建成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessCreateNodeResponse"
+                },
+                "example": {
+                  "status": "ok",
+                  "install_state": "pending_install",
+                  "next_step": "generate bootstrap token or deploy node from control panel",
+                  "node": {
+                    "id": 3,
+                    "name": "香港节点-01",
+                    "endpoint": "47.83.160.126:666",
+                    "server_ip": "47.83.160.126",
+                    "server_port": 666,
+                    "relay_server_ip": null,
+                    "relay_server_port": null,
+                    "is_support_ipv6": false,
+                    "area": "HK",
+                    "tag": "default",
+                    "bandwidth_quality": "normal",
+                    "disable_quic": false,
+                    "telecom_ip": null,
+                    "mobile_ip": null,
+                    "unicom_ip": null,
+                    "status": "pending_install",
+                    "kernel_version": null,
+                    "config_revision": 1,
+                    "last_seen_at": null,
+                    "last_report_at": null,
+                    "latest_report": null,
+                    "ssh_credential": {
+                      "configured": false,
+                      "host": null,
+                      "port": null,
+                      "username": null,
+                      "auth_status": null,
+                      "last_error": null,
+                      "last_checked_at": null
+                    }
+                  },
+                  "server_time": 1781070000
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/business/v1/sync-catalog": {
+      "post": {
+        "tags": ["业务后台对接"],
+        "summary": "同步游戏、分类、区服和线路",
+        "description": "业务后台把游戏、分类、区服和线路执行副本同步到控制面。推荐使用新版嵌套格式：games[].categories、games[].regions、games[].regions[].routes。旧版顶层 regions 和 route_rules 仍兼容。未传的数据不会删除，下线请传 status=disabled。",
+        "operationId": "businessSyncCatalog",
+        "security": [
+          {
+            "BusinessBearerAuth": []
+          },
+          {
+            "BusinessSyncTokenHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusinessSyncCatalogRequest"
+              },
+              "example": {
+                "source": "business-admin",
+                "revision": "2026-06-10T11:40:00+08:00",
+                "games": [
+                  {
+                    "game_id": 8888,
+                    "name": "英雄联盟",
+                    "platform": "pc",
+                    "category": "moba",
+                    "categories": ["moba", "competitive"],
+                    "status": "enabled",
+                    "regions": [
+                      {
+                        "region_id": 1,
+                        "name": "电信一区",
+                        "area": "HK",
+                        "status": "enabled",
+                        "routes": [
+                          {
+                            "external_id": "route-8888-hk-node2",
+                            "node_id": 2,
+                            "target_addr": "127.0.0.1:7777",
+                            "protocol": "udp",
+                            "priority": 10,
+                            "status": "enabled"
+                          },
+                          {
+                            "external_id": "route-8888-hk-node3",
+                            "node_id": 3,
+                            "target_addr": "127.0.0.1:7777",
+                            "protocol": "udp",
+                            "priority": 20,
+                            "status": "enabled"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "同步完成",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessSyncCatalogResponse"
+                },
+                "example": {
+                  "status": "ok",
+                  "source": "business-admin",
+                  "revision": "2026-06-10T11:40:00+08:00",
+                  "games_upserted": 1,
+                  "categories_upserted": 2,
+                  "regions_upserted": 1,
+                  "route_rules_upserted": 2,
+                  "server_time": 1781070000
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/business/v1/connect-intent": {
+      "post": {
+        "tags": ["业务后台对接"],
+        "summary": "签发客户端加速意图",
+        "description": "业务后台完成登录、套餐、设备和游戏权限校验后调用。控制面返回候选节点、节点短期 token 和路由目标。客户端拿到候选节点后连接节点，不直接访问控制面管理接口。",
+        "operationId": "businessConnectIntent",
+        "security": [
+          {
+            "BusinessBearerAuth": []
+          },
+          {
+            "BusinessSyncTokenHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusinessConnectIntentRequest"
+              },
+              "example": {
+                "request_id": "req-20260610-0001",
+                "entitlement_id": "vip-order-1001",
+                "user_id": 1001,
+                "device_id": "pc-001",
+                "game_id": 8888,
+                "region_id": 1,
+                "platform": "pc",
+                "client_isp": "telecom",
+                "client_ip": "127.0.0.1",
+                "bandwidth_quality": "fast",
+                "client_version": "0.1.0"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "签发成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessConnectIntentResponse"
+                },
+                "example": {
+                  "status": "ok",
+                  "request_id": "req-20260610-0001",
+                  "entitlement_id": "vip-order-1001",
+                  "client_version": "0.1.0",
+                  "connect_intent": {
+                    "intent_id": "intent-1001-8888-1781070000-2",
+                    "ttl_sec": 120,
+                    "client": {
+                      "platform": "pc",
+                      "client_isp": "telecom",
+                      "client_ip": "127.0.0.1",
+                      "bandwidth_quality": "fast",
+                      "region_id": 1
+                    },
+                    "candidates": [
+                      {
+                        "node_id": 2,
+                        "area": "HK",
+                        "tag": "default",
+                        "host": "47.83.160.126",
+                        "port": 666,
+                        "transports": ["udp"],
+                        "bandwidth_quality": "normal",
+                        "probe": {
+                          "udp": true,
+                          "tcp": true,
+                          "protocol": "xaccel/1"
+                        },
+                        "route": {
+                          "target_addr": "127.0.0.1:7777",
+                          "protocol": "udp",
+                          "region_id": 1,
+                          "region_name": "电信一区"
+                        },
+                        "credential": {
+                          "token": "xat.v1.xxx",
+                          "expires_at": 1781070120,
+                          "intent_id": "intent-1001-8888-1781070000-2",
+                          "route": {
+                            "target_addr": "127.0.0.1:7777",
+                            "protocol": "udp",
+                            "region_id": 1,
+                            "region_name": "电信一区"
+                          }
+                        },
+                        "scheduler": {
+                          "route_priority": 10,
+                          "latest_active_sessions": 0,
+                          "latest_udp_sessions": 0,
+                          "latest_tcp_sessions": 0,
+                          "latest_reported_at": 1781069990,
+                          "latest_report_age_sec": 10,
+                          "report_fresh": true
+                        }
+                      }
+                    ]
+                  },
+                  "server_time": 1781070000
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NoCandidate"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BusinessBearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "XACCEL_BUSINESS_SYNC_TOKEN",
+        "description": "推荐方式：Authorization: Bearer <业务后台 Token>"
+      },
+      "BusinessSyncTokenHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Business-Sync-Token",
+        "description": "兼容方式：X-Business-Sync-Token: <业务后台 Token>"
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "请求参数错误",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": {
+                "code": "invalid_game",
+                "message": "game_id is invalid"
+              }
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "业务后台 Token 缺失或错误",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "required": {
+                "summary": "未传 Token",
+                "value": {
+                  "error": {
+                    "code": "business_sync_auth_required",
+                    "message": "business sync token is required"
+                  }
+                }
+              },
+              "failed": {
+                "summary": "Token 错误",
+                "value": {
+                  "error": {
+                    "code": "business_sync_auth_failed",
+                    "message": "business sync token is invalid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "资源冲突，例如相同公网 IP 和入口端口的节点已经存在。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": {
+                "code": "node_endpoint_exists",
+                "message": "a node with the same server_ip and server_port already exists"
+              }
+            }
+          }
+        }
+      },
+      "NoCandidate": {
+        "description": "没有可用候选节点或路由",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": {
+                "code": "no_candidate",
+                "message": "no available node candidate"
+              }
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "控制面内部错误",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": {
+                "code": "internal_error",
+                "message": "database operation failed"
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "BusinessStatusResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "catalog_owner",
+          "control_role",
+          "business_api_enabled",
+          "nodes_total",
+          "nodes_online",
+          "games_enabled",
+          "routes_enabled",
+          "server_time"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok",
+            "description": "接口调用结果。ok 表示控制面业务 API 可用。"
+          },
+          "version": {
+            "type": "string",
+            "example": "0.60.0",
+            "description": "控制面当前版本号。"
+          },
+          "catalog_owner": {
+            "type": "string",
+            "enum": ["business_backend"],
+            "example": "business_backend",
+            "description": "游戏、区服、线路主数据归属。固定为 business_backend。"
+          },
+          "control_role": {
+            "type": "string",
+            "enum": ["node_operations"],
+            "example": "node_operations",
+            "description": "控制面职责。固定为 node_operations。"
+          },
+          "business_api_enabled": {
+            "type": "boolean",
+            "example": true,
+            "description": "业务 API Token 是否已配置。"
+          },
+          "nodes_total": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 2,
+            "description": "控制面节点总数。"
+          },
+          "nodes_online": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 2,
+            "description": "当前在线节点数量。"
+          },
+          "games_enabled": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1,
+            "description": "启用中的游戏数量。"
+          },
+          "routes_enabled": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 2,
+            "description": "启用中的线路数量，connect-intent 依赖这些路由。"
+          },
+          "server_time": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1781070000,
+            "description": "控制面 Unix 秒级时间戳。"
+          }
+        }
+      },
+      "BusinessCreateNodeRequest": {
+        "type": "object",
+        "required": ["name", "server_ip", "server_port"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "节点显示名称，建议使用地区或机房名。",
+            "example": "香港节点-01"
+          },
+          "server_ip": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "节点公网 IP，客户端最终连接这个地址。",
+            "example": "47.83.160.126"
+          },
+          "server_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "节点入口端口，节点内核会监听 TCP/UDP 这个端口。",
+            "example": 666
+          },
+          "relay_server_ip": {
+            "type": "string",
+            "nullable": true,
+            "description": "中转服务器 IP，没有中转时传 null 或不传。",
+            "example": null
+          },
+          "relay_server_port": {
+            "type": "integer",
+            "format": "uint16",
+            "nullable": true,
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "中转端口。只有 relay_server_ip 存在时才允许传。",
+            "example": null
+          },
+          "is_support_ipv6": {
+            "type": "boolean",
+            "default": false,
+            "description": "节点是否支持 IPv6。",
+            "example": false
+          },
+          "bandwidth_quality": {
+            "type": "string",
+            "enum": ["fast", "normal", "slow"],
+            "default": "normal",
+            "description": "节点带宽质量标记。调度时可作为排序参考。",
+            "example": "normal"
+          },
+          "disable_quic": {
+            "type": "boolean",
+            "default": false,
+            "description": "是否禁用 QUIC。游戏加速节点通常保持 false。",
+            "example": false
+          },
+          "area": {
+            "type": "string",
+            "maxLength": 32,
+            "default": "UNKNOWN",
+            "description": "节点区域，例如 HK、JP、SG、US。",
+            "example": "HK"
+          },
+          "telecom_ip": {
+            "type": "string",
+            "nullable": true,
+            "description": "电信线路 IP，没有就传 null 或不传。",
+            "example": null
+          },
+          "mobile_ip": {
+            "type": "string",
+            "nullable": true,
+            "description": "移动线路 IP，没有就传 null 或不传。",
+            "example": null
+          },
+          "unicom_ip": {
+            "type": "string",
+            "nullable": true,
+            "description": "联通线路 IP，没有就传 null 或不传。",
+            "example": null
+          },
+          "tag": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 64,
+            "description": "节点标签，例如 default、premium、HK。",
+            "example": "default"
+          }
+        }
+      },
+      "BusinessCreateNodeResponse": {
+        "type": "object",
+        "required": ["status", "node", "install_state", "next_step", "server_time"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "node": {
+            "$ref": "#/components/schemas/BusinessNodeSummary"
+          },
+          "install_state": {
+            "type": "string",
+            "enum": ["pending_install"],
+            "example": "pending_install",
+            "description": "节点基础信息已创建，但还没有安装节点内核。"
+          },
+          "next_step": {
+            "type": "string",
+            "example": "generate bootstrap token or deploy node from control panel",
+            "description": "下一步处理建议。"
+          },
+          "server_time": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1781070000
+          }
+        }
+      },
+      "BusinessNodeSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "endpoint",
+          "server_ip",
+          "server_port",
+          "is_support_ipv6",
+          "area",
+          "bandwidth_quality",
+          "disable_quic",
+          "status",
+          "config_revision",
+          "ssh_credential"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "uint64",
+            "description": "控制面节点 ID。后续同步路由时 routes[].node_id 使用这个值。",
+            "example": 3
+          },
+          "name": {
+            "type": "string",
+            "example": "香港节点-01"
+          },
+          "endpoint": {
+            "type": "string",
+            "example": "47.83.160.126:666"
+          },
+          "server_ip": {
+            "type": "string",
+            "example": "47.83.160.126"
+          },
+          "server_port": {
+            "type": "integer",
+            "format": "uint16",
+            "example": 666
+          },
+          "relay_server_ip": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "relay_server_port": {
+            "type": "integer",
+            "format": "uint16",
+            "nullable": true,
+            "example": null
+          },
+          "is_support_ipv6": {
+            "type": "boolean",
+            "example": false
+          },
+          "area": {
+            "type": "string",
+            "example": "HK"
+          },
+          "tag": {
+            "type": "string",
+            "nullable": true,
+            "example": "default"
+          },
+          "bandwidth_quality": {
+            "type": "string",
+            "enum": ["fast", "normal", "slow"],
+            "example": "normal"
+          },
+          "disable_quic": {
+            "type": "boolean",
+            "example": false
+          },
+          "telecom_ip": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "mobile_ip": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "unicom_ip": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "status": {
+            "type": "string",
+            "example": "pending_install"
+          },
+          "kernel_version": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "config_revision": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1
+          },
+          "last_seen_at": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true,
+            "example": null
+          },
+          "last_report_at": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true,
+            "example": null
+          },
+          "latest_report": {
+            "nullable": true,
+            "description": "最新节点上报摘要。新建未安装节点一般为 null。",
+            "example": null
+          },
+          "ssh_credential": {
+            "$ref": "#/components/schemas/BusinessNodeSshCredentialSummary"
+          }
+        }
+      },
+      "BusinessNodeSshCredentialSummary": {
+        "type": "object",
+        "required": ["configured"],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "是否已经在控制面保存 SSH 凭据。业务新增节点接口不会保存 SSH。",
+            "example": false
+          },
+          "host": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "nullable": true,
+            "example": null
+          },
+          "username": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "auth_status": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "last_error": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "last_checked_at": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true,
+            "example": null
+          }
+        }
+      },
+      "BusinessSyncCatalogRequest": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "maxLength": 64,
+            "default": "business",
+            "description": "同步来源标识，例如 business-admin、xboard、billing-api。",
+            "example": "business-admin"
+          },
+          "revision": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "业务后台本次同步版本号，可填业务数据版本、发布时间或 ISO 时间。",
+            "example": "2026-06-10T11:40:00+08:00"
+          },
+          "games": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncGame"
+            },
+            "default": [],
+            "description": "推荐每个 game 内嵌 categories、regions 和 routes。"
+          },
+          "regions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRegion"
+            },
+            "default": [],
+            "description": "兼容旧版的顶层区服列表。顶层传入时 game_id 必填。"
+          },
+          "route_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRouteRule"
+            },
+            "default": [],
+            "description": "兼容旧版的顶层线路规则列表，也兼容字段名 routes。顶层传入时 game_id 必填。"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRouteRule"
+            },
+            "default": [],
+            "description": "route_rules 的别名。"
+          }
+        }
+      },
+      "BusinessSyncGame": {
+        "type": "object",
+        "required": ["game_id", "name"],
+        "properties": {
+          "game_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1,
+            "description": "业务后台游戏 ID，客户端 connect-intent 也使用这个 ID。",
+            "example": 8888
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "游戏名称。",
+            "example": "英雄联盟"
+          },
+          "platform": {
+            "type": "string",
+            "enum": ["pc", "android", "ios", "multi"],
+            "default": "pc",
+            "description": "游戏平台。",
+            "example": "pc"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "兼容旧版的单分类字段。若同时传 categories，category 会作为主分类并排第一位。",
+            "example": "moba"
+          },
+          "categories": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "description": "游戏可同时归属多个分类。控制面会去空、去重，并写入多分类关系表。",
+            "example": ["moba", "competitive"]
+          },
+          "icon_url": {
+            "type": "string",
+            "maxLength": 512,
+            "nullable": true,
+            "description": "游戏图标 URL，可不传。",
+            "example": null
+          },
+          "status": {
+            "type": "string",
+            "enum": ["enabled", "disabled"],
+            "default": "enabled",
+            "description": "游戏状态。",
+            "example": "enabled"
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 512,
+            "nullable": true,
+            "description": "备注。",
+            "example": null
+          },
+          "regions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRegion"
+            },
+            "default": [],
+            "description": "游戏内嵌区服列表。放在 game 下时 region.game_id 可省略。"
+          },
+          "route_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRouteRule"
+            },
+            "default": [],
+            "description": "游戏级线路列表，也兼容字段名 routes。"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRouteRule"
+            },
+            "default": [],
+            "description": "route_rules 的别名。"
+          }
+        }
+      },
+      "BusinessSyncRegion": {
+        "type": "object",
+        "required": ["region_id", "name"],
+        "properties": {
+          "game_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1,
+            "description": "所属游戏 ID。顶层 regions 必填；放在 games[].regions 时可省略。",
+            "example": 8888
+          },
+          "region_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1,
+            "description": "业务后台区服 ID。同一个游戏下稳定唯一。",
+            "example": 1
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "区服名称。",
+            "example": "电信一区"
+          },
+          "area": {
+            "type": "string",
+            "maxLength": 32,
+            "nullable": true,
+            "description": "区服区域标记。",
+            "example": "HK"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["enabled", "disabled"],
+            "default": "enabled",
+            "description": "区服状态。",
+            "example": "enabled"
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 512,
+            "nullable": true,
+            "description": "区服备注。",
+            "example": null
+          },
+          "route_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRouteRule"
+            },
+            "default": [],
+            "description": "区服内嵌线路列表，也兼容字段名 routes。"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessSyncRouteRule"
+            },
+            "default": [],
+            "description": "route_rules 的别名。"
+          }
+        }
+      },
+      "BusinessSyncRouteRule": {
+        "type": "object",
+        "required": ["node_id", "target_addr"],
+        "properties": {
+          "external_id": {
+            "type": "string",
+            "maxLength": 128,
+            "nullable": true,
+            "description": "业务后台线路唯一 ID。建议必传，后续修改同一路由时保持一致。",
+            "example": "route-8888-hk-node2"
+          },
+          "game_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1,
+            "description": "所属游戏 ID。顶层 route_rules 必填；嵌套在 game 或 region 下时可省略。",
+            "example": 8888
+          },
+          "game_name": {
+            "type": "string",
+            "maxLength": 128,
+            "nullable": true,
+            "description": "游戏名称快照，可省略，控制面会使用父级游戏名称。",
+            "example": "英雄联盟"
+          },
+          "region_id": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true,
+            "description": "所属区服 ID。嵌套在 region 下时可省略。",
+            "example": 1
+          },
+          "region_name": {
+            "type": "string",
+            "maxLength": 128,
+            "nullable": true,
+            "description": "区服名称快照，可省略，控制面会使用父级区服名称。",
+            "example": "电信一区"
+          },
+          "node_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1,
+            "description": "控制面节点 ID，来自新增节点接口返回的 node.id。",
+            "example": 2
+          },
+          "target_addr": {
+            "type": "string",
+            "description": "节点最终转发到的游戏目标地址，格式 host:port。",
+            "example": "127.0.0.1:7777"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": ["udp"],
+            "default": "udp",
+            "description": "当前游戏转发主协议。",
+            "example": "udp"
+          },
+          "area": {
+            "type": "string",
+            "maxLength": 32,
+            "nullable": true,
+            "description": "线路区域标记。",
+            "example": "HK"
+          },
+          "tag": {
+            "type": "string",
+            "maxLength": 64,
+            "nullable": true,
+            "description": "线路标签。",
+            "example": "default"
+          },
+          "priority": {
+            "type": "integer",
+            "format": "uint32",
+            "default": 100,
+            "description": "线路优先级，数字越小越优先。",
+            "example": 10
+          },
+          "status": {
+            "type": "string",
+            "enum": ["enabled", "disabled"],
+            "default": "enabled",
+            "description": "线路状态。",
+            "example": "enabled"
+          }
+        }
+      },
+      "BusinessSyncCatalogResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "source",
+          "games_upserted",
+          "categories_upserted",
+          "regions_upserted",
+          "route_rules_upserted",
+          "server_time"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "source": {
+            "type": "string",
+            "example": "business-admin"
+          },
+          "revision": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-06-10T11:40:00+08:00"
+          },
+          "games_upserted": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1
+          },
+          "categories_upserted": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 2
+          },
+          "regions_upserted": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1
+          },
+          "route_rules_upserted": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 2
+          },
+          "server_time": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1781070000
+          }
+        }
+      },
+      "BusinessConnectIntentRequest": {
+        "type": "object",
+        "required": ["user_id", "device_id", "game_id"],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "nullable": true,
+            "description": "业务后台请求 ID，用于日志追踪和幂等排查。",
+            "example": "req-20260610-0001"
+          },
+          "entitlement_id": {
+            "type": "string",
+            "maxLength": 128,
+            "nullable": true,
+            "description": "业务后台权益或订单 ID。控制面只记录，不做权益校验。",
+            "example": "vip-order-1001"
+          },
+          "user_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1,
+            "description": "业务后台用户 ID。",
+            "example": 1001
+          },
+          "device_id": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "客户端设备 ID。",
+            "example": "pc-001"
+          },
+          "game_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1,
+            "description": "业务后台游戏 ID，必须已通过 sync-catalog 同步。",
+            "example": 8888
+          },
+          "region_id": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true,
+            "description": "区服 ID。客户端选择区服时传入。",
+            "example": 1
+          },
+          "platform": {
+            "type": "string",
+            "enum": ["pc", "android", "ios", "multi"],
+            "default": "pc",
+            "description": "客户端平台。",
+            "example": "pc"
+          },
+          "client_isp": {
+            "type": "string",
+            "maxLength": 32,
+            "nullable": true,
+            "description": "客户端运营商。",
+            "example": "telecom"
+          },
+          "client_ip": {
+            "type": "string",
+            "maxLength": 64,
+            "nullable": true,
+            "description": "客户端公网 IP。",
+            "example": "127.0.0.1"
+          },
+          "bandwidth_quality": {
+            "type": "string",
+            "enum": ["fast", "normal", "slow"],
+            "default": "normal",
+            "description": "业务后台对本次客户端网络质量的判断。",
+            "example": "fast"
+          },
+          "client_version": {
+            "type": "string",
+            "maxLength": 64,
+            "nullable": true,
+            "description": "客户端版本号。",
+            "example": "0.1.0"
+          }
+        }
+      },
+      "BusinessConnectIntentResponse": {
+        "type": "object",
+        "required": ["status", "connect_intent", "server_time"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "request_id": {
+            "type": "string",
+            "nullable": true,
+            "example": "req-20260610-0001"
+          },
+          "entitlement_id": {
+            "type": "string",
+            "nullable": true,
+            "example": "vip-order-1001"
+          },
+          "client_version": {
+            "type": "string",
+            "nullable": true,
+            "example": "0.1.0"
+          },
+          "connect_intent": {
+            "$ref": "#/components/schemas/ConnectIntent"
+          },
+          "server_time": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1781070000
+          }
+        }
+      },
+      "ConnectIntent": {
+        "type": "object",
+        "required": ["intent_id", "ttl_sec", "client", "candidates"],
+        "properties": {
+          "intent_id": {
+            "type": "string",
+            "description": "本次加速意图 ID。",
+            "example": "intent-1001-8888-1781070000-2"
+          },
+          "ttl_sec": {
+            "type": "integer",
+            "format": "uint32",
+            "description": "意图有效期，单位秒。",
+            "example": 120
+          },
+          "client": {
+            "$ref": "#/components/schemas/ClientContext"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeCandidate"
+            },
+            "description": "候选节点列表。客户端通常取第一个候选节点连接。"
+          }
+        }
+      },
+      "ClientContext": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "example": "pc"
+          },
+          "client_isp": {
+            "type": "string",
+            "nullable": true,
+            "example": "telecom"
+          },
+          "client_ip": {
+            "type": "string",
+            "nullable": true,
+            "example": "127.0.0.1"
+          },
+          "bandwidth_quality": {
+            "type": "string",
+            "example": "fast"
+          },
+          "region_id": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true,
+            "example": 1
+          }
+        }
+      },
+      "NodeCandidate": {
+        "type": "object",
+        "required": [
+          "node_id",
+          "area",
+          "tag",
+          "host",
+          "port",
+          "transports",
+          "bandwidth_quality",
+          "probe",
+          "route",
+          "credential",
+          "scheduler"
+        ],
+        "properties": {
+          "node_id": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 2
+          },
+          "area": {
+            "type": "string",
+            "example": "HK"
+          },
+          "tag": {
+            "type": "string",
+            "example": "default"
+          },
+          "host": {
+            "type": "string",
+            "description": "客户端连接节点使用的公网 IP 或域名。",
+            "example": "47.83.160.126"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "description": "客户端连接节点使用的入口端口。",
+            "example": 666
+          },
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["udp", "tcp"]
+            },
+            "example": ["udp"]
+          },
+          "bandwidth_quality": {
+            "type": "string",
+            "enum": ["fast", "normal", "slow"],
+            "example": "normal"
+          },
+          "probe": {
+            "$ref": "#/components/schemas/ProbeInfo"
+          },
+          "route": {
+            "$ref": "#/components/schemas/ClientRoute"
+          },
+          "credential": {
+            "$ref": "#/components/schemas/CredentialInfo"
+          },
+          "scheduler": {
+            "$ref": "#/components/schemas/CandidateSchedulerInfo"
+          }
+        }
+      },
+      "ProbeInfo": {
+        "type": "object",
+        "required": ["udp", "tcp", "protocol"],
+        "properties": {
+          "udp": {
+            "type": "boolean",
+            "example": true
+          },
+          "tcp": {
+            "type": "boolean",
+            "example": true
+          },
+          "protocol": {
+            "type": "string",
+            "example": "xaccel/1"
+          }
+        }
+      },
+      "ClientRoute": {
+        "type": "object",
+        "required": ["target_addr", "protocol"],
+        "properties": {
+          "target_addr": {
+            "type": "string",
+            "description": "节点最终转发到的游戏目标地址。客户端不用直连该地址。",
+            "example": "127.0.0.1:7777"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": ["udp", "tcp"],
+            "example": "udp"
+          },
+          "region_id": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true,
+            "example": 1
+          },
+          "region_name": {
+            "type": "string",
+            "nullable": true,
+            "example": "电信一区"
+          }
+        }
+      },
+      "CredentialInfo": {
+        "type": "object",
+        "required": ["token", "expires_at", "intent_id", "route"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "客户端连接节点时使用的短期 xat.v1 token。",
+            "example": "xat.v1.xxx"
+          },
+          "expires_at": {
+            "type": "integer",
+            "format": "uint64",
+            "description": "节点 token 过期时间，Unix 秒级时间戳。",
+            "example": 1781070120
+          },
+          "intent_id": {
+            "type": "string",
+            "example": "intent-1001-8888-1781070000-2"
+          },
+          "route": {
+            "$ref": "#/components/schemas/ClientRoute"
+          }
+        }
+      },
+      "CandidateSchedulerInfo": {
+        "type": "object",
+        "required": [
+          "route_priority",
+          "latest_active_sessions",
+          "latest_udp_sessions",
+          "latest_tcp_sessions",
+          "report_fresh"
+        ],
+        "properties": {
+          "route_priority": {
+            "type": "integer",
+            "format": "uint32",
+            "description": "线路优先级，数字越小越优先。",
+            "example": 10
+          },
+          "latest_active_sessions": {
+            "type": "integer",
+            "format": "uint32",
+            "example": 0
+          },
+          "latest_udp_sessions": {
+            "type": "integer",
+            "format": "uint32",
+            "example": 0
+          },
+          "latest_tcp_sessions": {
+            "type": "integer",
+            "format": "uint32",
+            "example": 0
+          },
+          "latest_reported_at": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true,
+            "example": 1781069990
+          },
+          "latest_report_age_sec": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true,
+            "example": 10
+          },
+          "report_fresh": {
+            "type": "boolean",
+            "example": true
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "机器可读错误码。",
+                "example": "no_candidate"
+              },
+              "message": {
+                "type": "string",
+                "description": "人类可读错误说明。",
+                "example": "no available node candidate"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
