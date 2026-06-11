@@ -9373,11 +9373,76 @@ LIMIT 1
     }
 }
 
+async fn select_node_id_by_endpoint(
+    pool: &MySqlPool,
+    server_ip: &str,
+    server_port: u32,
+    exclude_node_id: Option<u64>,
+) -> Result<Option<u64>, AppError> {
+    let node_id = if let Some(exclude_node_id) = exclude_node_id {
+        sqlx::query_scalar::<_, u64>(
+            r#"
+SELECT id
+FROM accel_nodes
+WHERE server_ip = ? AND server_port = ? AND id <> ?
+LIMIT 1
+"#,
+        )
+        .bind(server_ip)
+        .bind(server_port)
+        .bind(exclude_node_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(AppError::database)?
+    } else {
+        sqlx::query_scalar::<_, u64>(
+            r#"
+SELECT id
+FROM accel_nodes
+WHERE server_ip = ? AND server_port = ?
+LIMIT 1
+"#,
+        )
+        .bind(server_ip)
+        .bind(server_port)
+        .fetch_optional(pool)
+        .await
+        .map_err(AppError::database)?
+    };
+    Ok(node_id)
+}
+
+fn node_endpoint_exists_error() -> AppError {
+    AppError::conflict(
+        "node_endpoint_exists",
+        "节点入口已存在：server_ip 和 server_port 不能重复。已有节点请使用修改节点。",
+    )
+}
+
+fn is_duplicate_database_error(error: &(dyn sqlx::error::DatabaseError + 'static)) -> bool {
+    let code = error
+        .code()
+        .map(|code| code.to_string())
+        .unwrap_or_default();
+    let message = error.message();
+    code == "1062"
+        || (code == "23000" && message.contains("Duplicate entry"))
+        || message.contains("1062")
+        || message.contains("Duplicate entry")
+}
+
 async fn insert_admin_node(
     pool: &MySqlPool,
     request: AdminCreateNodeRequest,
 ) -> Result<u64, AppError> {
     let node = normalize_create_node_request(&request)?;
+    if select_node_id_by_endpoint(pool, &node.server_ip, node.server_port, None)
+        .await?
+        .is_some()
+    {
+        return Err(node_endpoint_exists_error());
+    }
+
     let result = sqlx::query(
         r#"
 INSERT INTO accel_nodes (
@@ -9419,11 +9484,8 @@ INSERT INTO accel_nodes (
 
     match result {
         Ok(result) => Ok(result.last_insert_id()),
-        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("1062") => {
-            Err(AppError::conflict(
-                "node_endpoint_exists",
-                "a node with the same server_ip and server_port already exists",
-            ))
+        Err(sqlx::Error::Database(error)) if is_duplicate_database_error(error.as_ref()) => {
+            Err(node_endpoint_exists_error())
         }
         Err(error) => Err(AppError::database(error)),
     }
@@ -9700,6 +9762,13 @@ async fn update_admin_node_config(
     request: AdminUpdateNodeRequest,
 ) -> Result<(), AppError> {
     let node = normalize_create_node_request(&request)?;
+    if select_node_id_by_endpoint(pool, &node.server_ip, node.server_port, Some(node_id))
+        .await?
+        .is_some()
+    {
+        return Err(node_endpoint_exists_error());
+    }
+
     let mut tx = pool.begin().await.map_err(AppError::database)?;
     let result = sqlx::query(
         r#"
@@ -9742,11 +9811,8 @@ WHERE id = ?
 
     let result = match result {
         Ok(result) => result,
-        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("1062") => {
-            return Err(AppError::conflict(
-                "node_endpoint_exists",
-                "a node with the same server_ip and server_port already exists",
-            ));
+        Err(sqlx::Error::Database(error)) if is_duplicate_database_error(error.as_ref()) => {
+            return Err(node_endpoint_exists_error());
         }
         Err(error) => return Err(AppError::database(error)),
     };

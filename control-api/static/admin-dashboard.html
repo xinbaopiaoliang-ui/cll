@@ -2776,7 +2776,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.62.0</span>
+          <span class="mono">v0.62.1</span>
         </div>
       </aside>
 
@@ -3297,7 +3297,7 @@
 
                   <div class="operation-card">
                     <div class="operation-title">节点接口 CRUD</div>
-                    <div class="message">用于验证业务后台新增、查询、修改、删除节点基础信息。安装部署仍在节点管理里执行。</div>
+                    <div class="message">用于验证业务后台新增、查询、修改、删除节点基础信息。新增前请改成未登记的公网 IP + 端口；已有节点请点修改节点。</div>
                     <div class="form-grid">
                       <div class="field">
                         <label for="businessNodeIdInput">节点 ID</label>
@@ -3309,8 +3309,8 @@
                       </div>
                     </div>
                     <textarea id="businessNodePayload" spellcheck="false">{
-  "name": "debug-node-01",
-  "server_ip": "47.83.160.126",
+  "name": "debug-node-new",
+  "server_ip": "203.0.113.10",
   "server_port": 666,
   "area": "HK",
   "tag": "debug",
@@ -3689,7 +3689,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.62.0</div>
+              <div class="insight-value">0.62.1</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
