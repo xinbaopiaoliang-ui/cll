@@ -21,18 +21,18 @@
   ],
   "tags": [
     {
-      "name": "Business API",
-      "description": "Business backend integration APIs."
+      "name": "业务后台对接",
+      "description": "业务后台同步节点、游戏、区服、线路，并签发客户端加速意图。"
     }
   ],
   "paths": {
     "/api/business/v1/status": {
       "get": {
         "tags": [
-          "Business API"
+          "业务后台对接"
         ],
         "summary": "业务 API 状态检查",
-        "description": "业务后台启动或定时探活时调用，用于确认业务 Token、控制面、节点和路由执行副本是否可用。",
+        "description": "业务后台启动、定时巡检或联调前调用，确认控制面业务 API Token、节点、游戏和路由执行副本是否可用。",
         "operationId": "businessStatus",
         "security": [
           {
@@ -77,10 +77,10 @@
     "/api/business/v1/nodes": {
       "get": {
         "tags": [
-          "Business API"
+          "业务后台对接"
         ],
-        "summary": "List nodes",
-        "description": "Read node basics registered in the control plane. SSH secrets are never returned.",
+        "summary": "查询节点列表",
+        "description": "业务后台读取控制面已登记的节点基础资料，用于选择线路节点、展示节点 ID 或校验节点是否存在。不会返回 SSH 密码。",
         "operationId": "businessListNodes",
         "security": [
           {
@@ -101,7 +101,7 @@
               "maximum": 500,
               "default": 200
             },
-            "description": "Maximum node count to return."
+            "description": "最多返回多少条数据。"
           }
         ],
         "responses": {
@@ -163,10 +163,10 @@
       },
       "post": {
         "tags": [
-          "Business API"
+          "业务后台对接"
         ],
         "summary": "新增节点基础信息",
-        "description": "Create a node basic record. It does not save SSH credentials and does not install node kernel directly.",
+        "description": "业务后台登记节点基础资料。这个接口只创建节点记录，不保存 SSH 密码，也不直接远程安装节点内核。",
         "operationId": "businessCreateNode",
         "security": [
           {
@@ -199,7 +199,8 @@
                 "unicom_ip": null
               }
             }
-          }
+          },
+          "description": "请求体参数。"
         },
         "responses": {
           "200": {
@@ -268,10 +269,10 @@
     "/api/business/v1/sync-catalog": {
       "get": {
         "tags": [
-          "Business API"
+          "业务后台对接"
         ],
-        "summary": "Get catalog snapshot",
-        "description": "Read the current game, region and route execution snapshot stored by the control plane.",
+        "summary": "查询游戏目录快照",
+        "description": "读取控制面当前保存的游戏、区服和路由执行副本，用于业务后台联调、对账或确认同步结果。",
         "operationId": "businessGetCatalogSnapshot",
         "security": [
           {
@@ -291,7 +292,7 @@
               "format": "uint64",
               "minimum": 1
             },
-            "description": "Filter by game id."
+            "description": "业务后台游戏 ID。"
           },
           {
             "name": "node_id",
@@ -302,7 +303,7 @@
               "format": "uint64",
               "minimum": 1
             },
-            "description": "Filter by node id."
+            "description": "控制面节点 ID。"
           },
           {
             "name": "status",
@@ -315,7 +316,7 @@
                 "disabled"
               ]
             },
-            "description": "Filter by enabled or disabled status."
+            "description": "状态过滤，可选 enabled 或 disabled。"
           },
           {
             "name": "limit",
@@ -327,7 +328,7 @@
               "maximum": 500,
               "default": 200
             },
-            "description": "Maximum rows per group."
+            "description": "最多返回多少条数据。"
           }
         ],
         "responses": {
@@ -410,10 +411,10 @@
       },
       "post": {
         "tags": [
-          "Business API"
+          "业务后台对接"
         ],
         "summary": "同步游戏、分类、区服和线路",
-        "description": "Upsert game, category, region and route execution snapshots. Missing data is not deleted. Use DELETE /api/business/v1/sync-catalog to remove stale records.",
+        "description": "业务后台把游戏、分类、区服和线路执行副本同步到控制面。未传的数据不会删除，需要清理旧数据时调用删除目录接口。",
         "operationId": "businessSyncCatalog",
         "security": [
           {
@@ -474,7 +475,8 @@
                 ]
               }
             }
-          }
+          },
+          "description": "请求体参数。"
         },
         "responses": {
           "200": {
@@ -510,10 +512,10 @@
       },
       "put": {
         "tags": [
-          "Business API"
+          "业务后台对接"
         ],
-        "summary": "Update catalog snapshot",
-        "description": "Same request and response as POST /api/business/v1/sync-catalog. Use it when the business backend wants update semantics.",
+        "summary": "更新游戏目录快照",
+        "description": "与同步游戏目录接口使用同一套请求和响应，用于业务后台重放或覆盖更新游戏、分类、区服和线路执行副本。",
         "operationId": "businessUpdateCatalog",
         "security": [
           {
@@ -574,7 +576,8 @@
                 ]
               }
             }
-          }
+          },
+          "description": "请求体参数。"
         },
         "responses": {
           "200": {
@@ -610,10 +613,10 @@
       },
       "delete": {
         "tags": [
-          "Business API"
+          "业务后台对接"
         ],
-        "summary": "Delete catalog records",
-        "description": "Delete game, region, route rule ids, or business external route ids from the execution snapshot.",
+        "summary": "删除游戏目录数据",
+        "description": "按游戏、区服、控制面线路 ID 或业务 external_id 删除控制面执行副本。",
         "operationId": "businessDeleteCatalog",
         "security": [
           {
@@ -649,7 +652,8 @@
                 ]
               }
             }
-          }
+          },
+          "description": "请求体参数。"
         },
         "responses": {
           "200": {
@@ -684,10 +688,10 @@
     "/api/business/v1/connect-intent": {
       "post": {
         "tags": [
-          "Business API"
+          "业务后台对接"
         ],
         "summary": "签发客户端加速意图",
-        "description": "业务后台完成登录、套餐、设备和游戏权限校验后调用。控制面返回候选节点、节点短期 token 和路由目标。客户端拿到候选节点后连接节点，不直接访问控制面管理接口。",
+        "description": "业务后台完成用户权益校验后调用，控制面返回候选节点、节点连接凭证和路由目标。",
         "operationId": "businessConnectIntent",
         "security": [
           {
@@ -718,7 +722,8 @@
                 "client_version": "0.1.0"
               }
             }
-          }
+          },
+          "description": "请求体参数。"
         },
         "responses": {
           "200": {
@@ -811,10 +816,10 @@
     "/api/business/v1/nodes/{node_id}": {
       "get": {
         "tags": [
-          "Business API"
+          "业务后台对接"
         ],
-        "summary": "Get node",
-        "description": "Read one node by control-plane node id.",
+        "summary": "查询节点详情",
+        "description": "按控制面节点 ID 查询单个节点基础资料、最新上报摘要和 SSH 凭据配置状态。不会返回 SSH 密码。",
         "operationId": "businessGetNode",
         "security": [
           {
@@ -834,7 +839,7 @@
               "format": "uint64",
               "minimum": 1
             },
-            "description": "Control-plane node id."
+            "description": "控制面节点 ID。"
           }
         ],
         "responses": {
@@ -897,10 +902,10 @@
       },
       "put": {
         "tags": [
-          "Business API"
+          "业务后台对接"
         ],
-        "summary": "Update node",
-        "description": "Update node name, public endpoint, area, tag, quality and network flags. SSH credentials remain managed by the operations panel.",
+        "summary": "修改节点基础信息",
+        "description": "业务后台修改节点名称、公网入口、区域、标签、带宽质量等基础资料。SSH 账号密码仍由控制面节点运维模块管理。",
         "operationId": "businessUpdateNode",
         "security": [
           {
@@ -920,7 +925,7 @@
               "format": "uint64",
               "minimum": 1
             },
-            "description": "Control-plane node id."
+            "description": "控制面节点 ID。"
           }
         ],
         "requestBody": {
@@ -946,7 +951,8 @@
                 "unicom_ip": null
               }
             }
-          }
+          },
+          "description": "请求体参数。"
         },
         "responses": {
           "200": {
@@ -1014,10 +1020,10 @@
       },
       "delete": {
         "tags": [
-          "Business API"
+          "业务后台对接"
         ],
-        "summary": "Delete node",
-        "description": "Delete a node basic record. In production, make sure no route still references this node before deleting it.",
+        "summary": "删除节点基础信息",
+        "description": "删除控制面节点记录。生产环境建议先确认没有路由仍然引用该节点，再执行删除。",
         "operationId": "businessDeleteNode",
         "security": [
           {
@@ -1037,7 +1043,7 @@
               "format": "uint64",
               "minimum": 1
             },
-            "description": "Control-plane node id."
+            "description": "控制面节点 ID。"
           }
         ],
         "responses": {
@@ -1372,10 +1378,12 @@
         "properties": {
           "status": {
             "type": "string",
-            "example": "ok"
+            "example": "ok",
+            "description": "接口处理状态，成功时为 ok。"
           },
           "node": {
-            "$ref": "#/components/schemas/BusinessNodeSummary"
+            "$ref": "#/components/schemas/BusinessNodeSummary",
+            "description": "节点详情。"
           },
           "install_state": {
             "type": "string",
@@ -1393,7 +1401,8 @@
           "server_time": {
             "type": "integer",
             "format": "uint64",
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "控制面 Unix 秒级时间戳。"
           }
         }
       },
@@ -1422,44 +1431,53 @@
           },
           "name": {
             "type": "string",
-            "example": "香港节点-01"
+            "example": "香港节点-01",
+            "description": "名称。"
           },
           "endpoint": {
             "type": "string",
-            "example": "47.83.160.126:666"
+            "example": "47.83.160.126:666",
+            "description": "节点公网入口，格式为 IP:端口。"
           },
           "server_ip": {
             "type": "string",
-            "example": "47.83.160.126"
+            "example": "47.83.160.126",
+            "description": "节点公网 IP，客户端连接这个地址。"
           },
           "server_port": {
             "type": "integer",
             "format": "uint16",
-            "example": 666
+            "example": 666,
+            "description": "节点入口端口，节点内核监听 TCP/UDP 这个端口。"
           },
           "relay_server_ip": {
             "type": "string",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "中转服务器 IP，没有中转时为空。"
           },
           "relay_server_port": {
             "type": "integer",
             "format": "uint16",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "中转服务器端口，没有中转时为空。"
           },
           "is_support_ipv6": {
             "type": "boolean",
-            "example": false
+            "example": false,
+            "description": "节点是否支持 IPv6。"
           },
           "area": {
             "type": "string",
-            "example": "HK"
+            "example": "HK",
+            "description": "区域标识，例如 HK、JP、SG、US。"
           },
           "tag": {
             "type": "string",
             "nullable": true,
-            "example": "default"
+            "example": "default",
+            "description": "节点或线路标签，例如 default、premium、HK。"
           },
           "bandwidth_quality": {
             "type": "string",
@@ -1468,52 +1486,62 @@
               "normal",
               "slow"
             ],
-            "example": "normal"
+            "example": "normal",
+            "description": "节点带宽质量标记，可作为调度参考。"
           },
           "disable_quic": {
             "type": "boolean",
-            "example": false
+            "example": false,
+            "description": "是否禁用 QUIC。"
           },
           "telecom_ip": {
             "type": "string",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "电信线路 IP，没有就为空。"
           },
           "mobile_ip": {
             "type": "string",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "移动线路 IP，没有就为空。"
           },
           "unicom_ip": {
             "type": "string",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "联通线路 IP，没有就为空。"
           },
           "status": {
             "type": "string",
-            "example": "pending_install"
+            "example": "pending_install",
+            "description": "接口处理状态，成功时为 ok。"
           },
           "kernel_version": {
             "type": "string",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "节点内核版本。"
           },
           "config_revision": {
             "type": "integer",
             "format": "uint64",
-            "example": 1
+            "example": 1,
+            "description": "节点配置版本号。"
           },
           "last_seen_at": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "节点最近握手时间，Unix 秒级时间戳。"
           },
           "last_report_at": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "节点最近上报时间，Unix 秒级时间戳。"
           },
           "latest_report": {
             "nullable": true,
@@ -1521,7 +1549,8 @@
             "example": null
           },
           "ssh_credential": {
-            "$ref": "#/components/schemas/BusinessNodeSshCredentialSummary"
+            "$ref": "#/components/schemas/BusinessNodeSshCredentialSummary",
+            "description": "SSH 凭据配置状态摘要，不包含密码。"
           }
         }
       },
@@ -1539,34 +1568,40 @@
           "host": {
             "type": "string",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "SSH 主机地址。"
           },
           "port": {
             "type": "integer",
             "format": "uint16",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "SSH 端口。"
           },
           "username": {
             "type": "string",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "SSH 用户名。"
           },
           "auth_status": {
             "type": "string",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "SSH 验证状态。"
           },
           "last_error": {
             "type": "string",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "最近一次 SSH 或任务错误摘要。"
           },
           "last_checked_at": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "最近一次 SSH 检查时间，Unix 秒级时间戳。"
           }
         }
       },
@@ -1900,41 +1935,49 @@
         "properties": {
           "status": {
             "type": "string",
-            "example": "ok"
+            "example": "ok",
+            "description": "接口处理状态，成功时为 ok。"
           },
           "source": {
             "type": "string",
-            "example": "business-admin"
+            "example": "business-admin",
+            "description": "业务后台同步来源标识。"
           },
           "revision": {
             "type": "string",
             "nullable": true,
-            "example": "2026-06-10T11:40:00+08:00"
+            "example": "2026-06-10T11:40:00+08:00",
+            "description": "业务后台本次同步版本号。"
           },
           "games_upserted": {
             "type": "integer",
             "format": "uint64",
-            "example": 1
+            "example": 1,
+            "description": "本次写入或更新的游戏数量。"
           },
           "categories_upserted": {
             "type": "integer",
             "format": "uint64",
-            "example": 2
+            "example": 2,
+            "description": "本次写入或更新的分类数量。"
           },
           "regions_upserted": {
             "type": "integer",
             "format": "uint64",
-            "example": 1
+            "example": 1,
+            "description": "本次写入或更新的区服数量。"
           },
           "route_rules_upserted": {
             "type": "integer",
             "format": "uint64",
-            "example": 2
+            "example": 2,
+            "description": "本次写入或更新的线路规则数量。"
           },
           "server_time": {
             "type": "integer",
             "format": "uint64",
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "控制面 Unix 秒级时间戳。"
           }
         }
       },
@@ -2043,30 +2086,36 @@
         "properties": {
           "status": {
             "type": "string",
-            "example": "ok"
+            "example": "ok",
+            "description": "接口处理状态，成功时为 ok。"
           },
           "request_id": {
             "type": "string",
             "nullable": true,
-            "example": "req-20260610-0001"
+            "example": "req-20260610-0001",
+            "description": "业务后台请求 ID，用于排查和串联日志。"
           },
           "entitlement_id": {
             "type": "string",
             "nullable": true,
-            "example": "vip-order-1001"
+            "example": "vip-order-1001",
+            "description": "业务后台权益或订单 ID。"
           },
           "client_version": {
             "type": "string",
             "nullable": true,
-            "example": "0.1.0"
+            "example": "0.1.0",
+            "description": "客户端版本号。"
           },
           "connect_intent": {
-            "$ref": "#/components/schemas/ConnectIntent"
+            "$ref": "#/components/schemas/ConnectIntent",
+            "description": "控制面签发的加速意图。"
           },
           "server_time": {
             "type": "integer",
             "format": "uint64",
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "控制面 Unix 秒级时间戳。"
           }
         }
       },
@@ -2091,7 +2140,8 @@
             "example": 120
           },
           "client": {
-            "$ref": "#/components/schemas/ClientContext"
+            "$ref": "#/components/schemas/ClientContext",
+            "description": "客户端上下文。"
           },
           "candidates": {
             "type": "array",
@@ -2107,27 +2157,32 @@
         "properties": {
           "platform": {
             "type": "string",
-            "example": "pc"
+            "example": "pc",
+            "description": "游戏平台，例如 pc、android、ios、console、other。"
           },
           "client_isp": {
             "type": "string",
             "nullable": true,
-            "example": "telecom"
+            "example": "telecom",
+            "description": "客户端运营商，例如 telecom、mobile、unicom。"
           },
           "client_ip": {
             "type": "string",
             "nullable": true,
-            "example": "127.0.0.1"
+            "example": "127.0.0.1",
+            "description": "客户端公网 IP 或业务后台识别到的来源 IP。"
           },
           "bandwidth_quality": {
             "type": "string",
-            "example": "fast"
+            "example": "fast",
+            "description": "节点带宽质量标记，可作为调度参考。"
           },
           "region_id": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": 1
+            "example": 1,
+            "description": "业务后台区服 ID。"
           }
         }
       },
@@ -2150,15 +2205,18 @@
           "node_id": {
             "type": "integer",
             "format": "uint64",
-            "example": 2
+            "example": 2,
+            "description": "控制面节点 ID。"
           },
           "area": {
             "type": "string",
-            "example": "HK"
+            "example": "HK",
+            "description": "区域标识，例如 HK、JP、SG、US。"
           },
           "tag": {
             "type": "string",
-            "example": "default"
+            "example": "default",
+            "description": "节点或线路标签，例如 default、premium、HK。"
           },
           "host": {
             "type": "string",
@@ -2182,7 +2240,8 @@
             },
             "example": [
               "udp"
-            ]
+            ],
+            "description": "节点支持的传输协议列表。"
           },
           "bandwidth_quality": {
             "type": "string",
@@ -2191,19 +2250,24 @@
               "normal",
               "slow"
             ],
-            "example": "normal"
+            "example": "normal",
+            "description": "节点带宽质量标记，可作为调度参考。"
           },
           "probe": {
-            "$ref": "#/components/schemas/ProbeInfo"
+            "$ref": "#/components/schemas/ProbeInfo",
+            "description": "节点探测能力。"
           },
           "route": {
-            "$ref": "#/components/schemas/ClientRoute"
+            "$ref": "#/components/schemas/ClientRoute",
+            "description": "路由目标。"
           },
           "credential": {
-            "$ref": "#/components/schemas/CredentialInfo"
+            "$ref": "#/components/schemas/CredentialInfo",
+            "description": "节点连接凭证。"
           },
           "scheduler": {
-            "$ref": "#/components/schemas/CandidateSchedulerInfo"
+            "$ref": "#/components/schemas/CandidateSchedulerInfo",
+            "description": "调度参考数据。"
           }
         }
       },
@@ -2217,15 +2281,18 @@
         "properties": {
           "udp": {
             "type": "boolean",
-            "example": true
+            "example": true,
+            "description": "是否支持 UDP 探测。"
           },
           "tcp": {
             "type": "boolean",
-            "example": true
+            "example": true,
+            "description": "是否支持 TCP 探测。"
           },
           "protocol": {
             "type": "string",
-            "example": "xaccel/1"
+            "example": "xaccel/1",
+            "description": "转发协议，udp 或 tcp。"
           }
         }
       },
@@ -2247,18 +2314,21 @@
               "udp",
               "tcp"
             ],
-            "example": "udp"
+            "example": "udp",
+            "description": "转发协议，udp 或 tcp。"
           },
           "region_id": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": 1
+            "example": 1,
+            "description": "业务后台区服 ID。"
           },
           "region_name": {
             "type": "string",
             "nullable": true,
-            "example": "电信一区"
+            "example": "电信一区",
+            "description": "业务后台区服名称。"
           }
         }
       },
@@ -2284,10 +2354,12 @@
           },
           "intent_id": {
             "type": "string",
-            "example": "intent-1001-8888-1781070000-2"
+            "example": "intent-1001-8888-1781070000-2",
+            "description": "本次加速意图 ID。"
           },
           "route": {
-            "$ref": "#/components/schemas/ClientRoute"
+            "$ref": "#/components/schemas/ClientRoute",
+            "description": "路由目标。"
           }
         }
       },
@@ -2310,33 +2382,39 @@
           "latest_active_sessions": {
             "type": "integer",
             "format": "uint32",
-            "example": 0
+            "example": 0,
+            "description": "最近上报的活跃会话数。"
           },
           "latest_udp_sessions": {
             "type": "integer",
             "format": "uint32",
-            "example": 0
+            "example": 0,
+            "description": "最近上报的 UDP 会话数。"
           },
           "latest_tcp_sessions": {
             "type": "integer",
             "format": "uint32",
-            "example": 0
+            "example": 0,
+            "description": "最近上报的 TCP 会话数。"
           },
           "latest_reported_at": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": 1781069990
+            "example": 1781069990,
+            "description": "最近节点上报时间，Unix 秒级时间戳。"
           },
           "latest_report_age_sec": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": 10
+            "example": 10,
+            "description": "最近上报距当前时间的秒数。"
           },
           "report_fresh": {
             "type": "boolean",
-            "example": true
+            "example": true,
+            "description": "节点上报是否新鲜。"
           }
         }
       },
@@ -2363,7 +2441,8 @@
                 "description": "人类可读错误说明。",
                 "example": "no available node candidate"
               }
-            }
+            },
+            "description": "错误对象。"
           }
         }
       },
@@ -2385,12 +2464,14 @@
           "total": {
             "type": "integer",
             "format": "uint64",
-            "example": 2
+            "example": 2,
+            "description": "返回数据总数。"
           },
           "server_time": {
             "type": "integer",
             "format": "uint64",
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "控制面 Unix 秒级时间戳。"
           }
         }
       },
@@ -2404,15 +2485,18 @@
         "properties": {
           "status": {
             "type": "string",
-            "example": "ok"
+            "example": "ok",
+            "description": "接口处理状态，成功时为 ok。"
           },
           "node": {
-            "$ref": "#/components/schemas/BusinessNodeSummary"
+            "$ref": "#/components/schemas/BusinessNodeSummary",
+            "description": "节点详情。"
           },
           "server_time": {
             "type": "integer",
             "format": "uint64",
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "控制面 Unix 秒级时间戳。"
           }
         }
       },
@@ -2427,12 +2511,14 @@
         "properties": {
           "status": {
             "type": "string",
-            "example": "ok"
+            "example": "ok",
+            "description": "接口处理状态，成功时为 ok。"
           },
           "node_id": {
             "type": "integer",
             "format": "uint64",
-            "example": 3
+            "example": 3,
+            "description": "控制面节点 ID。"
           },
           "deleted": {
             "type": "boolean",
@@ -2442,7 +2528,8 @@
           "server_time": {
             "type": "integer",
             "format": "uint64",
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "控制面 Unix 秒级时间戳。"
           }
         }
       },
@@ -2483,7 +2570,8 @@
               "console",
               "other"
             ],
-            "example": "pc"
+            "example": "pc",
+            "description": "游戏平台，例如 pc、android、ios、console、other。"
           },
           "category": {
             "type": "string",
@@ -2494,7 +2582,8 @@
           "icon_url": {
             "type": "string",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "游戏图标 URL。"
           },
           "status": {
             "type": "string",
@@ -2502,29 +2591,34 @@
               "enabled",
               "disabled"
             ],
-            "example": "enabled"
+            "example": "enabled",
+            "description": "接口处理状态，成功时为 ok。"
           },
           "remark": {
             "type": "string",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "备注。"
           },
           "route_count": {
             "type": "integer",
             "format": "uint64",
-            "example": 2
+            "example": 2,
+            "description": "该游戏下的线路数量。"
           },
           "created_at": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "创建时间，Unix 秒级时间戳。"
           },
           "updated_at": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "更新时间，Unix 秒级时间戳。"
           }
         }
       },
@@ -2540,21 +2634,25 @@
           "game_id": {
             "type": "integer",
             "format": "uint64",
-            "example": 8888
+            "example": 8888,
+            "description": "业务后台游戏 ID。"
           },
           "region_id": {
             "type": "integer",
             "format": "uint64",
-            "example": 1
+            "example": 1,
+            "description": "业务后台区服 ID。"
           },
           "name": {
             "type": "string",
-            "example": "telecom-1"
+            "example": "telecom-1",
+            "description": "名称。"
           },
           "area": {
             "type": "string",
             "nullable": true,
-            "example": "HK"
+            "example": "HK",
+            "description": "区域标识，例如 HK、JP、SG、US。"
           },
           "status": {
             "type": "string",
@@ -2562,24 +2660,28 @@
               "enabled",
               "disabled"
             ],
-            "example": "enabled"
+            "example": "enabled",
+            "description": "接口处理状态，成功时为 ok。"
           },
           "remark": {
             "type": "string",
             "nullable": true,
-            "example": null
+            "example": null,
+            "description": "备注。"
           },
           "created_at": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "创建时间，Unix 秒级时间戳。"
           },
           "updated_at": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "更新时间，Unix 秒级时间戳。"
           }
         }
       },
@@ -2607,39 +2709,47 @@
           "game_id": {
             "type": "integer",
             "format": "uint64",
-            "example": 8888
+            "example": 8888,
+            "description": "业务后台游戏 ID。"
           },
           "game_name": {
             "type": "string",
-            "example": "league-of-legends"
+            "example": "league-of-legends",
+            "description": "游戏名称。"
           },
           "region_id": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": 1
+            "example": 1,
+            "description": "业务后台区服 ID。"
           },
           "region_name": {
             "type": "string",
             "nullable": true,
-            "example": "telecom-1"
+            "example": "telecom-1",
+            "description": "业务后台区服名称。"
           },
           "node_id": {
             "type": "integer",
             "format": "uint64",
-            "example": 2
+            "example": 2,
+            "description": "控制面节点 ID。"
           },
           "node_name": {
             "type": "string",
-            "example": "hk-node"
+            "example": "hk-node",
+            "description": "节点名称。"
           },
           "node_endpoint": {
             "type": "string",
-            "example": "47.83.160.126:666"
+            "example": "47.83.160.126:666",
+            "description": "节点入口地址，格式为 IP:端口。"
           },
           "node_status": {
             "type": "string",
-            "example": "online"
+            "example": "online",
+            "description": "节点当前状态。"
           },
           "target_addr": {
             "type": "string",
@@ -2652,22 +2762,26 @@
               "udp",
               "tcp"
             ],
-            "example": "udp"
+            "example": "udp",
+            "description": "转发协议，udp 或 tcp。"
           },
           "area": {
             "type": "string",
             "nullable": true,
-            "example": "HK"
+            "example": "HK",
+            "description": "区域标识，例如 HK、JP、SG、US。"
           },
           "tag": {
             "type": "string",
             "nullable": true,
-            "example": "default"
+            "example": "default",
+            "description": "节点或线路标签，例如 default、premium、HK。"
           },
           "priority": {
             "type": "integer",
             "format": "uint32",
-            "example": 10
+            "example": 10,
+            "description": "调度优先级，数值越小越优先。"
           },
           "status": {
             "type": "string",
@@ -2675,12 +2789,14 @@
               "enabled",
               "disabled"
             ],
-            "example": "enabled"
+            "example": "enabled",
+            "description": "接口处理状态，成功时为 ok。"
           },
           "sync_source": {
             "type": "string",
             "nullable": true,
-            "example": "business-admin"
+            "example": "business-admin",
+            "description": "该线路来自哪个业务后台同步源。"
           },
           "external_id": {
             "type": "string",
@@ -2692,13 +2808,15 @@
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "创建时间，Unix 秒级时间戳。"
           },
           "updated_at": {
             "type": "integer",
             "format": "uint64",
             "nullable": true,
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "更新时间，Unix 秒级时间戳。"
           }
         }
       },
@@ -2718,39 +2836,46 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BusinessGameSummary"
-            }
+            },
+            "description": "游戏列表。"
           },
           "regions": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BusinessCatalogRegionSummary"
-            }
+            },
+            "description": "区服列表。"
           },
           "route_rules": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BusinessRouteRuleSummary"
-            }
+            },
+            "description": "线路规则列表。"
           },
           "total_games": {
             "type": "integer",
             "format": "uint64",
-            "example": 1
+            "example": 1,
+            "description": "返回的游戏数量。"
           },
           "total_regions": {
             "type": "integer",
             "format": "uint64",
-            "example": 1
+            "example": 1,
+            "description": "返回的区服数量。"
           },
           "total_route_rules": {
             "type": "integer",
             "format": "uint64",
-            "example": 1
+            "example": 1,
+            "description": "返回的线路规则数量。"
           },
           "server_time": {
             "type": "integer",
             "format": "uint64",
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "控制面 Unix 秒级时间戳。"
           }
         }
       },
@@ -2765,13 +2890,15 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 1,
-            "example": 8888
+            "example": 8888,
+            "description": "业务后台游戏 ID。"
           },
           "region_id": {
             "type": "integer",
             "format": "uint64",
             "minimum": 1,
-            "example": 2
+            "example": 2,
+            "description": "业务后台区服 ID。"
           }
         }
       },
@@ -2837,27 +2964,32 @@
         "properties": {
           "status": {
             "type": "string",
-            "example": "ok"
+            "example": "ok",
+            "description": "接口处理状态，成功时为 ok。"
           },
           "games_deleted": {
             "type": "integer",
             "format": "uint64",
-            "example": 1
+            "example": 1,
+            "description": "本次删除的游戏数量。"
           },
           "regions_deleted": {
             "type": "integer",
             "format": "uint64",
-            "example": 1
+            "example": 1,
+            "description": "本次删除的区服数量。"
           },
           "route_rules_deleted": {
             "type": "integer",
             "format": "uint64",
-            "example": 3
+            "example": 3,
+            "description": "本次删除的线路规则数量。"
           },
           "server_time": {
             "type": "integer",
             "format": "uint64",
-            "example": 1781070000
+            "example": 1781070000,
+            "description": "控制面 Unix 秒级时间戳。"
           }
         }
       }
