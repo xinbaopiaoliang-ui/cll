@@ -703,6 +703,7 @@ struct AdminCreateNodeRequest {
 }
 
 type AdminUpdateNodeRequest = AdminCreateNodeRequest;
+type BusinessCreateNodeRequest = AdminCreateNodeRequest;
 
 #[derive(Debug, Deserialize)]
 struct AdminUpdateNodeStatusRequest {
@@ -1261,6 +1262,15 @@ struct BusinessConnectIntentResponse {
     entitlement_id: Option<String>,
     client_version: Option<String>,
     connect_intent: ConnectIntentResponse,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct BusinessCreateNodeResponse {
+    status: &'static str,
+    node: AdminNodeSummary,
+    install_state: &'static str,
+    next_step: &'static str,
     server_time: u64,
 }
 
@@ -1941,6 +1951,7 @@ async fn main() -> anyhow::Result<()> {
             "/api/business/v1/connect-intent",
             post(business_connect_intent),
         )
+        .route("/api/business/v1/nodes", post(business_create_node))
         .route("/api/business/v1/sync-catalog", post(business_sync_catalog))
         .route(NODE_BOOTSTRAP_PATH, post(node_bootstrap))
         .route(NODE_HANDSHAKE_PATH, post(node_handshake))
@@ -3287,6 +3298,133 @@ async fn business_connect_intent(
         entitlement_id,
         client_version,
         connect_intent,
+        server_time: now_unix(),
+    }))
+}
+
+async fn business_create_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<BusinessCreateNodeRequest>,
+) -> Result<Json<BusinessCreateNodeResponse>, AppError> {
+    require_business_sync(&state, &headers)?;
+    let log_name = request.name.clone();
+    let log_server_ip = request.server_ip.clone();
+    let log_server_port = request.server_port;
+    let log_area = request.area.clone();
+    let log_tag = request.tag.clone();
+    let log_quality = request.bandwidth_quality.clone();
+
+    let node_id = match insert_admin_node(&state.pool, request).await {
+        Ok(node_id) => node_id,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "business.node.create",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let node = match select_admin_node(&state.pool, node_id).await {
+        Ok(Some(node)) => node,
+        Ok(None) => {
+            let error = AppError::not_found("node_not_found", "created node does not exist");
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "business.node.create",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "business.node.create",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let node_summary = AdminNodeSummary::from_row(node);
+    if let Err(error) = insert_node_audit_log(
+        &state.pool,
+        node_id,
+        "business_api",
+        None,
+        "node.business_create",
+        json!({
+            "name": log_name,
+            "server_ip": log_server_ip,
+            "server_port": log_server_port,
+            "area": log_area,
+            "tag": log_tag,
+            "bandwidth_quality": log_quality,
+        }),
+    )
+    .await
+    {
+        error!(
+            error = %error.message,
+            node_id,
+            "failed to record business node create audit log"
+        );
+    }
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "nodes",
+            action: "business.node.create",
+            source: "business_api",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "node_id": node_summary.id,
+                "name": node_summary.name.clone(),
+                "endpoint": node_summary.endpoint.clone(),
+                "server_ip": node_summary.server_ip.clone(),
+                "server_port": node_summary.server_port,
+                "status": node_summary.status.clone(),
+                "area": node_summary.area.clone(),
+                "tag": node_summary.tag.clone(),
+                "bandwidth_quality": node_summary.bandwidth_quality.clone(),
+            }),
+        },
+    )
+    .await;
+
+    Ok(Json(BusinessCreateNodeResponse {
+        status: "ok",
+        node: node_summary,
+        install_state: "pending_install",
+        next_step: "generate bootstrap token or deploy node from control panel",
         server_time: now_unix(),
     }))
 }
@@ -9016,10 +9154,10 @@ fn normalize_business_log_endpoint_filter(value: Option<&str>) -> Result<Option<
         return Ok(None);
     };
     match value.as_str() {
-        "status" | "sync-catalog" | "connect-intent" => Ok(Some(value)),
+        "status" | "sync-catalog" | "connect-intent" | "nodes" => Ok(Some(value)),
         _ => Err(AppError::bad_request(
             "invalid_business_log_endpoint",
-            "endpoint must be status, sync-catalog, or connect-intent",
+            "endpoint must be status, nodes, sync-catalog, or connect-intent",
         )),
     }
 }
@@ -11785,6 +11923,20 @@ mod tests {
     }
 
     #[test]
+    fn accepts_business_nodes_log_endpoint_filter() {
+        assert_eq!(
+            normalize_business_log_endpoint_filter(Some("nodes"))
+                .expect("nodes endpoint")
+                .as_deref(),
+            Some("nodes")
+        );
+
+        let error = normalize_business_log_endpoint_filter(Some("unknown")).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_business_log_endpoint");
+    }
+
+    #[test]
     fn renders_business_sync_token_env_updates() {
         let current =
             "DATABASE_URL='mysql://db'\nXACCEL_BUSINESS_SYNC_TOKEN='old-token'\nRUST_LOG='info'\n";
@@ -12573,6 +12725,7 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("renderBusinessConnectIntentResult"));
         assert!(ADMIN_DASHBOARD_HTML.contains("runBusinessProbeDebug"));
         assert!(ADMIN_DASHBOARD_HTML.contains("renderBusinessCallError"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("option value=\"nodes\""));
     }
 
     #[test]

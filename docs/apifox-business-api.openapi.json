@@ -3,7 +3,7 @@
   "info": {
     "title": "XAccel 控制面 - 业务后台对接 API",
     "description": "业务后台调用控制面的专用接口。游戏、区服、线路主数据由业务后台维护；控制面只保存调度和节点执行副本。导入 Apifox 后请在环境变量中配置 baseUrl 和 XACCEL_BUSINESS_SYNC_TOKEN。所有业务接口都需要鉴权，推荐使用 Authorization: Bearer <Token>。",
-    "version": "0.59.0"
+    "version": "0.60.0"
   },
   "servers": [
     {
@@ -52,7 +52,7 @@
                 },
                 "example": {
                   "status": "ok",
-                  "version": "0.59.0",
+                  "version": "0.60.0",
                   "catalog_owner": "business_backend",
                   "control_role": "node_operations",
                   "business_api_enabled": true,
@@ -67,6 +67,111 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/business/v1/nodes": {
+      "post": {
+        "tags": [
+          "业务后台对接"
+        ],
+        "summary": "业务后台新增节点基础信息",
+        "description": "业务后台登记一台节点服务器的基础资料。这个接口只创建节点记录，不会保存 SSH 密码，也不会远程安装节点内核。创建成功后节点状态为 pending_install，后续由控制面生成安装令牌或执行一键部署。",
+        "operationId": "businessCreateNode",
+        "security": [
+          {
+            "BusinessBearerAuth": []
+          },
+          {
+            "BusinessSyncTokenHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusinessCreateNodeRequest"
+              },
+              "example": {
+                "name": "香港节点-01",
+                "server_ip": "47.83.160.126",
+                "server_port": 666,
+                "area": "HK",
+                "tag": "default",
+                "bandwidth_quality": "normal",
+                "disable_quic": false,
+                "is_support_ipv6": false,
+                "relay_server_ip": null,
+                "relay_server_port": null,
+                "telecom_ip": null,
+                "mobile_ip": null,
+                "unicom_ip": null
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "节点基础信息创建成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessCreateNodeResponse"
+                },
+                "example": {
+                  "status": "ok",
+                  "install_state": "pending_install",
+                  "next_step": "generate bootstrap token or deploy node from control panel",
+                  "node": {
+                    "id": 3,
+                    "name": "香港节点-01",
+                    "endpoint": "47.83.160.126:666",
+                    "server_ip": "47.83.160.126",
+                    "server_port": 666,
+                    "relay_server_ip": null,
+                    "relay_server_port": null,
+                    "is_support_ipv6": false,
+                    "area": "HK",
+                    "tag": "default",
+                    "bandwidth_quality": "normal",
+                    "disable_quic": false,
+                    "telecom_ip": null,
+                    "mobile_ip": null,
+                    "unicom_ip": null,
+                    "status": "pending_install",
+                    "kernel_version": null,
+                    "config_revision": 1,
+                    "last_seen_at": null,
+                    "last_report_at": null,
+                    "latest_report": null,
+                    "ssh_credential": {
+                      "configured": false,
+                      "host": null,
+                      "port": null,
+                      "username": null,
+                      "auth_status": null,
+                      "last_error": null,
+                      "last_checked_at": null
+                    }
+                  },
+                  "server_time": 1781070000
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -366,6 +471,22 @@
           }
         }
       },
+      "Conflict": {
+        "description": "资源冲突，例如相同公网 IP 和入口端口的节点已经存在。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": {
+                "code": "node_endpoint_exists",
+                "message": "a node with the same server_ip and server_port already exists"
+              }
+            }
+          }
+        }
+      },
       "NoCandidate": {
         "description": "没有可用候选节点或路由",
         "content": {
@@ -422,7 +543,7 @@
           },
           "version": {
             "type": "string",
-            "example": "0.59.0",
+            "example": "0.60.0",
             "description": "控制面当前版本号，用于业务后台记录兼容版本。"
           },
           "catalog_owner": {
@@ -475,6 +596,318 @@
             "format": "uint64",
             "description": "控制面 Unix 秒级时间戳，用于日志对齐和过期时间判断。",
             "example": 1781070000
+          }
+        }
+      },
+      "BusinessCreateNodeRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "server_ip",
+          "server_port"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "节点显示名称，建议使用地区或机房名，例如香港节点-01。",
+            "example": "香港节点-01"
+          },
+          "server_ip": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "节点公网 IP，客户端最终连接这个地址。",
+            "example": "47.83.160.126"
+          },
+          "server_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "节点入口端口，节点内核会监听 TCP/UDP 这个端口。",
+            "example": 666
+          },
+          "relay_server_ip": {
+            "type": "string",
+            "nullable": true,
+            "description": "中转服务器 IP。没有中转时传 null 或不传。",
+            "example": null
+          },
+          "relay_server_port": {
+            "type": "integer",
+            "format": "uint16",
+            "nullable": true,
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "中转端口。只有 relay_server_ip 存在时才允许传。",
+            "example": null
+          },
+          "is_support_ipv6": {
+            "type": "boolean",
+            "default": false,
+            "description": "节点是否支持 IPv6。",
+            "example": false
+          },
+          "bandwidth_quality": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "normal",
+              "slow"
+            ],
+            "default": "normal",
+            "description": "节点带宽质量标记。调度时可作为候选节点排序参考。",
+            "example": "normal"
+          },
+          "disable_quic": {
+            "type": "boolean",
+            "default": false,
+            "description": "是否禁用 QUIC。游戏加速节点通常保持 false。",
+            "example": false
+          },
+          "area": {
+            "type": "string",
+            "maxLength": 32,
+            "default": "UNKNOWN",
+            "description": "节点区域，例如 HK、JP、SG、US。为空时控制面写 UNKNOWN。",
+            "example": "HK"
+          },
+          "telecom_ip": {
+            "type": "string",
+            "nullable": true,
+            "description": "电信线路 IP，没有就传 null 或不传。",
+            "example": null
+          },
+          "mobile_ip": {
+            "type": "string",
+            "nullable": true,
+            "description": "移动线路 IP，没有就传 null 或不传。",
+            "example": null
+          },
+          "unicom_ip": {
+            "type": "string",
+            "nullable": true,
+            "description": "联通线路 IP，没有就传 null 或不传。",
+            "example": null
+          },
+          "tag": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 64,
+            "description": "节点标签，例如 default、premium、HK。可用于业务后台分组展示。",
+            "example": "default"
+          }
+        }
+      },
+      "BusinessCreateNodeResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "node",
+          "install_state",
+          "next_step",
+          "server_time"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "node": {
+            "$ref": "#/components/schemas/BusinessNodeSummary"
+          },
+          "install_state": {
+            "type": "string",
+            "enum": [
+              "pending_install"
+            ],
+            "description": "节点基础信息已创建，但还没有安装节点内核。",
+            "example": "pending_install"
+          },
+          "next_step": {
+            "type": "string",
+            "description": "下一步处理建议。业务后台只负责登记基础信息，安装部署仍由控制面完成。",
+            "example": "generate bootstrap token or deploy node from control panel"
+          },
+          "server_time": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1781070000
+          }
+        }
+      },
+      "BusinessNodeSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "endpoint",
+          "server_ip",
+          "server_port",
+          "is_support_ipv6",
+          "area",
+          "bandwidth_quality",
+          "disable_quic",
+          "status",
+          "config_revision",
+          "ssh_credential"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "uint64",
+            "description": "控制面节点 ID。后续同步路由时 route.node_id 使用这个值。",
+            "example": 3
+          },
+          "name": {
+            "type": "string",
+            "example": "香港节点-01"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "公网入口，格式为 server_ip:server_port。",
+            "example": "47.83.160.126:666"
+          },
+          "server_ip": {
+            "type": "string",
+            "example": "47.83.160.126"
+          },
+          "server_port": {
+            "type": "integer",
+            "format": "uint16",
+            "example": 666
+          },
+          "relay_server_ip": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "relay_server_port": {
+            "type": "integer",
+            "format": "uint16",
+            "nullable": true,
+            "example": null
+          },
+          "is_support_ipv6": {
+            "type": "boolean",
+            "example": false
+          },
+          "area": {
+            "type": "string",
+            "example": "HK"
+          },
+          "tag": {
+            "type": "string",
+            "nullable": true,
+            "example": "default"
+          },
+          "bandwidth_quality": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "normal",
+              "slow"
+            ],
+            "example": "normal"
+          },
+          "disable_quic": {
+            "type": "boolean",
+            "example": false
+          },
+          "telecom_ip": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "mobile_ip": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "unicom_ip": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "status": {
+            "type": "string",
+            "description": "创建后默认为 pending_install。节点安装并上报后会变为 online。",
+            "example": "pending_install"
+          },
+          "kernel_version": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "config_revision": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1
+          },
+          "last_seen_at": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true,
+            "example": null
+          },
+          "last_report_at": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true,
+            "example": null
+          },
+          "latest_report": {
+            "nullable": true,
+            "description": "最新节点上报摘要。新建未安装节点一般为 null。",
+            "example": null
+          },
+          "ssh_credential": {
+            "$ref": "#/components/schemas/BusinessNodeSshCredentialSummary"
+          }
+        }
+      },
+      "BusinessNodeSshCredentialSummary": {
+        "type": "object",
+        "required": [
+          "configured"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "是否已经在控制面保存 SSH 凭据。业务新增节点接口不会保存 SSH。",
+            "example": false
+          },
+          "host": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "nullable": true,
+            "example": null
+          },
+          "username": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "auth_status": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "last_error": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "last_checked_at": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true,
+            "example": null
           }
         }
       },

@@ -197,6 +197,18 @@ curl -fsSL http://127.0.0.1:18080/api/business/v1/status \
   -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}"
 ```
 
+Business backend can register node basics before operators deploy the node core:
+
+```bash
+curl -fsSL -X POST http://127.0.0.1:18080/api/business/v1/nodes \
+  -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"香港节点-01","server_ip":"47.83.160.126","server_port":666,"area":"HK","tag":"default","bandwidth_quality":"normal","disable_quic":false,"is_support_ipv6":false}'
+```
+
+The response returns the control-plane `node.id`; later `sync-catalog`
+route entries should reference that value in `routes[].node_id`.
+
 After the business backend has checked login, entitlement, device limits, and
 game access, it can request the node candidates and short-lived node credential
 for the client:

@@ -2766,7 +2766,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.59.0</span>
+          <span class="mono">v0.60.0</span>
         </div>
       </aside>
 
@@ -3343,6 +3343,7 @@
                   <select id="businessApiEndpointFilter">
                     <option value="">全部接口</option>
                     <option value="status">status</option>
+                    <option value="nodes">nodes</option>
                     <option value="sync-catalog">sync-catalog</option>
                     <option value="connect-intent">connect-intent</option>
                   </select>
@@ -3598,7 +3599,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.59.0</div>
+              <div class="insight-value">0.60.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -7073,6 +7074,7 @@
 
       function businessApiEndpointText(endpoint) {
         if (endpoint === "status") return "状态检查";
+        if (endpoint === "nodes") return "新增节点";
         if (endpoint === "sync-catalog") return "同步目录";
         if (endpoint === "connect-intent") return "签发意图";
         if (endpoint === "probe") return "节点探测";
@@ -7308,7 +7310,7 @@
           ? `${logs.length} 条业务日志 / 刷新 ${formatClock(serverTime)}`
           : "暂无业务 API 调用日志";
         if (!logs.length) {
-          els.businessApiLogRows.innerHTML = `<tr><td colspan="6" class="empty">暂无业务 API 调用日志。业务后台调用 status、sync-catalog、connect-intent 后会在这里留下记录。</td></tr>`;
+          els.businessApiLogRows.innerHTML = `<tr><td colspan="6" class="empty">暂无业务 API 调用日志。业务后台调用 status、nodes、sync-catalog、connect-intent 后会在这里留下记录。</td></tr>`;
           renderPager("businessApiLogs", 0, els.businessApiLogPager);
           return;
         }

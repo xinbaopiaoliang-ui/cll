@@ -69,13 +69,13 @@ Apifox 可直接导入 OpenAPI 文件：[apifox-business-api.openapi.json](apifo
 
 ## 控制面联调入口
 
-从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台。`0.58.0` 起，联调结果会以卡片展示，并支持一键探测节点。`0.59.0` 起，`sync-catalog` 支持游戏内嵌多个分类、区服和节点线路：
+从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台。`0.58.0` 起，联调结果会以卡片展示，并支持一键探测节点。`0.59.0` 起，`sync-catalog` 支持游戏内嵌多个分类、区服和节点线路。`0.60.0` 起，业务后台可以调用业务 API 登记节点基础信息：
 
 - “状态检查”会调用控制面内部业务状态接口，确认业务 API Token、节点、游戏和路由是否可用。
 - “同步目录”可以粘贴业务后台准备下发的 `sync-catalog` JSON，先验证游戏、区服和线路执行副本是否能写入。
 - “签发意图”可以粘贴 `connect-intent` JSON，检查能否拿到候选节点和路由凭证。
 - “一键探测节点”会复用签发意图里的用户、设备、游戏和区服参数，自动执行 UDP probe 和 session.data 转发测试。
-- “业务 API 调用日志”会展示业务后台和控制面联调工具调用 `status`、`sync-catalog`、`connect-intent` 的记录，便于联调时定位问题。
+- “业务 API 调用日志”会展示业务后台和控制面联调工具调用 `status`、`nodes`、`sync-catalog`、`connect-intent` 的记录，便于联调时定位问题。
 
 日常新增、编辑游戏和区服仍然由业务后台负责；控制面只做联调、排查和节点运维。
 
@@ -89,7 +89,7 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 ```json
 {
   "status": "ok",
-  "version": "0.59.0",
+  "version": "0.60.0",
   "catalog_owner": "business_backend",
   "control_role": "node_operations",
   "business_api_enabled": true,
@@ -103,7 +103,60 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 
 其中 `catalog_owner=business_backend` 表示游戏、区服、线路主数据由业务后台维护；`control_role=node_operations` 表示控制面只负责节点、调度和执行副本。
 
-## 2. 同步游戏、区服和路由
+## 2. 新增节点基础信息
+
+业务后台只登记节点基础资料，不传 SSH 密码，也不直接安装节点内核。创建成功后节点状态是 `pending_install`，后续由控制面生成安装令牌或通过已配置 SSH 做一键部署。
+
+```bash
+curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/nodes \
+  -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "香港节点-01",
+    "server_ip": "47.83.160.126",
+    "server_port": 666,
+    "area": "HK",
+    "tag": "default",
+    "bandwidth_quality": "normal",
+    "disable_quic": false,
+    "is_support_ipv6": false
+  }'
+```
+
+返回示例：
+
+```json
+{
+  "status": "ok",
+  "install_state": "pending_install",
+  "next_step": "generate bootstrap token or deploy node from control panel",
+  "node": {
+    "id": 3,
+    "name": "香港节点-01",
+    "endpoint": "47.83.160.126:666",
+    "server_ip": "47.83.160.126",
+    "server_port": 666,
+    "area": "HK",
+    "tag": "default",
+    "bandwidth_quality": "normal",
+    "status": "pending_install",
+    "config_revision": 1,
+    "ssh_credential": {
+      "configured": false
+    }
+  },
+  "server_time": 1781070000
+}
+```
+
+注意：
+
+- 相同 `server_ip + server_port` 不能重复创建，重复时返回 `node_endpoint_exists`。
+- `server_port` 是节点内核监听端口，不是 SSH 端口。
+- 节点 ID 会在后续 `sync-catalog` 的 `routes[].node_id` 中使用。
+- SSH 账号密码仍然由控制面节点运维模块管理，不走业务 API。
+
+## 3. 同步游戏、区服和路由
 
 业务后台把游戏、分类、区服和路由执行副本同步到控制面。建议业务后台保存自己的 `external_id`，后续修改同一路由时使用同一个 `external_id`。
 
@@ -170,7 +223,7 @@ curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/sync-catalog \
 }
 ```
 
-## 3. 业务后台签发加速意图
+## 4. 业务后台签发加速意图
 
 业务后台完成用户权益校验后调用此接口。该接口会返回节点候选、节点 token 和路由目标。
 
