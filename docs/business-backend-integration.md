@@ -69,7 +69,7 @@ Apifox 可直接导入 OpenAPI 文件：[apifox-business-api.openapi.json](apifo
 
 ## 控制面联调入口
 
-从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台。`0.58.0` 起，联调结果会以卡片展示，并支持一键探测节点。`0.59.0` 起，`sync-catalog` 支持游戏内嵌多个分类、区服和节点线路。`0.60.0` 起，业务后台可以调用业务 API 登记节点基础信息：
+从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台。`0.58.0` 起，联调结果会以卡片展示，并支持一键探测节点。`0.59.0` 起，`sync-catalog` 支持游戏内嵌多个分类、区服和节点线路。`0.60.0` 起，业务后台可以调用业务 API 登记节点基础信息。`0.61.0` 起，业务 API 补齐节点 CRUD 和目录快照/删除：
 
 - “状态检查”会调用控制面内部业务状态接口，确认业务 API Token、节点、游戏和路由是否可用。
 - “同步目录”可以粘贴业务后台准备下发的 `sync-catalog` JSON，先验证游戏、区服和线路执行副本是否能写入。
@@ -89,7 +89,7 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 ```json
 {
   "status": "ok",
-  "version": "0.60.0",
+  "version": "0.61.0",
   "catalog_owner": "business_backend",
   "control_role": "node_operations",
   "business_api_enabled": true,
@@ -103,9 +103,17 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 
 其中 `catalog_owner=business_backend` 表示游戏、区服、线路主数据由业务后台维护；`control_role=node_operations` 表示控制面只负责节点、调度和执行副本。
 
-## 2. 新增节点基础信息
+## 2. 节点基础信息 CRUD
 
 业务后台只登记节点基础资料，不传 SSH 密码，也不直接安装节点内核。创建成功后节点状态是 `pending_install`，后续由控制面生成安装令牌或通过已配置 SSH 做一键部署。
+
+支持的节点接口：
+
+- `GET /api/business/v1/nodes`：查询控制面已有节点。
+- `GET /api/business/v1/nodes/{node_id}`：查询单个节点。
+- `POST /api/business/v1/nodes`：新增节点基础信息。
+- `PUT /api/business/v1/nodes/{node_id}`：修改节点基础信息。
+- `DELETE /api/business/v1/nodes/{node_id}`：删除节点基础信息。
 
 ```bash
 curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/nodes \
@@ -156,11 +164,43 @@ curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/nodes \
 - 节点 ID 会在后续 `sync-catalog` 的 `routes[].node_id` 中使用。
 - SSH 账号密码仍然由控制面节点运维模块管理，不走业务 API。
 
-## 3. 同步游戏、区服和路由
+修改节点使用同一套节点字段：
+
+```bash
+curl -fsSL -X PUT http://103.201.131.99:18080/api/business/v1/nodes/3 \
+  -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "香港节点-01",
+    "server_ip": "47.83.160.126",
+    "server_port": 666,
+    "area": "HK",
+    "tag": "default",
+    "bandwidth_quality": "fast",
+    "disable_quic": false,
+    "is_support_ipv6": false
+  }'
+```
+
+删除节点：
+
+```bash
+curl -fsSL -X DELETE http://103.201.131.99:18080/api/business/v1/nodes/3 \
+  -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}"
+```
+
+## 3. 同步、查询和删除游戏目录
 
 业务后台把游戏、分类、区服和路由执行副本同步到控制面。建议业务后台保存自己的 `external_id`，后续修改同一路由时使用同一个 `external_id`。
 
 推荐使用新版嵌套格式：一个 `game` 里可以带多个 `categories`、多个 `regions`，每个区服下面可以带多个 `routes`，这样更贴近业务后台里的“游戏 -> 区服 -> 节点线路”结构。旧版顶层 `regions` 和 `route_rules` 数组仍然兼容，适合分步同步。
+
+支持的目录接口：
+
+- `GET /api/business/v1/sync-catalog`：查询控制面当前游戏、区服和路由执行副本。
+- `POST /api/business/v1/sync-catalog`：批量新增或覆盖同步。
+- `PUT /api/business/v1/sync-catalog`：与 `POST` 一样，用于业务后台重放更新。
+- `DELETE /api/business/v1/sync-catalog`：按游戏、区服、线路 ID 或业务 `external_id` 删除执行副本。
 
 ```bash
 curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/sync-catalog \
@@ -222,6 +262,37 @@ curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/sync-catalog \
   "server_time": 1781070000
 }
 ```
+
+查询目录快照：
+
+```bash
+curl -fsSL 'http://103.201.131.99:18080/api/business/v1/sync-catalog?game_id=8888&node_id=2&status=enabled' \
+  -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}"
+```
+
+删除目录执行副本：
+
+```bash
+curl -fsSL -X DELETE http://103.201.131.99:18080/api/business/v1/sync-catalog \
+  -H "Authorization: Bearer ${XACCEL_BUSINESS_SYNC_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "source": "business-admin",
+    "game_ids": [9999],
+    "regions": [
+      { "game_id": 8888, "region_id": 2 }
+    ],
+    "route_rule_ids": [12],
+    "route_external_ids": ["route-8888-hk-node2"]
+  }'
+```
+
+删除规则：
+
+- `game_ids` 会删除该游戏、分类、区服和该游戏下所有线路。
+- `regions` 会删除指定游戏区服，以及该区服下的线路。
+- `route_rule_ids` 只按控制面线路规则 ID 删除。
+- `route_external_ids` 按业务后台传入的线路 `external_id` 删除；带 `source` 时只删除同来源的数据。
 
 ## 4. 业务后台签发加速意图
 

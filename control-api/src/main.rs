@@ -704,6 +704,7 @@ struct AdminCreateNodeRequest {
 
 type AdminUpdateNodeRequest = AdminCreateNodeRequest;
 type BusinessCreateNodeRequest = AdminCreateNodeRequest;
+type BusinessUpdateNodeRequest = AdminCreateNodeRequest;
 
 #[derive(Debug, Deserialize)]
 struct AdminUpdateNodeStatusRequest {
@@ -1116,6 +1117,33 @@ struct BusinessSyncRouteRule {
     status: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct BusinessCatalogSnapshotQuery {
+    game_id: Option<u64>,
+    node_id: Option<u64>,
+    status: Option<String>,
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BusinessDeleteCatalogRequest {
+    #[serde(default)]
+    game_ids: Vec<u64>,
+    #[serde(default)]
+    regions: Vec<BusinessDeleteCatalogRegionRef>,
+    #[serde(default)]
+    route_rule_ids: Vec<u64>,
+    #[serde(default)]
+    route_external_ids: Vec<String>,
+    source: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BusinessDeleteCatalogRegionRef {
+    game_id: u64,
+    region_id: u64,
+}
+
 #[derive(Debug, Serialize)]
 struct AdminListNodesResponse {
     nodes: Vec<AdminNodeSummary>,
@@ -1256,6 +1284,38 @@ struct BusinessSyncCatalogResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct BusinessCatalogSnapshotResponse {
+    games: Vec<AdminGameSummary>,
+    regions: Vec<BusinessCatalogRegionSummary>,
+    route_rules: Vec<AdminRouteRuleSummary>,
+    total_games: usize,
+    total_regions: usize,
+    total_route_rules: usize,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct BusinessCatalogRegionSummary {
+    game_id: u64,
+    region_id: u64,
+    name: String,
+    area: Option<String>,
+    status: String,
+    remark: Option<String>,
+    created_at: Option<u64>,
+    updated_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct BusinessDeleteCatalogResponse {
+    status: &'static str,
+    games_deleted: u64,
+    regions_deleted: u64,
+    route_rules_deleted: u64,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
 struct BusinessConnectIntentResponse {
     status: &'static str,
     request_id: Option<String>,
@@ -1271,6 +1331,28 @@ struct BusinessCreateNodeResponse {
     node: AdminNodeSummary,
     install_state: &'static str,
     next_step: &'static str,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct BusinessListNodesResponse {
+    nodes: Vec<AdminNodeSummary>,
+    total: usize,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct BusinessNodeResponse {
+    status: &'static str,
+    node: AdminNodeSummary,
+    server_time: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct BusinessDeleteNodeResponse {
+    status: &'static str,
+    node_id: u64,
+    deleted: bool,
     server_time: u64,
 }
 
@@ -1736,6 +1818,18 @@ struct AdminRouteRuleRow {
     updated_at: Option<u64>,
 }
 
+#[derive(Debug, FromRow)]
+struct BusinessCatalogRegionRow {
+    game_id: u64,
+    region_id: u64,
+    name: String,
+    area: Option<String>,
+    status: String,
+    remark: Option<String>,
+    created_at: Option<u64>,
+    updated_at: Option<u64>,
+}
+
 #[derive(Debug)]
 struct NormalizedCreateNode {
     name: String,
@@ -1799,6 +1893,29 @@ struct BusinessSyncCatalog {
     games: Vec<NormalizedGame>,
     regions: Vec<NormalizedGameRegion>,
     route_rules: Vec<NormalizedRouteRule>,
+}
+
+#[derive(Debug)]
+struct NormalizedBusinessCatalogSnapshotQuery {
+    game_id: Option<u64>,
+    node_id: Option<u64>,
+    status: Option<String>,
+    limit: Option<u32>,
+}
+
+#[derive(Debug)]
+struct NormalizedBusinessDeleteCatalog {
+    game_ids: Vec<u64>,
+    regions: Vec<NormalizedBusinessDeleteCatalogRegionRef>,
+    route_rule_ids: Vec<u64>,
+    route_external_ids: Vec<String>,
+    source: Option<String>,
+}
+
+#[derive(Debug)]
+struct NormalizedBusinessDeleteCatalogRegionRef {
+    game_id: u64,
+    region_id: u64,
 }
 
 struct NewBusinessApiLog<'a> {
@@ -1951,8 +2068,23 @@ async fn main() -> anyhow::Result<()> {
             "/api/business/v1/connect-intent",
             post(business_connect_intent),
         )
-        .route("/api/business/v1/nodes", post(business_create_node))
-        .route("/api/business/v1/sync-catalog", post(business_sync_catalog))
+        .route(
+            "/api/business/v1/nodes",
+            get(business_list_nodes).post(business_create_node),
+        )
+        .route(
+            "/api/business/v1/nodes/:node_id",
+            get(business_get_node)
+                .put(business_update_node)
+                .delete(business_delete_node),
+        )
+        .route(
+            "/api/business/v1/sync-catalog",
+            get(business_get_catalog)
+                .post(business_sync_catalog)
+                .put(business_sync_catalog)
+                .delete(business_delete_catalog),
+        )
         .route(NODE_BOOTSTRAP_PATH, post(node_bootstrap))
         .route(NODE_HANDSHAKE_PATH, post(node_handshake))
         .route(NODE_CONFIG_PATH, get(node_config))
@@ -3142,6 +3274,135 @@ async fn connect_intent(
     Ok(Json(response))
 }
 
+async fn business_list_nodes(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<AdminListNodesQuery>,
+) -> Result<Json<BusinessListNodesResponse>, AppError> {
+    require_business_sync(&state, &headers)?;
+    let limit = clamp_limit(query.limit, 200, 500);
+    let rows = match select_admin_nodes(&state.pool, limit).await {
+        Ok(rows) => rows,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "business.node.list",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let nodes = rows
+        .into_iter()
+        .map(AdminNodeSummary::from_row)
+        .collect::<Vec<_>>();
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "nodes",
+            action: "business.node.list",
+            source: "business_api",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "limit": limit,
+                "total": nodes.len(),
+            }),
+        },
+    )
+    .await;
+
+    Ok(Json(BusinessListNodesResponse {
+        total: nodes.len(),
+        nodes,
+        server_time: now_unix(),
+    }))
+}
+
+async fn business_get_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+) -> Result<Json<BusinessNodeResponse>, AppError> {
+    require_business_sync(&state, &headers)?;
+    let node = match select_admin_node(&state.pool, node_id).await {
+        Ok(Some(node)) => node,
+        Ok(None) => {
+            let error = AppError::not_found("node_not_found", "node does not exist");
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "business.node.get",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "business.node.get",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let node_summary = AdminNodeSummary::from_row(node);
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "nodes",
+            action: "business.node.get",
+            source: "business_api",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "node_id": node_summary.id,
+                "endpoint": node_summary.endpoint.clone(),
+                "status": node_summary.status.clone(),
+            }),
+        },
+    )
+    .await;
+
+    Ok(Json(BusinessNodeResponse {
+        status: "ok",
+        node: node_summary,
+        server_time: now_unix(),
+    }))
+}
+
 async fn business_sync_catalog(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -3210,6 +3471,220 @@ async fn business_sync_catalog(
                 "regions_upserted": log_regions,
                 "route_rules_upserted": log_routes,
                 "revision": log_revision,
+            }),
+        },
+    )
+    .await;
+    Ok(Json(response))
+}
+
+async fn business_get_catalog(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<BusinessCatalogSnapshotQuery>,
+) -> Result<Json<BusinessCatalogSnapshotResponse>, AppError> {
+    require_business_sync(&state, &headers)?;
+    let query = match normalize_business_catalog_snapshot_query(query) {
+        Ok(query) => query,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "business.catalog.get",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let limit = clamp_limit(query.limit, 200, 500);
+    let games = match select_business_catalog_games(&state.pool, &query, limit).await {
+        Ok(games) => games
+            .into_iter()
+            .map(AdminGameSummary::from_row)
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "business.catalog.get",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let regions = match select_business_catalog_regions(&state.pool, &query, limit).await {
+        Ok(regions) => regions
+            .into_iter()
+            .map(BusinessCatalogRegionSummary::from_row)
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "business.catalog.get",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let route_query = AdminListRouteRulesQuery {
+        game_id: query.game_id,
+        region_id: None,
+        node_id: query.node_id,
+        status: query.status.clone(),
+        limit: Some(limit),
+    };
+    let route_rules = match select_admin_route_rules(&state.pool, &route_query, limit).await {
+        Ok(route_rules) => route_rules
+            .into_iter()
+            .map(AdminRouteRuleSummary::from_row)
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "business.catalog.get",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "sync-catalog",
+            action: "business.catalog.get",
+            source: "business_api",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: query.game_id,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "node_id": query.node_id,
+                "status_filter": query.status,
+                "limit": limit,
+                "total_games": games.len(),
+                "total_regions": regions.len(),
+                "total_route_rules": route_rules.len(),
+            }),
+        },
+    )
+    .await;
+
+    Ok(Json(BusinessCatalogSnapshotResponse {
+        total_games: games.len(),
+        total_regions: regions.len(),
+        total_route_rules: route_rules.len(),
+        games,
+        regions,
+        route_rules,
+        server_time: now_unix(),
+    }))
+}
+
+async fn business_delete_catalog(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<BusinessDeleteCatalogRequest>,
+) -> Result<Json<BusinessDeleteCatalogResponse>, AppError> {
+    require_business_sync(&state, &headers)?;
+    let request = match normalize_business_delete_catalog(request) {
+        Ok(request) => request,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "business.catalog.delete",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let log_detail = json!({
+        "game_ids": request.game_ids,
+        "regions": request
+            .regions
+            .iter()
+            .map(|region| json!({
+                "game_id": region.game_id,
+                "region_id": region.region_id,
+            }))
+            .collect::<Vec<_>>(),
+        "route_rule_ids": request.route_rule_ids,
+        "route_external_ids": request.route_external_ids,
+        "source": request.source,
+    });
+    let response = match delete_business_catalog(&state.pool, &request).await {
+        Ok(response) => response,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "business.catalog.delete",
+                request.source.as_deref().unwrap_or("business_api"),
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "sync-catalog",
+            action: "business.catalog.delete",
+            source: request.source.as_deref().unwrap_or("business_api"),
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "request": log_detail,
+                "games_deleted": response.games_deleted,
+                "regions_deleted": response.regions_deleted,
+                "route_rules_deleted": response.route_rules_deleted,
             }),
         },
     )
@@ -3425,6 +3900,168 @@ async fn business_create_node(
         node: node_summary,
         install_state: "pending_install",
         next_step: "generate bootstrap token or deploy node from control panel",
+        server_time: now_unix(),
+    }))
+}
+
+async fn business_update_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+    Json(request): Json<BusinessUpdateNodeRequest>,
+) -> Result<Json<BusinessNodeResponse>, AppError> {
+    require_business_sync(&state, &headers)?;
+    let detail = json!({
+        "node_id": node_id,
+        "name": request.name.clone(),
+        "server_ip": request.server_ip.clone(),
+        "server_port": request.server_port,
+        "area": request.area.clone(),
+        "tag": request.tag.clone(),
+        "bandwidth_quality": request.bandwidth_quality.clone(),
+    });
+    if let Err(error) = update_admin_node_config(&state.pool, node_id, request).await {
+        record_business_api_failure_best_effort(
+            &state.pool,
+            "nodes",
+            "business.node.update",
+            "business_api",
+            None,
+            None,
+            None,
+            None,
+            &error,
+        )
+        .await;
+        return Err(error);
+    }
+    let node = match select_admin_node(&state.pool, node_id).await {
+        Ok(Some(node)) => node,
+        Ok(None) => {
+            let error = AppError::not_found("node_not_found", "updated node does not exist");
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "business.node.update",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "business.node.update",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    if let Err(error) = insert_node_audit_log(
+        &state.pool,
+        node_id,
+        "business_api",
+        None,
+        "node.business_update",
+        detail.clone(),
+    )
+    .await
+    {
+        error!(
+            error = %error.message,
+            node_id,
+            "failed to record business node update audit log"
+        );
+    }
+    let node_summary = AdminNodeSummary::from_row(node);
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "nodes",
+            action: "business.node.update",
+            source: "business_api",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail,
+        },
+    )
+    .await;
+
+    Ok(Json(BusinessNodeResponse {
+        status: "ok",
+        node: node_summary,
+        server_time: now_unix(),
+    }))
+}
+
+async fn business_delete_node(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(node_id): Path<u64>,
+) -> Result<Json<BusinessDeleteNodeResponse>, AppError> {
+    require_business_sync(&state, &headers)?;
+    let deleted = match delete_admin_node(&state.pool, node_id).await {
+        Ok(deleted) => deleted,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "nodes",
+                "business.node.delete",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    record_business_api_log_best_effort(
+        &state.pool,
+        NewBusinessApiLog {
+            endpoint: "nodes",
+            action: "business.node.delete",
+            source: "business_api",
+            request_id: None,
+            status: "succeeded",
+            http_status: Some(200),
+            user_id: None,
+            game_id: None,
+            region_id: None,
+            error_code: None,
+            error_message: None,
+            detail: json!({
+                "node_id": node_id,
+                "deleted": deleted,
+            }),
+        },
+    )
+    .await;
+
+    Ok(Json(BusinessDeleteNodeResponse {
+        status: "ok",
+        node_id,
+        deleted,
         server_time: now_unix(),
     }))
 }
@@ -7365,6 +8002,118 @@ LIMIT 1
     .map_err(AppError::database)
 }
 
+async fn select_business_catalog_games(
+    pool: &MySqlPool,
+    query: &NormalizedBusinessCatalogSnapshotQuery,
+    limit: u32,
+) -> Result<Vec<AdminGameRow>, AppError> {
+    let mut builder = QueryBuilder::<MySql>::new(
+        r#"
+SELECT
+  g.id,
+  g.game_id,
+  g.name,
+  g.platform,
+  COALESCE(GROUP_CONCAT(gc.category ORDER BY gc.sort_order ASC, gc.category ASC SEPARATOR ' / '), g.category) AS category,
+  g.icon_url,
+  g.status,
+  g.remark,
+  CAST(COUNT(DISTINCT r.id) AS UNSIGNED) AS route_count,
+  CAST(UNIX_TIMESTAMP(g.created_at) AS UNSIGNED) AS created_at,
+  CAST(UNIX_TIMESTAMP(g.updated_at) AS UNSIGNED) AS updated_at
+FROM accel_games g
+LEFT JOIN game_route_rules r ON r.game_id = g.game_id
+LEFT JOIN accel_game_categories gc ON gc.game_id = g.game_id
+WHERE 1 = 1
+"#,
+    );
+    if let Some(game_id) = query.game_id {
+        builder.push(" AND g.game_id = ");
+        builder.push_bind(game_id);
+    }
+    if let Some(status) = query.status.as_deref() {
+        builder.push(" AND g.status = ");
+        builder.push_bind(status);
+    }
+    if let Some(node_id) = query.node_id {
+        builder.push(" AND EXISTS (SELECT 1 FROM game_route_rules nr WHERE nr.game_id = g.game_id AND nr.node_id = ");
+        builder.push_bind(node_id);
+        builder.push(")");
+    }
+    builder.push(
+        r#"
+GROUP BY
+  g.id,
+  g.game_id,
+  g.name,
+  g.platform,
+  g.category,
+  g.icon_url,
+  g.status,
+  g.remark,
+  g.created_at,
+  g.updated_at
+ORDER BY g.status ASC, g.game_id ASC
+LIMIT
+"#,
+    );
+    builder.push_bind(limit);
+
+    builder
+        .build_query_as::<AdminGameRow>()
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::database)
+}
+
+async fn select_business_catalog_regions(
+    pool: &MySqlPool,
+    query: &NormalizedBusinessCatalogSnapshotQuery,
+    limit: u32,
+) -> Result<Vec<BusinessCatalogRegionRow>, AppError> {
+    let mut builder = QueryBuilder::<MySql>::new(
+        r#"
+SELECT
+  gr.game_id,
+  gr.region_id,
+  gr.name,
+  gr.area,
+  gr.status,
+  gr.remark,
+  CAST(UNIX_TIMESTAMP(gr.created_at) AS UNSIGNED) AS created_at,
+  CAST(UNIX_TIMESTAMP(gr.updated_at) AS UNSIGNED) AS updated_at
+FROM accel_game_regions gr
+WHERE 1 = 1
+"#,
+    );
+    if let Some(game_id) = query.game_id {
+        builder.push(" AND gr.game_id = ");
+        builder.push_bind(game_id);
+    }
+    if let Some(status) = query.status.as_deref() {
+        builder.push(" AND gr.status = ");
+        builder.push_bind(status);
+    }
+    if let Some(node_id) = query.node_id {
+        builder.push(" AND EXISTS (SELECT 1 FROM game_route_rules r WHERE r.game_id = gr.game_id AND r.region_id = gr.region_id AND r.node_id = ");
+        builder.push_bind(node_id);
+        builder.push(")");
+    }
+    builder.push(
+        r#"
+ORDER BY gr.game_id ASC, gr.region_id ASC
+LIMIT
+"#,
+    );
+    builder.push_bind(limit);
+
+    builder
+        .build_query_as::<BusinessCatalogRegionRow>()
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::database)
+}
+
 async fn insert_admin_game(pool: &MySqlPool, request: AdminGameRequest) -> Result<u64, AppError> {
     let game = normalize_game_request(&request)?;
     let mut tx = pool.begin().await.map_err(AppError::database)?;
@@ -7623,6 +8372,136 @@ async fn sync_business_catalog(
         categories_upserted,
         regions_upserted,
         route_rules_upserted,
+        server_time: now_unix(),
+    })
+}
+
+async fn delete_business_catalog(
+    pool: &MySqlPool,
+    request: &NormalizedBusinessDeleteCatalog,
+) -> Result<BusinessDeleteCatalogResponse, AppError> {
+    let mut tx = pool.begin().await.map_err(AppError::database)?;
+    let mut games_deleted = 0;
+    let mut regions_deleted = 0;
+    let mut route_rules_deleted = 0;
+
+    for rule_id in &request.route_rule_ids {
+        let result = sqlx::query(
+            r#"
+DELETE FROM game_route_rules
+WHERE id = ?
+"#,
+        )
+        .bind(rule_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::database)?;
+        route_rules_deleted += result.rows_affected();
+    }
+
+    for external_id in &request.route_external_ids {
+        let result = sqlx::query(
+            r#"
+DELETE FROM game_route_rules
+WHERE external_id = ?
+  AND (? IS NULL OR sync_source = ?)
+"#,
+        )
+        .bind(external_id)
+        .bind(request.source.as_deref())
+        .bind(request.source.as_deref())
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::database)?;
+        route_rules_deleted += result.rows_affected();
+    }
+
+    for region in &request.regions {
+        let route_result = sqlx::query(
+            r#"
+DELETE FROM game_route_rules
+WHERE game_id = ?
+  AND region_id = ?
+"#,
+        )
+        .bind(region.game_id)
+        .bind(region.region_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::database)?;
+        route_rules_deleted += route_result.rows_affected();
+
+        let region_result = sqlx::query(
+            r#"
+DELETE FROM accel_game_regions
+WHERE game_id = ?
+  AND region_id = ?
+"#,
+        )
+        .bind(region.game_id)
+        .bind(region.region_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::database)?;
+        regions_deleted += region_result.rows_affected();
+    }
+
+    for game_id in &request.game_ids {
+        let route_result = sqlx::query(
+            r#"
+DELETE FROM game_route_rules
+WHERE game_id = ?
+"#,
+        )
+        .bind(game_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::database)?;
+        route_rules_deleted += route_result.rows_affected();
+
+        let region_result = sqlx::query(
+            r#"
+DELETE FROM accel_game_regions
+WHERE game_id = ?
+"#,
+        )
+        .bind(game_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::database)?;
+        regions_deleted += region_result.rows_affected();
+
+        sqlx::query(
+            r#"
+DELETE FROM accel_game_categories
+WHERE game_id = ?
+"#,
+        )
+        .bind(game_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::database)?;
+
+        let game_result = sqlx::query(
+            r#"
+DELETE FROM accel_games
+WHERE game_id = ?
+"#,
+        )
+        .bind(game_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::database)?;
+        games_deleted += game_result.rows_affected();
+    }
+
+    tx.commit().await.map_err(AppError::database)?;
+
+    Ok(BusinessDeleteCatalogResponse {
+        status: "ok",
+        games_deleted,
+        regions_deleted,
+        route_rules_deleted,
         server_time: now_unix(),
     })
 }
@@ -9147,6 +10026,107 @@ fn normalize_business_sync_catalog(
         regions,
         route_rules,
     })
+}
+
+fn normalize_business_catalog_snapshot_query(
+    query: BusinessCatalogSnapshotQuery,
+) -> Result<NormalizedBusinessCatalogSnapshotQuery, AppError> {
+    if query.game_id == Some(0) {
+        return Err(AppError::bad_request(
+            "invalid_game",
+            "game_id must be positive",
+        ));
+    }
+    if query.node_id == Some(0) {
+        return Err(AppError::bad_request(
+            "invalid_node",
+            "node_id must be positive",
+        ));
+    }
+    let status = match normalize_optional_text(query.status.as_deref(), 32)? {
+        Some(status) => Some(validate_game_status(&status)?.to_string()),
+        None => None,
+    };
+    Ok(NormalizedBusinessCatalogSnapshotQuery {
+        game_id: query.game_id,
+        node_id: query.node_id,
+        status,
+        limit: query.limit,
+    })
+}
+
+fn normalize_business_delete_catalog(
+    request: BusinessDeleteCatalogRequest,
+) -> Result<NormalizedBusinessDeleteCatalog, AppError> {
+    let game_ids = normalize_positive_u64_set(request.game_ids, "game_id")?;
+    let route_rule_ids = normalize_positive_u64_set(request.route_rule_ids, "route_rule_id")?;
+    let mut region_seen = HashSet::new();
+    let mut regions = Vec::with_capacity(request.regions.len());
+    for region in request.regions {
+        if region.game_id == 0 {
+            return Err(AppError::bad_request(
+                "invalid_game",
+                "region.game_id must be positive",
+            ));
+        }
+        if region.region_id == 0 {
+            return Err(AppError::bad_request(
+                "invalid_region",
+                "region.region_id must be positive",
+            ));
+        }
+        if region_seen.insert((region.game_id, region.region_id)) {
+            regions.push(NormalizedBusinessDeleteCatalogRegionRef {
+                game_id: region.game_id,
+                region_id: region.region_id,
+            });
+        }
+    }
+
+    let mut external_seen = HashSet::new();
+    let mut route_external_ids = Vec::with_capacity(request.route_external_ids.len());
+    for external_id in request.route_external_ids {
+        let external_id = normalize_required_text(&external_id, "route_external_id", 128)?;
+        if external_seen.insert(external_id.to_ascii_lowercase()) {
+            route_external_ids.push(external_id);
+        }
+    }
+    let source = normalize_optional_text(request.source.as_deref(), 32)?;
+    if game_ids.is_empty()
+        && regions.is_empty()
+        && route_rule_ids.is_empty()
+        && route_external_ids.is_empty()
+    {
+        return Err(AppError::bad_request(
+            "empty_delete_catalog",
+            "at least one game_id, region, route_rule_id, or route_external_id is required",
+        ));
+    }
+
+    Ok(NormalizedBusinessDeleteCatalog {
+        game_ids,
+        regions,
+        route_rule_ids,
+        route_external_ids,
+        source,
+    })
+}
+
+fn normalize_positive_u64_set(values: Vec<u64>, field: &'static str) -> Result<Vec<u64>, AppError> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::with_capacity(values.len());
+    for value in values {
+        if value == 0 {
+            return Err(AppError::bad_request(
+                "invalid_id",
+                format!("{field} must be positive"),
+            ));
+        }
+        if seen.insert(value) {
+            normalized.push(value);
+        }
+    }
+    Ok(normalized)
 }
 
 fn normalize_business_log_endpoint_filter(value: Option<&str>) -> Result<Option<String>, AppError> {
@@ -11405,6 +12385,21 @@ impl AdminRouteRuleSummary {
     }
 }
 
+impl BusinessCatalogRegionSummary {
+    fn from_row(row: BusinessCatalogRegionRow) -> Self {
+        Self {
+            game_id: row.game_id,
+            region_id: row.region_id,
+            name: row.name,
+            area: row.area,
+            status: row.status,
+            remark: row.remark,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
 impl CandidateSchedulerInfo {
     fn from_candidate_row(row: &CandidateRow, now: u64) -> Self {
         let latest_report_age_sec = row
@@ -12499,6 +13494,66 @@ mod tests {
         let error = normalize_business_sync_catalog(request).unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.code, "invalid_game");
+    }
+
+    #[test]
+    fn normalizes_business_catalog_snapshot_query() {
+        let query = BusinessCatalogSnapshotQuery {
+            game_id: Some(8888),
+            node_id: Some(2),
+            status: Some(" enabled ".to_string()),
+            limit: Some(50),
+        };
+
+        let query = normalize_business_catalog_snapshot_query(query).expect("query");
+
+        assert_eq!(query.game_id, Some(8888));
+        assert_eq!(query.node_id, Some(2));
+        assert_eq!(query.status.as_deref(), Some("enabled"));
+        assert_eq!(query.limit, Some(50));
+    }
+
+    #[test]
+    fn normalizes_business_delete_catalog() {
+        let request = BusinessDeleteCatalogRequest {
+            game_ids: vec![8888, 8888],
+            regions: vec![
+                BusinessDeleteCatalogRegionRef {
+                    game_id: 8888,
+                    region_id: 1,
+                },
+                BusinessDeleteCatalogRegionRef {
+                    game_id: 8888,
+                    region_id: 1,
+                },
+            ],
+            route_rule_ids: vec![7, 7],
+            route_external_ids: vec![" route-8888-hk ".to_string(), "route-8888-hk".to_string()],
+            source: Some(" billing ".to_string()),
+        };
+
+        let delete = normalize_business_delete_catalog(request).expect("delete request");
+
+        assert_eq!(delete.game_ids, vec![8888]);
+        assert_eq!(delete.regions.len(), 1);
+        assert_eq!(delete.route_rule_ids, vec![7]);
+        assert_eq!(delete.route_external_ids, vec!["route-8888-hk"]);
+        assert_eq!(delete.source.as_deref(), Some("billing"));
+    }
+
+    #[test]
+    fn rejects_empty_business_delete_catalog() {
+        let request = BusinessDeleteCatalogRequest {
+            game_ids: vec![],
+            regions: vec![],
+            route_rule_ids: vec![],
+            route_external_ids: vec![],
+            source: None,
+        };
+
+        let error = normalize_business_delete_catalog(request).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "empty_delete_catalog");
     }
 
     #[test]
