@@ -2219,10 +2219,59 @@
         min-height: 360px;
         max-height: 620px;
         overflow: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
-        font-family: var(--mono);
+        white-space: normal;
+        word-break: normal;
+      }
+
+      .business-result-layout {
+        display: grid;
+        gap: 12px;
+      }
+
+      .business-result-summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .business-result-card {
+        min-width: 0;
+        display: grid;
+        gap: 6px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.76);
+      }
+
+      .business-result-label {
+        color: var(--muted);
         font-size: 12px;
+        font-weight: 760;
+      }
+
+      .business-result-value {
+        min-width: 0;
+        font-family: var(--mono);
+        font-size: 16px;
+        font-weight: 820;
+        overflow-wrap: anywhere;
+      }
+
+      .business-result-note {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .business-candidate-main {
+        display: grid;
+        grid-template-columns: minmax(240px, 0.34fr) minmax(0, 1fr);
+        gap: 12px;
+      }
+
+      .business-raw-json {
+        margin-top: 0;
       }
 
       .task-output-preview {
@@ -2541,6 +2590,8 @@
         .deploy-layout,
         .batch-upgrade-layout,
         .batch-upgrade-item,
+        .business-candidate-main,
+        .business-result-summary,
         .system-diagnostic-layout,
         .secret-panel-body,
         .permission-overview,
@@ -2715,7 +2766,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.57.1</span>
+          <span class="mono">v0.58.0</span>
         </div>
       </aside>
 
@@ -3268,6 +3319,7 @@
                   <div class="panel-meta" id="businessDebugMeta">等待业务 API 调试请求</div>
                 </div>
                 <div class="inline-actions">
+                  <button class="hidden" type="button" id="businessRunProbe">一键探测节点</button>
                   <button type="button" id="businessCopyResult">复制结果</button>
                 </div>
               </div>
@@ -3549,7 +3601,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.57.1</div>
+              <div class="insight-value">0.58.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -4218,6 +4270,7 @@
         auditLogs: [],
         businessApiLogs: [],
         businessDebugResult: null,
+        businessIntentProbePayload: null,
         adminUsers: [],
         systemDiagnostics: null,
         systemDownloadCheck: null,
@@ -4413,6 +4466,7 @@
         businessIntentError: document.getElementById("businessIntentError"),
         businessDebugMeta: document.getElementById("businessDebugMeta"),
         businessDebugResult: document.getElementById("businessDebugResult"),
+        businessRunProbe: document.getElementById("businessRunProbe"),
         businessCopyResult: document.getElementById("businessCopyResult"),
         businessApiLogMeta: document.getElementById("businessApiLogMeta"),
         businessApiLogRows: document.getElementById("businessApiLogRows"),
@@ -7024,6 +7078,7 @@
         if (endpoint === "status") return "状态检查";
         if (endpoint === "sync-catalog") return "同步目录";
         if (endpoint === "connect-intent") return "签发意图";
+        if (endpoint === "probe") return "节点探测";
         return endpoint || "--";
       }
 
@@ -7052,11 +7107,201 @@
         return parts.length ? parts.join(" / ") : "--";
       }
 
+      function businessResultCard(label, value, note = "") {
+        return `
+          <div class="business-result-card">
+            <div class="business-result-label">${escapeHtml(label)}</div>
+            <div class="business-result-value">${escapeHtml(String(value ?? "--"))}</div>
+            ${note ? `<div class="business-result-note">${escapeHtml(note)}</div>` : ""}
+          </div>
+        `;
+      }
+
+      function businessRawJson(data) {
+        return `
+          <details class="health-json business-raw-json">
+            <summary>原始返回数据</summary>
+            <pre>${escapeHtml(JSON.stringify(data, null, 2))}</pre>
+          </details>
+        `;
+      }
+
+      function renderBusinessStatusResult(data) {
+        const result = data.result || {};
+        return `
+          <div class="business-result-layout">
+            <div class="business-result-summary">
+              ${businessResultCard("业务 API", result.business_api_enabled ? "已启用" : "未启用", "系统设置里的业务 Token 状态")}
+              ${businessResultCard("在线节点", `${result.nodes_online || 0}/${result.nodes_total || 0}`, "可参与调度的节点基础数")}
+              ${businessResultCard("启用游戏", result.games_enabled || 0, "来自业务后台同步快照")}
+              ${businessResultCard("启用路由", result.routes_enabled || 0, "connect-intent 依赖这些路由")}
+            </div>
+            ${businessRawJson(data)}
+          </div>
+        `;
+      }
+
+      function renderBusinessSyncResult(data) {
+        const result = data.result || {};
+        return `
+          <div class="business-result-layout">
+            <div class="business-result-summary">
+              ${businessResultCard("同步状态", result.status || data.status || "--", "目录数据已写入控制面执行副本")}
+              ${businessResultCard("游戏", result.games_upserted || 0, "本次写入或更新")}
+              ${businessResultCard("区服", result.regions_upserted || 0, "本次写入或更新")}
+              ${businessResultCard("路由", result.route_rules_upserted || 0, "本次写入或更新")}
+            </div>
+            <div class="detail-grid">
+              ${metric("来源", result.source || "--")}
+              ${metric("版本标记", result.revision || "--")}
+              ${metric("服务时间", formatTime(result.server_time || data.server_time))}
+            </div>
+            ${businessRawJson(data)}
+          </div>
+        `;
+      }
+
+      function renderBusinessConnectIntentResult(data) {
+        const result = data.result || {};
+        const intent = result.connect_intent || {};
+        const candidates = intent.candidates || [];
+        const selected = candidates[0] || null;
+        const route = selected?.route || {};
+        const credential = selected?.credential || {};
+        const scheduler = selected?.scheduler || {};
+        return `
+          <div class="business-result-layout">
+            <div class="diagnostic-strip">
+              <div class="diagnostic-step">
+                <div class="diagnostic-step-title">签发状态</div>
+                <div class="diagnostic-step-value">${escapeHtml(data.status || result.status || "--")}</div>
+                <span class="chip ${candidates.length ? "ok" : "bad"}">${candidates.length ? "已有候选节点" : "没有候选节点"}</span>
+              </div>
+              <div class="diagnostic-step">
+                <div class="diagnostic-step-title">连接意图</div>
+                <div class="diagnostic-step-value">${escapeHtml(intent.intent_id || "--")}</div>
+                <span class="chip ok">TTL ${escapeHtml(String(intent.ttl_sec || 0))} 秒</span>
+              </div>
+              <div class="diagnostic-step">
+                <div class="diagnostic-step-title">推荐节点</div>
+                <div class="diagnostic-step-value">${escapeHtml(selected ? `${selected.host}:${selected.port}` : "--")}</div>
+                <span class="chip ${selected ? "ok" : "warn"}">${escapeHtml(selected ? `ID ${selected.node_id}` : "等待路由")}</span>
+              </div>
+            </div>
+            <div class="business-candidate-main">
+              <div class="business-result-card">
+                <div class="business-result-label">客户端需要拿走的数据</div>
+                <div class="detail-grid">
+                  ${metric("节点地址", selected ? `${selected.host}:${selected.port}` : "--")}
+                  ${metric("路由目标", route.target_addr || "--")}
+                  ${metric("路由协议", protocolText(route.protocol))}
+                  ${metric("区服", route.region_name || route.region_id || "--")}
+                  ${metric("凭证过期", formatTime(credential.expires_at))}
+                </div>
+              </div>
+              <div class="business-result-card">
+                <div class="business-result-label">调度信息</div>
+                <div class="detail-grid">
+                  ${metric("候选节点", candidates.length)}
+                  ${metric("优先级", scheduler.route_priority ?? "--")}
+                  ${metric("最新会话", scheduler.latest_active_sessions ?? "--")}
+                  ${metric("上报新鲜", scheduler.report_fresh ? "是" : "否")}
+                  ${metric("节点质量", qualityText(selected?.bandwidth_quality))}
+                </div>
+              </div>
+            </div>
+            <div class="token-preview">${escapeHtml(shortToken(credential.token || ""))}</div>
+            ${businessRawJson(data)}
+          </div>
+        `;
+      }
+
+      function renderBusinessProbeResult(data) {
+        const statusOk = data.status === "ok";
+        const probe = data.probe;
+        const sessionData = data.session_data;
+        const error = data.error;
+        return `
+          <div class="business-result-layout">
+            <div class="diagnostic-strip">
+              <div class="diagnostic-step">
+                <div class="diagnostic-step-title">节点探测</div>
+                <div class="diagnostic-step-value">${probe ? `${probe.latency_ms}ms` : "--"}</div>
+                <span class="chip ${probe ? "ok" : "bad"}">${probe ? "Probe 成功" : "Probe 未通过"}</span>
+              </div>
+              <div class="diagnostic-step">
+                <div class="diagnostic-step-title">上游转发</div>
+                <div class="diagnostic-step-value">${sessionData ? `${sessionData.latency_ms}ms` : "--"}</div>
+                <span class="chip ${statusOk ? "ok" : "bad"}">${escapeHtml(statusOk ? "转发成功" : error?.code || "转发失败")}</span>
+              </div>
+              <div class="diagnostic-step">
+                <div class="diagnostic-step-title">节点地址</div>
+                <div class="diagnostic-step-value">${escapeHtml(data.node?.address || "--")}</div>
+                <span class="chip ${statusOk ? "ok" : "warn"}">${escapeHtml(data.node?.node_version || "等待版本")}</span>
+              </div>
+            </div>
+            <div class="detail-grid">
+              ${metric("连接意图", data.connect_intent?.intent_id || "--")}
+              ${metric("Session", probe?.session_id || "--")}
+              ${metric("路由目标", data.node?.route?.target_addr || "--")}
+              ${metric("测试响应", sessionData?.response_payload_text || sessionData?.status || "--")}
+              ${metric("请求字节", sessionData?.request_payload_bytes ?? "--")}
+              ${metric("响应字节", sessionData?.response_payload_bytes ?? "--")}
+            </div>
+            ${
+              error
+                ? `<div class="message error-text">失败步骤：${escapeHtml(error.step)} / ${escapeHtml(error.code)} / ${escapeHtml(error.message)}</div>`
+                : ""
+            }
+            ${businessRawJson(data)}
+          </div>
+        `;
+      }
+
+      function renderBusinessCallError(action, error) {
+        const payload = {
+          status: "failed",
+          endpoint: action,
+          error: {
+            message: error?.message || "request failed",
+          },
+          server_time: state.serverTime,
+        };
+        state.businessDebugResult = payload;
+        els.businessDebugMeta.textContent = `${businessApiEndpointText(action)} / ${formatClock(state.serverTime)}`;
+        els.businessDebugResult.classList.remove("empty");
+        els.businessDebugResult.innerHTML = `
+          <div class="business-result-layout">
+            <div class="business-result-summary">
+              ${businessResultCard("调用状态", "失败", "请求没有完成，下面保留原始错误信息")}
+              ${businessResultCard("接口", businessApiEndpointText(action), "业务联调工具内部调用")}
+              ${businessResultCard("时间", formatClock(state.serverTime), "当前控制面时间")}
+              ${businessResultCard("建议", "查看日志", "可到业务 API 调用日志继续定位")}
+            </div>
+            <div class="message error-text">${escapeHtml(payload.error.message)}</div>
+            ${businessRawJson(payload)}
+          </div>
+        `;
+      }
+
       function renderBusinessDebugResult(action, data) {
         state.businessDebugResult = data;
         els.businessDebugMeta.textContent = `${businessApiEndpointText(action)} / ${formatClock(data?.server_time || state.serverTime)}`;
         els.businessDebugResult.classList.remove("empty");
-        els.businessDebugResult.textContent = JSON.stringify(data, null, 2);
+        const canProbe = action === "connect-intent" && Boolean(data?.result?.connect_intent?.candidates?.length);
+        els.businessRunProbe.classList.toggle("hidden", !canProbe);
+        if (action === "status") {
+          els.businessDebugResult.innerHTML = renderBusinessStatusResult(data);
+        } else if (action === "sync-catalog") {
+          els.businessDebugResult.innerHTML = renderBusinessSyncResult(data);
+        } else if (action === "connect-intent") {
+          els.businessDebugResult.innerHTML = renderBusinessConnectIntentResult(data);
+        } else if (action === "probe") {
+          els.businessRunProbe.classList.toggle("hidden", !state.businessIntentProbePayload);
+          els.businessDebugResult.innerHTML = renderBusinessProbeResult(data);
+        } else {
+          els.businessDebugResult.innerHTML = businessRawJson(data);
+        }
       }
 
       function renderBusinessApiLogs(serverTime = state.serverTime) {
@@ -7614,6 +7859,7 @@
 
       async function runBusinessStatusCheck() {
         const data = await api("/api/admin/v1/business-api/status");
+        state.businessIntentProbePayload = null;
         renderBusinessDebugResult("status", data);
         await loadBusinessApiLogs({ silent: true });
       }
@@ -7625,6 +7871,7 @@
           method: "POST",
           body: JSON.stringify(payload),
         });
+        state.businessIntentProbePayload = null;
         renderBusinessDebugResult("sync-catalog", data);
         await Promise.all([
           loadGames({ silent: true }),
@@ -7640,8 +7887,29 @@
           method: "POST",
           body: JSON.stringify(payload),
         });
+        state.businessIntentProbePayload = data?.result?.connect_intent?.candidates?.length
+          ? diagnosticPayloadFromBusinessIntentPayload(payload)
+          : null;
         renderBusinessDebugResult("connect-intent", data);
         await loadBusinessApiLogs({ silent: true });
+      }
+
+      async function runBusinessProbeDebug() {
+        let payload = state.businessIntentProbePayload;
+        if (!payload) {
+          payload = diagnosticPayloadFromBusinessIntentPayload(
+            parseBusinessJson(els.businessIntentPayload, els.businessIntentError),
+          );
+          state.businessIntentProbePayload = payload;
+        }
+        els.businessDebugMeta.textContent = `节点探测 / ${formatClock(state.serverTime)}`;
+        els.businessDebugResult.classList.remove("empty");
+        els.businessDebugResult.innerHTML = `<span class="skeleton"></span>`;
+        const data = await api("/api/admin/v1/connectivity-diagnostic", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        renderBusinessDebugResult("probe", data);
       }
 
       async function loadHealthAlerts({ silent = false } = {}) {
@@ -7927,6 +8195,25 @@
         if (testPayload) payload.payload = testPayload;
         if (timeoutSec) payload.timeout_sec = timeoutSec;
         if (responseTimeoutMs) payload.response_timeout_ms = responseTimeoutMs;
+        return payload;
+      }
+
+      function diagnosticPayloadFromBusinessIntentPayload(intentPayload) {
+        const payload = {
+          user_id: Number(intentPayload.user_id),
+          device_id: String(intentPayload.device_id || "").trim(),
+          game_id: Number(intentPayload.game_id),
+          payload: "hello",
+          timeout_sec: 3,
+          response_timeout_ms: 500,
+          candidate_index: 0,
+        };
+        for (const key of ["region_id", "platform", "client_isp", "client_ip", "bandwidth_quality"]) {
+          const value = intentPayload[key];
+          if (value !== undefined && value !== null && value !== "") {
+            payload[key] = key === "region_id" ? Number(value) : value;
+          }
+        }
         return payload;
       }
 
@@ -8706,6 +8993,14 @@
       els.businessRunIntent.addEventListener("click", () => {
         runBusinessIntentDebug().catch((error) => {
           if (error instanceof SyntaxError) return;
+          showInlineError(els.businessIntentError, error.message);
+        });
+      });
+
+      els.businessRunProbe.addEventListener("click", () => {
+        runBusinessProbeDebug().catch((error) => {
+          if (error instanceof SyntaxError) return;
+          renderBusinessCallError("probe", error);
           showInlineError(els.businessIntentError, error.message);
         });
       });

@@ -62,8 +62,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.57.1
-git push origin v0.57.1
+git tag v0.58.0
+git push origin v0.58.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -81,11 +81,15 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.57.1` moves game and route daily operations out of the
-control dashboard: the sidebar now focuses on node operations, games are shown
-as business sync snapshots, routes are shown as operations fallback snapshots,
-and health checks guide operators to `sync-catalog` instead of local game/route
-creation. Version `0.55.1` fixes JSON content-type handling for saving the
+next stage. Version `0.58.0` polishes the business integration console with
+card-based status, sync, and connect-intent results, plus a one-click node probe
+that reuses the signed intent request to run UDP probe and session relay checks.
+Version `0.57.1` fixes MySQL COUNT decoding for status checks. Version `0.57.0`
+moves game and route daily operations out of the control dashboard: the sidebar
+now focuses on node operations, games are shown as business sync snapshots,
+routes are shown as operations fallback snapshots, and health checks guide
+operators to `sync-catalog` instead of local game/route creation. Version
+`0.55.1` fixes JSON content-type handling for saving the
 business API token from System Settings. Version `0.55.0` lets super
 administrators edit the business API token directly in System Settings and
 applies it immediately. Version `0.54.0` adds a super-admin-only business API

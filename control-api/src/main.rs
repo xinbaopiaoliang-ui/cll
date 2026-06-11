@@ -3079,13 +3079,47 @@ async fn business_sync_catalog(
     Json(request): Json<BusinessSyncCatalogRequest>,
 ) -> Result<Json<BusinessSyncCatalogResponse>, AppError> {
     require_business_sync(&state, &headers)?;
-    let catalog = normalize_business_sync_catalog(request)?;
+    let catalog = match normalize_business_sync_catalog(request) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "business.sync_catalog",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
     let log_source = catalog.source.clone();
     let log_revision = catalog.revision.clone();
     let log_games = catalog.games.len();
     let log_regions = catalog.regions.len();
     let log_routes = catalog.route_rules.len();
-    let response = sync_business_catalog(&state.pool, catalog).await?;
+    let response = match sync_business_catalog(&state.pool, catalog).await {
+        Ok(response) => response,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "business.sync_catalog",
+                &log_source,
+                log_revision.as_deref(),
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
     record_business_api_log_best_effort(
         &state.pool,
         NewBusinessApiLog {
@@ -3118,16 +3152,47 @@ async fn business_connect_intent(
     Json(request): Json<BusinessConnectIntentRequest>,
 ) -> Result<Json<BusinessConnectIntentResponse>, AppError> {
     require_business_sync(&state, &headers)?;
-    validate_business_connect_intent_request(&request)?;
     let request_id = request.request_id.clone();
     let entitlement_id = request.entitlement_id.clone();
     let client_version = request.client_version.clone();
     let log_user_id = request.user_id;
     let log_game_id = request.game_id;
     let log_region_id = request.region_id;
+    if let Err(error) = validate_business_connect_intent_request(&request) {
+        record_business_api_failure_best_effort(
+            &state.pool,
+            "connect-intent",
+            "business.connect_intent",
+            "business_api",
+            request_id.as_deref(),
+            Some(log_user_id),
+            Some(log_game_id),
+            log_region_id,
+            &error,
+        )
+        .await;
+        return Err(error);
+    }
     let connect_request = request.into_connect_intent_request();
     let connect_intent =
-        issue_connect_intent(&state.pool, state.token_ttl_sec, connect_request).await?;
+        match issue_connect_intent(&state.pool, state.token_ttl_sec, connect_request).await {
+            Ok(connect_intent) => connect_intent,
+            Err(error) => {
+                record_business_api_failure_best_effort(
+                    &state.pool,
+                    "connect-intent",
+                    "business.connect_intent",
+                    "business_api",
+                    request_id.as_deref(),
+                    Some(log_user_id),
+                    Some(log_game_id),
+                    log_region_id,
+                    &error,
+                )
+                .await;
+                return Err(error);
+            }
+        };
     record_business_api_log_best_effort(
         &state.pool,
         NewBusinessApiLog {
@@ -3171,7 +3236,24 @@ async fn business_status(
     headers: HeaderMap,
 ) -> Result<Json<BusinessStatusResponse>, AppError> {
     require_business_sync(&state, &headers)?;
-    let response = build_business_status_response(&state).await?;
+    let response = match build_business_status_response(&state).await {
+        Ok(response) => response,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "status",
+                "business.status",
+                "business_api",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
     record_business_api_log_best_effort(
         &state.pool,
         NewBusinessApiLog {
@@ -3243,7 +3325,24 @@ async fn admin_business_api_status(
     headers: HeaderMap,
 ) -> Result<Json<AdminBusinessApiDebugResponse<BusinessStatusResponse>>, AppError> {
     require_admin(&state, &headers)?;
-    let response = build_business_status_response(&state).await?;
+    let response = match build_business_status_response(&state).await {
+        Ok(response) => response,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "status",
+                "admin.business.status",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
     record_business_api_log_best_effort(
         &state.pool,
         NewBusinessApiLog {
@@ -3281,13 +3380,47 @@ async fn admin_business_api_sync_catalog(
     Json(request): Json<BusinessSyncCatalogRequest>,
 ) -> Result<Json<AdminBusinessApiDebugResponse<BusinessSyncCatalogResponse>>, AppError> {
     require_admin_write(&state, &headers)?;
-    let catalog = normalize_business_sync_catalog(request)?;
+    let catalog = match normalize_business_sync_catalog(request) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "admin.business.sync_catalog",
+                "admin_debug",
+                None,
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
     let log_source = catalog.source.clone();
     let log_revision = catalog.revision.clone();
     let log_games = catalog.games.len();
     let log_regions = catalog.regions.len();
     let log_routes = catalog.route_rules.len();
-    let response = sync_business_catalog(&state.pool, catalog).await?;
+    let response = match sync_business_catalog(&state.pool, catalog).await {
+        Ok(response) => response,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "sync-catalog",
+                "admin.business.sync_catalog",
+                "admin_debug",
+                log_revision.as_deref(),
+                None,
+                None,
+                None,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
     record_business_api_log_best_effort(
         &state.pool,
         NewBusinessApiLog {
@@ -3326,16 +3459,47 @@ async fn admin_business_api_connect_intent(
     Json(request): Json<BusinessConnectIntentRequest>,
 ) -> Result<Json<AdminBusinessApiDebugResponse<BusinessConnectIntentResponse>>, AppError> {
     require_admin_write(&state, &headers)?;
-    validate_business_connect_intent_request(&request)?;
     let request_id = request.request_id.clone();
     let entitlement_id = request.entitlement_id.clone();
     let client_version = request.client_version.clone();
     let log_user_id = request.user_id;
     let log_game_id = request.game_id;
     let log_region_id = request.region_id;
+    if let Err(error) = validate_business_connect_intent_request(&request) {
+        record_business_api_failure_best_effort(
+            &state.pool,
+            "connect-intent",
+            "admin.business.connect_intent",
+            "admin_debug",
+            request_id.as_deref(),
+            Some(log_user_id),
+            Some(log_game_id),
+            log_region_id,
+            &error,
+        )
+        .await;
+        return Err(error);
+    }
     let connect_request = request.into_connect_intent_request();
     let connect_intent =
-        issue_connect_intent(&state.pool, state.token_ttl_sec, connect_request).await?;
+        match issue_connect_intent(&state.pool, state.token_ttl_sec, connect_request).await {
+            Ok(connect_intent) => connect_intent,
+            Err(error) => {
+                record_business_api_failure_best_effort(
+                    &state.pool,
+                    "connect-intent",
+                    "admin.business.connect_intent",
+                    "admin_debug",
+                    request_id.as_deref(),
+                    Some(log_user_id),
+                    Some(log_game_id),
+                    log_region_id,
+                    &error,
+                )
+                .await;
+                return Err(error);
+            }
+        };
     record_business_api_log_best_effort(
         &state.pool,
         NewBusinessApiLog {
@@ -8074,6 +8238,40 @@ async fn record_business_api_log_best_effort(pool: &MySqlPool, log: NewBusinessA
     }
 }
 
+async fn record_business_api_failure_best_effort(
+    pool: &MySqlPool,
+    endpoint: &str,
+    action: &str,
+    source: &str,
+    request_id: Option<&str>,
+    user_id: Option<u64>,
+    game_id: Option<u64>,
+    region_id: Option<u64>,
+    error: &AppError,
+) {
+    record_business_api_log_best_effort(
+        pool,
+        NewBusinessApiLog {
+            endpoint,
+            action,
+            source,
+            request_id,
+            status: "failed",
+            http_status: Some(error.status.as_u16()),
+            user_id,
+            game_id,
+            region_id,
+            error_code: Some(error.code),
+            error_message: Some(&error.message),
+            detail: json!({
+                "error_code": error.code,
+                "error_message": error.message.as_str(),
+            }),
+        },
+    )
+    .await;
+}
+
 async fn insert_business_api_log(
     pool: &MySqlPool,
     log: NewBusinessApiLog<'_>,
@@ -12051,6 +12249,12 @@ mod tests {
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/business-api/sync-catalog"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/business-api/connect-intent"));
         assert!(ADMIN_DASHBOARD_HTML.contains("/api/admin/v1/business-api/logs"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("businessRunProbe"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("business-result-summary"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("diagnosticPayloadFromBusinessIntentPayload"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("renderBusinessConnectIntentResult"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("runBusinessProbeDebug"));
+        assert!(ADMIN_DASHBOARD_HTML.contains("renderBusinessCallError"));
     }
 
     #[test]
