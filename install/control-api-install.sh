@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.64.0"
+INSTALLER_VERSION="0.65.0"
 SERVICE_NAME="xaccel-control-api"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-control-api"
@@ -18,6 +18,7 @@ MAX_DB_CONNECTIONS="8"
 ADMIN_TOKEN=""
 PUBLIC_BASE_URL=""
 BUSINESS_SYNC_TOKEN=""
+CLIENT_API_TOKEN=""
 CREDENTIAL_KEY=""
 ARTIFACT_URL=""
 SHA256_URL=""
@@ -49,6 +50,8 @@ Options:
   --public-base-url URL   Optional public base URL for node bootstrap responses.
   --business-sync-token TOKEN
                          Optional bearer token for business backend API.
+  --client-api-token TOKEN
+                         Optional token required by /api/client/v1/connect-intent.
   --credential-key KEY   Base64 32-byte key for encrypting saved SSH passwords.
                          Generated automatically when omitted.
   --artifact-url URL      Override xaccel-control-api tar.gz download URL.
@@ -173,6 +176,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --business-sync-token)
       BUSINESS_SYNC_TOKEN="${2:-}"
+      shift 2
+      ;;
+    --client-api-token)
+      CLIENT_API_TOKEN="${2:-}"
       shift 2
       ;;
     --credential-key)
@@ -379,6 +386,21 @@ load_existing_business_sync_token_if_needed() {
   fi
 }
 
+load_existing_client_api_token_if_needed() {
+  if [[ -n "$CLIENT_API_TOKEN" ]]; then
+    return 0
+  fi
+
+  if [[ -f "$ENV_FILE" ]]; then
+    local existing_token
+    existing_token="$(sed -n "s/^XACCEL_CLIENT_API_TOKEN='\(.*\)'$/\1/p" "$ENV_FILE" | tail -n 1 || true)"
+    if [[ -n "$existing_token" ]]; then
+      CLIENT_API_TOKEN="$existing_token"
+      log "reuse existing client API token from ${ENV_FILE}"
+    fi
+  fi
+}
+
 generate_credential_key_if_needed() {
   if [[ -n "$CREDENTIAL_KEY" ]]; then
     return 0
@@ -501,6 +523,9 @@ EOF
   if [[ -n "$BUSINESS_SYNC_TOKEN" ]]; then
     printf "XACCEL_BUSINESS_SYNC_TOKEN='%s'\n" "$(env_escape "$BUSINESS_SYNC_TOKEN")" >> "$ENV_FILE"
   fi
+  if [[ -n "$CLIENT_API_TOKEN" ]]; then
+    printf "XACCEL_CLIENT_API_TOKEN='%s'\n" "$(env_escape "$CLIENT_API_TOKEN")" >> "$ENV_FILE"
+  fi
   chmod 0600 "$ENV_FILE"
 }
 
@@ -569,6 +594,7 @@ main() {
   install_ssh_tools_if_possible
   generate_admin_token_if_needed
   load_existing_business_sync_token_if_needed
+  load_existing_client_api_token_if_needed
   generate_credential_key_if_needed
   write_env
   write_systemd_unit

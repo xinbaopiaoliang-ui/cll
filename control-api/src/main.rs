@@ -93,6 +93,7 @@ const SYSTEM_DIAGNOSTIC_CORE_TABLES: [&str; 9] = [
 ];
 const CONTROL_API_ENV_FILE: &str = "/etc/xaccel-control-api/control-api.env";
 const BUSINESS_SYNC_TOKEN_ENV_KEY: &str = "XACCEL_BUSINESS_SYNC_TOKEN";
+const CLIENT_API_TOKEN_ENV_KEY: &str = "XACCEL_CLIENT_API_TOKEN";
 
 #[derive(Debug, Parser)]
 #[command(name = "xaccel-control-api")]
@@ -119,6 +120,9 @@ struct Cli {
     #[arg(long, env = "XACCEL_BUSINESS_SYNC_TOKEN")]
     business_sync_token: Option<String>,
 
+    #[arg(long, env = "XACCEL_CLIENT_API_TOKEN")]
+    client_api_token: Option<String>,
+
     #[arg(long, env = "XACCEL_CREDENTIAL_KEY")]
     credential_key: Option<String>,
 }
@@ -130,6 +134,7 @@ struct AppState {
     admin_token: Option<String>,
     public_base_url: Option<String>,
     business_sync_token: RwLock<Option<String>>,
+    client_api_token: Option<String>,
     credential_key: Option<String>,
 }
 
@@ -1370,6 +1375,7 @@ struct BusinessStatusResponse {
     catalog_owner: &'static str,
     control_role: &'static str,
     business_api_enabled: bool,
+    client_api_auth_required: bool,
     nodes_total: u64,
     nodes_online: u64,
     games_enabled: u64,
@@ -2069,6 +2075,12 @@ async fn main() -> anyhow::Result<()> {
                 .filter(|token| !token.is_empty())
                 .map(ToOwned::to_owned),
         ),
+        client_api_token: cli
+            .client_api_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .map(ToOwned::to_owned),
         credential_key: cli
             .credential_key
             .as_deref()
@@ -3003,6 +3015,13 @@ fn validate_cli(cli: &Cli) -> anyhow::Result<()> {
     {
         bail!("--business-sync-token must not be empty when provided");
     }
+    if cli
+        .client_api_token
+        .as_deref()
+        .is_some_and(|token| token.trim().is_empty())
+    {
+        bail!("--client-api-token / {CLIENT_API_TOKEN_ENV_KEY} must not be empty when provided");
+    }
     Ok(())
 }
 
@@ -3297,8 +3316,10 @@ fn push_system_check(
 
 async fn connect_intent(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request): Json<ConnectIntentRequest>,
 ) -> Result<Json<ConnectIntentResponse>, AppError> {
+    require_client_api(&state, &headers)?;
     validate_connect_intent_request(&request)?;
     let response = issue_connect_intent(&state.pool, state.token_ttl_sec, request).await?;
     Ok(Json(response))
@@ -4177,6 +4198,7 @@ async fn build_business_status_response(
         catalog_owner: "business_backend",
         control_role: "node_operations",
         business_api_enabled: current_business_sync_token(&state)?.is_some(),
+        client_api_auth_required: state.client_api_token.is_some(),
         nodes_total,
         nodes_online,
         games_enabled,
@@ -12407,6 +12429,24 @@ fn require_business_sync(state: &AppState, headers: &HeaderMap) -> Result<(), Ap
     }
 }
 
+fn require_client_api(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+    let Some(configured) = state.client_api_token.as_deref() else {
+        return Ok(());
+    };
+    let provided = client_api_token_from_headers(headers).ok_or_else(|| {
+        AppError::unauthorized("client_api_auth_required", "client api token is required")
+    })?;
+
+    if constant_time_eq(configured.as_bytes(), provided.as_bytes()) {
+        Ok(())
+    } else {
+        Err(AppError::unauthorized(
+            "client_api_auth_failed",
+            "client api token is invalid",
+        ))
+    }
+}
+
 fn create_admin_session_token(
     signing_secret: &str,
     user: &AdminUserRow,
@@ -12498,6 +12538,22 @@ fn business_sync_token_from_headers(headers: &HeaderMap) -> Option<&str> {
 
     headers
         .get("X-Business-Sync-Token")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+}
+
+fn client_api_token_from_headers(headers: &HeaderMap) -> Option<&str> {
+    if let Some(value) = headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+    {
+        if let Some(token) = value.strip_prefix("Bearer ") {
+            return Some(token.trim());
+        }
+    }
+
+    headers
+        .get("X-Client-Api-Token")
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
 }
@@ -14083,6 +14139,23 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", "Bearer secret".parse().unwrap());
         assert_eq!(admin_token_from_headers(&headers), Some("secret"));
+    }
+
+    #[test]
+    fn reads_client_api_token_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer client-secret".parse().unwrap());
+        assert_eq!(
+            client_api_token_from_headers(&headers),
+            Some("client-secret")
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Client-Api-Token", "client-header".parse().unwrap());
+        assert_eq!(
+            client_api_token_from_headers(&headers),
+            Some("client-header")
+        );
     }
 
     #[test]

@@ -344,11 +344,24 @@ Done in `v0.64.0`:
 - Show the same scheduler explanation in the control-panel business debug
   result so operators can troubleshoot business/backend/client handoff.
 
+Done in `v0.65.0`:
+
+- Add optional `XACCEL_CLIENT_API_TOKEN` protection for the legacy
+  `/api/client/v1/connect-intent` endpoint so clients cannot bypass the
+  business backend once formal integration starts.
+- Let `xaccel-client-probe 0.33.0` send the same client API token for
+  diagnostics.
+- Expose `client_api_auth_required` in business status so the business backend
+  and operators can verify whether the legacy client path is locked down.
+- Extend the installer and integration docs with the client-token rollout path.
+
 Next release focus:
 
-- `v0.65`: close the user/device entitlement boundary, add client API auth, and
-  formalize scheduler policy for ISP, region, latency, and node load.
-- `v0.66`: start the real game tunnel MVP after UDP relay cleanup is stable.
+- `v0.66`: carry business-auth context into `connect-intent` results, including
+  user entitlement, device verification, order/session IDs, and explicit
+  rejection reasons.
+- `v0.67`: start the real game tunnel MVP after UDP relay cleanup and auth
+  boundaries are stable.
 
 ## P4: UDP Relay MVP
 

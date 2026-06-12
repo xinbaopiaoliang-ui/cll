@@ -8,11 +8,15 @@ connect path:
 3. send one UDP `session.data` packet through the same socket;
 4. print a JSON summary with latency, node, route, and relay result.
 
+Version `0.33.0` supports `--client-api-token` for control panels that protect
+the legacy direct client API with `XACCEL_CLIENT_API_TOKEN`.
+
 ## Example
 
 ```bash
 xaccel-client-probe \
   --control-url http://127.0.0.1:18080 \
+  --client-api-token "${XACCEL_CLIENT_API_TOKEN}" \
   --user-id 1001 \
   --device-id pc-001 \
   --game-id 8888 \

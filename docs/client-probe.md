@@ -4,6 +4,9 @@
 not the final game client. It is a deployment and integration diagnostic tool
 for node operators and backend developers.
 
+Version `0.33.0` can send the optional `XACCEL_CLIENT_API_TOKEN` required by a
+control plane that protects the legacy client `connect-intent` endpoint.
+
 ## What It Checks
 
 - Control API is reachable.
@@ -20,6 +23,7 @@ Run it on any machine that can reach both the control API and the node UDP port:
 ```bash
 xaccel-client-probe \
   --control-url http://127.0.0.1:18080 \
+  --client-api-token "${XACCEL_CLIENT_API_TOKEN}" \
   --user-id 1001 \
   --device-id pc-001 \
   --game-id 8888 \
@@ -35,6 +39,7 @@ For the current two-server test, run it on the control server `s54112`:
 ```bash
 xaccel-client-probe \
   --control-url http://127.0.0.1:18080 \
+  --client-api-token "${XACCEL_CLIENT_API_TOKEN}" \
   --user-id 1001 \
   --device-id pc-001 \
   --game-id 8888 \
@@ -47,6 +52,9 @@ The output is JSON so scripts and future dashboards can consume it directly.
 
 ## Useful Options
 
+- `--client-api-token TOKEN`: sends `Authorization: Bearer TOKEN` to
+  `/api/client/v1/connect-intent`. Only needed when the control panel is
+  installed with `--client-api-token`.
 - `--skip-session-data`: only checks connect-intent and UDP probe.
 - `--payload TEXT`: sends `TEXT` as the session payload. Default is `hello`.
 - `--response-timeout-ms N`: upstream UDP wait time. Default is `500`.

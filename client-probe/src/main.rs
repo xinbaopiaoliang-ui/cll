@@ -23,6 +23,9 @@ struct Cli {
     )]
     control_url: String,
 
+    #[arg(long, env = "XACCEL_CLIENT_API_TOKEN")]
+    client_api_token: Option<String>,
+
     #[arg(long, default_value_t = 1001)]
     user_id: u64,
 
@@ -431,9 +434,18 @@ async fn request_connect_intent(
         .timeout(deadline)
         .build()
         .context("failed to build HTTP client")?;
-    let response = client
+    let mut request_builder = client
         .post(connect_intent_url(&cli.control_url))
-        .json(&request)
+        .json(&request);
+    if let Some(token) = cli
+        .client_api_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    {
+        request_builder = request_builder.bearer_auth(token);
+    }
+    let response = request_builder
         .send()
         .await
         .context("failed to request connect-intent")?;

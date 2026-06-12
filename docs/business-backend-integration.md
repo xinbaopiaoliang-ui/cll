@@ -69,7 +69,7 @@ Apifox 可直接导入 OpenAPI 文件：[apifox-business-api.openapi.json](apifo
 
 ## 控制面联调入口
 
-从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台。`0.58.0` 起，联调结果会以卡片展示，并支持一键探测节点。`0.59.0` 起，`sync-catalog` 支持游戏内嵌多个分类、区服和节点线路。`0.60.0` 起，业务后台可以调用业务 API 登记节点基础信息。`0.61.0` 起，业务 API 补齐节点 CRUD 和目录快照/删除。`0.62.0` 起，控制面联调页可以直接测试节点列表、详情、新增、修改、删除，以及目录快照查询和目录删除。`0.62.1` 起，新增或修改节点时如果公网 IP + 端口重复，会返回明确的 `node_endpoint_exists` 提示。`0.64.0` 起，`connect-intent` 候选节点会返回调度解释字段：
+从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台。`0.58.0` 起，联调结果会以卡片展示，并支持一键探测节点。`0.59.0` 起，`sync-catalog` 支持游戏内嵌多个分类、区服和节点线路。`0.60.0` 起，业务后台可以调用业务 API 登记节点基础信息。`0.61.0` 起，业务 API 补齐节点 CRUD 和目录快照/删除。`0.62.0` 起，控制面联调页可以直接测试节点列表、详情、新增、修改、删除，以及目录快照查询和目录删除。`0.62.1` 起，新增或修改节点时如果公网 IP + 端口重复，会返回明确的 `node_endpoint_exists` 提示。`0.64.0` 起，`connect-intent` 候选节点会返回调度解释字段。`0.65.0` 起，可以通过 `XACCEL_CLIENT_API_TOKEN` 保护老的客户端直连 `connect-intent` 接口：
 
 - “状态检查”会调用控制面内部业务状态接口，确认业务 API Token、节点、游戏和路由是否可用。
 - “同步目录”可以粘贴业务后台准备下发的 `sync-catalog` JSON，先验证游戏、区服和线路执行副本是否能写入。
@@ -91,10 +91,11 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 ```json
 {
   "status": "ok",
-  "version": "0.64.0",
+  "version": "0.65.0",
   "catalog_owner": "business_backend",
   "control_role": "node_operations",
   "business_api_enabled": true,
+  "client_api_auth_required": true,
   "nodes_total": 2,
   "nodes_online": 2,
   "games_enabled": 1,
@@ -104,6 +105,39 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 ```
 
 其中 `catalog_owner=business_backend` 表示游戏、区服、线路主数据由业务后台维护；`control_role=node_operations` 表示控制面只负责节点、调度和执行副本。
+
+## 客户端直连接口保护
+
+业务后台正式接入后，客户端一般不应该绕过业务后台直接请求控制面。控制面仍保留 `/api/client/v1/connect-intent` 给旧诊断工具和过渡期使用，但建议配置客户端 API Token：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install/control-api-install.sh | sudo bash -s -- \
+  --database-url 'mysql://xaccel:xaccel_password@127.0.0.1:3306/xaccel' \
+  --listen 0.0.0.0:18080 \
+  --public-base-url http://103.201.131.99:18080 \
+  --client-api-token '替换成客户端直连接口Token'
+```
+
+开启后，调用老接口需要带：
+
+```bash
+curl -fsSL -X POST http://103.201.131.99:18080/api/client/v1/connect-intent \
+  -H "Authorization: Bearer ${XACCEL_CLIENT_API_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":1001,"device_id":"pc-001","game_id":8888,"region_id":1,"platform":"pc","bandwidth_quality":"fast"}'
+```
+
+`xaccel-client-probe 0.33.0` 起也可以直接测试：
+
+```bash
+xaccel-client-probe \
+  --control-url http://103.201.131.99:18080 \
+  --client-api-token "${XACCEL_CLIENT_API_TOKEN}" \
+  --user-id 1001 \
+  --device-id pc-001 \
+  --game-id 8888 \
+  --region-id 1
+```
 
 ## 2. 节点基础信息 CRUD
 
