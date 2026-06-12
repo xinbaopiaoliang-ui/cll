@@ -336,11 +336,19 @@ Goals:
 - Add nonce replay storage for node report requests.
 - Add websocket or long-poll events for drain, config update, and user kick.
 
+Done in `v0.64.0`:
+
+- Add scheduler explanation fields to `connect-intent` candidates. Business
+  integrations can now see region match mode, requested quality, quality match,
+  report freshness, route priority, live load counters, and selection reasons.
+- Show the same scheduler explanation in the control-panel business debug
+  result so operators can troubleshoot business/backend/client handoff.
+
 Next release focus:
 
-- `v0.64`: close the user/device entitlement boundary, add client API auth, and
+- `v0.65`: close the user/device entitlement boundary, add client API auth, and
   formalize scheduler policy for ISP, region, latency, and node load.
-- `v0.65`: start the real game tunnel MVP after UDP relay cleanup is stable.
+- `v0.66`: start the real game tunnel MVP after UDP relay cleanup is stable.
 
 ## P4: UDP Relay MVP
 

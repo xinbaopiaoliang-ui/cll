@@ -2776,7 +2776,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.63.0</span>
+          <span class="mono">v0.64.0</span>
         </div>
       </aside>
 
@@ -3689,7 +3689,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.63.0</div>
+              <div class="insight-value">0.64.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -5444,6 +5444,38 @@
         if (value === "normal") return "普通";
         if (value === "slow") return "较慢";
         return value || "未知";
+      }
+
+      function booleanText(value) {
+        if (value === true) return "是";
+        if (value === false) return "否";
+        return "--";
+      }
+
+      function schedulerRegionMatchText(value) {
+        if (value === "exact") return "精确区服";
+        if (value === "fallback") return "兜底线路";
+        if (value === "global") return "全局线路";
+        if (value === "mismatch") return "不匹配";
+        return value || "未知";
+      }
+
+      function schedulerReasonText(value) {
+        const reasons = Array.isArray(value) ? value : [];
+        if (!reasons.length) return "--";
+        const text = reasons.map((item) => {
+          if (item === "region_exact") return "区服精确";
+          if (item === "region_fallback") return "区服兜底";
+          if (item === "region_global") return "全局线路";
+          if (item === "quality_match") return "质量匹配";
+          if (item === "quality_fallback") return "质量兜底";
+          if (item === "fresh_report") return "上报新鲜";
+          if (item === "stale_or_missing_report") return "上报过期";
+          if (item === "lowest_route_priority") return "优先级低";
+          if (item === "lowest_active_sessions") return "会话较少";
+          return item;
+        });
+        return text.join(" / ");
       }
 
       function ispText(value) {
@@ -7385,10 +7417,13 @@
                 <div class="business-result-label">调度信息</div>
                 <div class="detail-grid">
                   ${metric("候选节点", candidates.length)}
+                  ${metric("区服匹配", schedulerRegionMatchText(scheduler.region_match))}
+                  ${metric("请求质量", qualityText(scheduler.requested_bandwidth_quality || intent.client?.bandwidth_quality))}
+                  ${metric("质量匹配", booleanText(scheduler.bandwidth_quality_match))}
                   ${metric("优先级", scheduler.route_priority ?? "--")}
                   ${metric("最新会话", scheduler.latest_active_sessions ?? "--")}
-                  ${metric("上报新鲜", scheduler.report_fresh ? "是" : "否")}
-                  ${metric("节点质量", qualityText(selected?.bandwidth_quality))}
+                  ${metric("上报新鲜", booleanText(scheduler.report_fresh))}
+                  ${metric("调度原因", schedulerReasonText(scheduler.selection_reasons))}
                 </div>
               </div>
             </div>

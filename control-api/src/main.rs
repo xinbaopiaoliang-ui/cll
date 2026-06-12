@@ -426,6 +426,11 @@ struct NodeCandidate {
 
 #[derive(Debug, Clone, Serialize)]
 struct CandidateSchedulerInfo {
+    requested_region_id: Option<u64>,
+    selected_region_id: Option<u64>,
+    region_match: &'static str,
+    requested_bandwidth_quality: String,
+    bandwidth_quality_match: bool,
     route_priority: u32,
     latest_active_sessions: u32,
     latest_udp_sessions: u32,
@@ -433,6 +438,7 @@ struct CandidateSchedulerInfo {
     latest_reported_at: Option<u64>,
     latest_report_age_sec: Option<u64>,
     report_fresh: bool,
+    selection_reasons: Vec<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -6684,7 +6690,12 @@ async fn issue_connect_intent(
 
     let issued_at = now_unix();
     let expires_at = issued_at + ttl_sec;
-    let scheduler = CandidateSchedulerInfo::from_candidate_row(&row, issued_at);
+    let scheduler = CandidateSchedulerInfo::from_candidate_row(
+        &row,
+        issued_at,
+        request.region_id,
+        &requested_quality,
+    );
     let intent_id = format!(
         "intent-{}-{}-{}-{}",
         request.user_id, request.game_id, issued_at, row.node_id
@@ -13168,18 +13179,57 @@ impl BusinessCatalogRegionSummary {
 }
 
 impl CandidateSchedulerInfo {
-    fn from_candidate_row(row: &CandidateRow, now: u64) -> Self {
+    fn from_candidate_row(
+        row: &CandidateRow,
+        now: u64,
+        requested_region_id: Option<u64>,
+        requested_bandwidth_quality: &str,
+    ) -> Self {
         let latest_report_age_sec = row
             .latest_reported_at
             .map(|reported_at| now.saturating_sub(reported_at));
+        let report_fresh = latest_report_age_sec.is_some_and(|age| age <= 90);
+        let region_match = match (requested_region_id, row.region_id) {
+            (Some(requested), Some(selected)) if requested == selected => "exact",
+            (Some(_), None) => "fallback",
+            (None, None) => "global",
+            _ => "mismatch",
+        };
+        let bandwidth_quality_match = row.bandwidth_quality == requested_bandwidth_quality;
+        let mut selection_reasons = Vec::new();
+        selection_reasons.push(match region_match {
+            "exact" => "region_exact",
+            "fallback" => "region_fallback",
+            "global" => "region_global",
+            _ => "region_mismatch",
+        });
+        selection_reasons.push(if bandwidth_quality_match {
+            "quality_match"
+        } else {
+            "quality_fallback"
+        });
+        selection_reasons.push(if report_fresh {
+            "fresh_report"
+        } else {
+            "stale_or_missing_report"
+        });
+        selection_reasons.push("lowest_route_priority");
+        selection_reasons.push("lowest_active_sessions");
+
         Self {
+            requested_region_id,
+            selected_region_id: row.region_id,
+            region_match,
+            requested_bandwidth_quality: requested_bandwidth_quality.to_string(),
+            bandwidth_quality_match,
             route_priority: row.route_priority,
             latest_active_sessions: row.latest_active_sessions.unwrap_or_default(),
             latest_udp_sessions: row.latest_udp_sessions.unwrap_or_default(),
             latest_tcp_sessions: row.latest_tcp_sessions.unwrap_or_default(),
             latest_reported_at: row.latest_reported_at,
             latest_report_age_sec,
-            report_fresh: latest_report_age_sec.is_some_and(|age| age <= 90),
+            report_fresh,
+            selection_reasons,
         }
     }
 }
@@ -14344,12 +14394,70 @@ mod tests {
             latest_reported_at: Some(1_000),
         };
 
-        let scheduler = CandidateSchedulerInfo::from_candidate_row(&row, 1_030);
+        let scheduler = CandidateSchedulerInfo::from_candidate_row(&row, 1_030, Some(1), "fast");
 
+        assert_eq!(scheduler.requested_region_id, Some(1));
+        assert_eq!(scheduler.selected_region_id, Some(1));
+        assert_eq!(scheduler.region_match, "exact");
+        assert_eq!(scheduler.requested_bandwidth_quality, "fast");
+        assert!(scheduler.bandwidth_quality_match);
         assert_eq!(scheduler.route_priority, 10);
         assert_eq!(scheduler.latest_active_sessions, 5);
         assert_eq!(scheduler.latest_report_age_sec, Some(30));
         assert!(scheduler.report_fresh);
+        assert_eq!(
+            scheduler.selection_reasons,
+            vec![
+                "region_exact",
+                "quality_match",
+                "fresh_report",
+                "lowest_route_priority",
+                "lowest_active_sessions"
+            ]
+        );
+    }
+
+    #[test]
+    fn builds_candidate_scheduler_fallback_info() {
+        let row = CandidateRow {
+            node_id: 1,
+            server_ip: "103.201.131.99".to_string(),
+            server_port: 666,
+            area: "UNKNOWN".to_string(),
+            tag: Some("standalone".to_string()),
+            bandwidth_quality: "normal".to_string(),
+            node_secret: "secret".to_string(),
+            target_addr: "127.0.0.1:7777".to_string(),
+            protocol: "udp".to_string(),
+            region_id: None,
+            region_name: None,
+            route_priority: 100,
+            latest_active_sessions: None,
+            latest_udp_sessions: None,
+            latest_tcp_sessions: None,
+            latest_reported_at: None,
+        };
+
+        let scheduler = CandidateSchedulerInfo::from_candidate_row(&row, 1_030, Some(2), "fast");
+
+        assert_eq!(scheduler.requested_region_id, Some(2));
+        assert_eq!(scheduler.selected_region_id, None);
+        assert_eq!(scheduler.region_match, "fallback");
+        assert_eq!(scheduler.requested_bandwidth_quality, "fast");
+        assert!(!scheduler.bandwidth_quality_match);
+        assert_eq!(scheduler.latest_active_sessions, 0);
+        assert_eq!(scheduler.latest_report_age_sec, None);
+        assert!(!scheduler.report_fresh);
+        assert_eq!(
+            scheduler.selection_reasons,
+            vec![
+                "region_fallback",
+                "quality_fallback",
+                "stale_or_missing_report",
+                "lowest_route_priority",
+                "lowest_active_sessions"
+            ]
+        );
     }
 
     #[test]

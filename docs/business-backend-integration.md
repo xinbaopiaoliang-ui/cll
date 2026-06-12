@@ -69,7 +69,7 @@ Apifox 可直接导入 OpenAPI 文件：[apifox-business-api.openapi.json](apifo
 
 ## 控制面联调入口
 
-从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台。`0.58.0` 起，联调结果会以卡片展示，并支持一键探测节点。`0.59.0` 起，`sync-catalog` 支持游戏内嵌多个分类、区服和节点线路。`0.60.0` 起，业务后台可以调用业务 API 登记节点基础信息。`0.61.0` 起，业务 API 补齐节点 CRUD 和目录快照/删除。`0.62.0` 起，控制面联调页可以直接测试节点列表、详情、新增、修改、删除，以及目录快照查询和目录删除。`0.62.1` 起，新增或修改节点时如果公网 IP + 端口重复，会返回明确的 `node_endpoint_exists` 提示：
+从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台。`0.58.0` 起，联调结果会以卡片展示，并支持一键探测节点。`0.59.0` 起，`sync-catalog` 支持游戏内嵌多个分类、区服和节点线路。`0.60.0` 起，业务后台可以调用业务 API 登记节点基础信息。`0.61.0` 起，业务 API 补齐节点 CRUD 和目录快照/删除。`0.62.0` 起，控制面联调页可以直接测试节点列表、详情、新增、修改、删除，以及目录快照查询和目录删除。`0.62.1` 起，新增或修改节点时如果公网 IP + 端口重复，会返回明确的 `node_endpoint_exists` 提示。`0.64.0` 起，`connect-intent` 候选节点会返回调度解释字段：
 
 - “状态检查”会调用控制面内部业务状态接口，确认业务 API Token、节点、游戏和路由是否可用。
 - “同步目录”可以粘贴业务后台准备下发的 `sync-catalog` JSON，先验证游戏、区服和线路执行副本是否能写入。
@@ -91,7 +91,7 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 ```json
 {
   "status": "ok",
-  "version": "0.63.0",
+  "version": "0.64.0",
   "catalog_owner": "business_backend",
   "control_role": "node_operations",
   "business_api_enabled": true,
@@ -357,6 +357,27 @@ curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/connect-intent \
             "target_addr": "127.0.0.1:7777",
             "protocol": "udp"
           }
+        },
+        "scheduler": {
+          "requested_region_id": 1,
+          "selected_region_id": 1,
+          "region_match": "exact",
+          "requested_bandwidth_quality": "fast",
+          "bandwidth_quality_match": false,
+          "route_priority": 10,
+          "latest_active_sessions": 0,
+          "latest_udp_sessions": 0,
+          "latest_tcp_sessions": 0,
+          "latest_reported_at": 1781069990,
+          "latest_report_age_sec": 10,
+          "report_fresh": true,
+          "selection_reasons": [
+            "region_exact",
+            "quality_fallback",
+            "fresh_report",
+            "lowest_route_priority",
+            "lowest_active_sessions"
+          ]
         }
       }
     ]
@@ -371,6 +392,12 @@ curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/connect-intent \
 - `connect_intent.candidates[0].port`
 - `connect_intent.candidates[0].credential.token`
 - `connect_intent.candidates[0].route`
+
+业务后台排查调度时可以看：
+
+- `scheduler.region_match`：区服是精确命中、全局线路还是兜底线路。
+- `scheduler.bandwidth_quality_match`：节点质量是否满足客户端偏好。
+- `scheduler.selection_reasons`：本次选中节点的原因，例如区服命中、上报新鲜、优先级更高、会话更少。
 
 ## 客户端和节点通信流程
 

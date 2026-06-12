@@ -62,8 +62,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.63.0
-git push origin v0.63.0
+git tag v0.64.0
+git push origin v0.64.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -81,7 +81,10 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.63.0` closes the node deployment loop: bootstrap now
+next stage. Version `0.64.0` explains connect-intent scheduling decisions:
+business integration responses now show region matching, bandwidth-quality
+matching, report freshness, route priority, load counters, and selection
+reasons for the chosen node. Version `0.63.0` closes the node deployment loop: bootstrap now
 returns the full runtime network config, the installer writes identity,
 network, report, and limit settings into `config.toml`, and node listener bind
 failures include structured error codes and operator suggestions.
