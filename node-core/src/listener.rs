@@ -6,8 +6,8 @@ use crate::{
     },
     state::RuntimeState,
 };
-use anyhow::{bail, Context};
-use std::{net::SocketAddr, sync::Arc};
+use anyhow::{anyhow, bail, Context};
+use std::{io, net::SocketAddr, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream, UdpSocket},
@@ -25,12 +25,8 @@ pub async fn spawn_network_listeners(state: RuntimeState) -> anyhow::Result<Vec<
     };
 
     let listen_addr = listen_addr(&network)?;
-    let udp_socket = UdpSocket::bind(listen_addr)
-        .await
-        .with_context(|| format!("failed to bind UDP listener {listen_addr}"))?;
-    let tcp_listener = TcpListener::bind(listen_addr)
-        .await
-        .with_context(|| format!("failed to bind TCP listener {listen_addr}"))?;
+    let udp_socket = bind_udp_listener(listen_addr).await?;
+    let tcp_listener = bind_tcp_listener(listen_addr).await?;
 
     state.stats().set_udp_listening(true);
     state.stats().set_tcp_listening(true);
@@ -53,6 +49,73 @@ pub async fn spawn_network_listeners(state: RuntimeState) -> anyhow::Result<Vec<
     });
 
     Ok(vec![udp_task, tcp_task])
+}
+
+async fn bind_udp_listener(listen_addr: SocketAddr) -> anyhow::Result<UdpSocket> {
+    UdpSocket::bind(listen_addr)
+        .await
+        .map_err(|error| listener_bind_error("udp", listen_addr, error))
+}
+
+async fn bind_tcp_listener(listen_addr: SocketAddr) -> anyhow::Result<TcpListener> {
+    TcpListener::bind(listen_addr)
+        .await
+        .map_err(|error| listener_bind_error("tcp", listen_addr, error))
+}
+
+fn listener_bind_error(protocol: &str, listen_addr: SocketAddr, error: io::Error) -> anyhow::Error {
+    let reason = classify_bind_error(&error);
+    warn!(
+        protocol,
+        %listen_addr,
+        error_code = reason.code,
+        error_kind = ?error.kind(),
+        os_error = error.raw_os_error(),
+        suggestion = reason.suggestion,
+        %error,
+        "listener bind failed"
+    );
+    anyhow!(
+        "listener_bind_failed protocol={} listen_addr={} error_code={} error_kind={:?} os_error={:?} message=\"{}\" suggestion=\"{}\"",
+        protocol,
+        listen_addr,
+        reason.code,
+        error.kind(),
+        error.raw_os_error(),
+        error,
+        reason.suggestion
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BindErrorReason {
+    code: &'static str,
+    suggestion: &'static str,
+}
+
+fn classify_bind_error(error: &io::Error) -> BindErrorReason {
+    match error.kind() {
+        io::ErrorKind::AddrInUse => BindErrorReason {
+            code: "address_in_use",
+            suggestion: "stop the process using this port or change network.server_port",
+        },
+        io::ErrorKind::AddrNotAvailable => BindErrorReason {
+            code: "address_not_available",
+            suggestion: "set network.listen_ip to 0.0.0.0 or an IP assigned to this server",
+        },
+        io::ErrorKind::PermissionDenied => BindErrorReason {
+            code: "permission_denied",
+            suggestion: "run the service with sufficient privileges or choose a higher port",
+        },
+        io::ErrorKind::InvalidInput => BindErrorReason {
+            code: "invalid_listen_addr",
+            suggestion: "check network.listen_ip and network.server_port in config.toml",
+        },
+        _ => BindErrorReason {
+            code: "bind_failed",
+            suggestion: "check listener address, firewall, and kernel socket limits",
+        },
+    }
 }
 
 fn listen_addr(network: &NetworkConfig) -> anyhow::Result<SocketAddr> {
@@ -154,5 +217,28 @@ async fn handle_client_payload(
             build_session_data_response(state, transport, peer, request).await
         }
         ParsedClientMessage::Invalid(message) => build_probe_error(state, transport, message),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_address_in_use_bind_error() {
+        let error = io::Error::from(io::ErrorKind::AddrInUse);
+        let reason = classify_bind_error(&error);
+
+        assert_eq!(reason.code, "address_in_use");
+        assert!(reason.suggestion.contains("network.server_port"));
+    }
+
+    #[test]
+    fn classifies_address_not_available_bind_error() {
+        let error = io::Error::from(io::ErrorKind::AddrNotAvailable);
+        let reason = classify_bind_error(&error);
+
+        assert_eq!(reason.code, "address_not_available");
+        assert!(reason.suggestion.contains("network.listen_ip"));
     }
 }

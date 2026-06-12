@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "XAccel 控制面 - 业务后台对接 API",
-    "description": "业务后台调用控制面的专用接口。业务后台负责游戏、分类、区服、线路、用户、订单和权益；控制面负责节点运维、调度、节点凭证签发和转发执行副本。 v0.62.1 keeps the business API schema and improves duplicate node endpoint errors for business node create/update flows.",
-    "version": "0.62.1"
+    "description": "业务后台调用控制面的专用接口。业务后台负责游戏、分类、区服、线路、用户、订单和权益；控制面负责节点运维、调度、节点凭证签发和转发执行副本。 v0.63.0 keeps the business API schema and closes the node bootstrap deployment loop.",
+    "version": "0.63.0"
   },
   "servers": [
     {
@@ -52,7 +52,7 @@
                 },
                 "example": {
                   "status": "ok",
-                  "version": "0.62.1",
+                  "version": "0.63.0",
                   "catalog_owner": "business_backend",
                   "control_role": "node_operations",
                   "business_api_enabled": true,
@@ -1210,7 +1210,7 @@
           },
           "version": {
             "type": "string",
-            "example": "0.62.1",
+            "example": "0.63.0",
             "description": "控制面当前版本号。"
           },
           "catalog_owner": {

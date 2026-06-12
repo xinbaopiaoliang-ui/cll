@@ -666,6 +666,7 @@ struct BootstrapResponse {
     server_ip: String,
     server_port: u32,
     config_revision: u64,
+    network: NodeConfigNetworkResponse,
     release: BootstrapReleaseInfo,
 }
 
@@ -1999,6 +2000,16 @@ struct BootstrapExchangeRow {
     node_secret: Option<String>,
     server_ip: String,
     server_port: u32,
+    relay_server_ip: Option<String>,
+    relay_server_port: Option<u32>,
+    is_support_ipv6: i8,
+    bandwidth_quality: String,
+    disable_quic: i8,
+    area: String,
+    telecom_ip: Option<String>,
+    mobile_ip: Option<String>,
+    unicom_ip: Option<String>,
+    tag: Option<String>,
     config_revision: u64,
 }
 
@@ -6971,6 +6982,16 @@ SELECT
   n.node_secret,
   n.server_ip,
   n.server_port,
+  n.relay_server_ip,
+  n.relay_server_port,
+  n.is_support_ipv6,
+  n.bandwidth_quality,
+  n.disable_quic,
+  n.area,
+  n.telecom_ip,
+  n.mobile_ip,
+  n.unicom_ip,
+  n.tag,
   n.config_revision
 FROM node_bootstrap_tokens bt
 JOIN accel_nodes n ON n.id = bt.node_id
@@ -7047,9 +7068,26 @@ WHERE id = ?
         node_id: row.node_id,
         node_secret,
         panel_url,
-        server_ip: row.server_ip,
+        server_ip: row.server_ip.clone(),
         server_port: row.server_port,
         config_revision,
+        network: NodeConfigNetworkResponse {
+            server_ip: row.server_ip,
+            listen_ip: "0.0.0.0".to_string(),
+            server_port: row.server_port,
+            relay_server_ip: row.relay_server_ip,
+            relay_server_port: row.relay_server_port,
+            is_support_ipv6: row.is_support_ipv6 != 0,
+            disable_quic: row.disable_quic != 0,
+            area: row.area,
+            bandwidth_quality: row.bandwidth_quality,
+            tag: row.tag,
+            operator_ips: NodeConfigOperatorIpsResponse {
+                telecom_ip: row.telecom_ip,
+                mobile_ip: row.mobile_ip,
+                unicom_ip: row.unicom_ip,
+            },
+        },
         release: BootstrapReleaseInfo {
             version: VERSION,
             manifest_url: String::new(),
@@ -14548,6 +14586,49 @@ mod tests {
         };
 
         validate_bootstrap_request(&request).expect("request is valid");
+    }
+
+    #[test]
+    fn serializes_bootstrap_response_with_runtime_network() {
+        let response = BootstrapResponse {
+            node_id: 1,
+            node_secret: "secret".to_string(),
+            panel_url: "http://127.0.0.1:18080".to_string(),
+            server_ip: "103.201.131.99".to_string(),
+            server_port: 666,
+            config_revision: 3,
+            network: NodeConfigNetworkResponse {
+                server_ip: "103.201.131.99".to_string(),
+                listen_ip: "0.0.0.0".to_string(),
+                server_port: 666,
+                relay_server_ip: None,
+                relay_server_port: None,
+                is_support_ipv6: false,
+                disable_quic: false,
+                area: "HK".to_string(),
+                bandwidth_quality: "fast".to_string(),
+                tag: Some("premium".to_string()),
+                operator_ips: NodeConfigOperatorIpsResponse {
+                    telecom_ip: Some("103.201.131.99".to_string()),
+                    mobile_ip: None,
+                    unicom_ip: None,
+                },
+            },
+            release: BootstrapReleaseInfo {
+                version: VERSION,
+                manifest_url: String::new(),
+            },
+        };
+
+        let value = serde_json::to_value(response).expect("response serializes");
+
+        assert_eq!(value["server_ip"], "103.201.131.99");
+        assert_eq!(value["network"]["listen_ip"], "0.0.0.0");
+        assert_eq!(value["network"]["bandwidth_quality"], "fast");
+        assert_eq!(
+            value["network"]["operator_ips"]["telecom_ip"],
+            "103.201.131.99"
+        );
     }
 
     #[test]

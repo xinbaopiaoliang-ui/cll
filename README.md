@@ -62,8 +62,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.62.1
-git push origin v0.62.1
+git tag v0.63.0
+git push origin v0.63.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -81,7 +81,11 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.62.1` improves business node creation errors so duplicate
+next stage. Version `0.63.0` closes the node deployment loop: bootstrap now
+returns the full runtime network config, the installer writes identity,
+network, report, and limit settings into `config.toml`, and node listener bind
+failures include structured error codes and operator suggestions.
+Version `0.62.1` improves business node creation errors so duplicate
 node endpoints return a clear conflict instead of a generic database failure.
 Version `0.62.0` expands the control-panel business API console so
 operators can test node list/detail/create/update/delete and catalog

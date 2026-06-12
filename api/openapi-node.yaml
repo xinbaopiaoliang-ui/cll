@@ -599,6 +599,7 @@ components:
         - server_ip
         - server_port
         - config_revision
+        - network
         - release
       properties:
         node_id:
@@ -614,6 +615,8 @@ components:
           type: integer
         config_revision:
           type: integer
+        network:
+          $ref: '#/components/schemas/NodeRuntimeNetworkConfig'
         release:
           type: object
           required: [version, manifest_url]

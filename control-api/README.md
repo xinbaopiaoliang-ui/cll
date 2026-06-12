@@ -14,6 +14,8 @@ browser. The UI is organized as a management console with login, sidebar menus,
 overview, node management, game route management, and operations workspaces.
 Operators can create nodes, change status, generate bootstrap install commands,
 edit config, and manage route rules without direct MySQL edits.
+Bootstrap exchanges return the full runtime network config so installers can
+write production `config.toml` files without a manual MySQL follow-up.
 Business-backend catalog sync is separated from admin operations through
 `XACCEL_BUSINESS_SYNC_TOKEN`; it upserts games, game regions, and route rules
 into the control plane execution copy.

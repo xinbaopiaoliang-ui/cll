@@ -112,9 +112,14 @@ Done in `v0.16.2`:
 - Build Linux release binaries with `x86_64-unknown-linux-musl` to support
   older glibc servers without OS upgrades.
 
+Done in `v0.63.0`:
+
+- Add structured listener bind error reporting for node TCP/UDP startup.
+- Classify address-in-use, address-not-available, permission, and invalid
+  listener failures with operator-facing suggestions in service logs.
+
 Next:
 
-- Add structured bind error reporting.
 - Add user entitlement checks before issuing connect-intents.
 - Add production scheduler policy for ISP, region, latency, and node load.
 - Add API authentication for clients.
@@ -314,14 +319,28 @@ Done in `v0.31.0`:
 - Include scheduler details in connect-intent and `xaccel-client-probe` output
   so operators can see route priority, latest report age, and session counts.
 
+Done in `v0.63.0`:
+
+- Expand node bootstrap responses with the same runtime network shape used by
+  `/api/node/v1/config`.
+- Let the Linux installer parse production bootstrap JSON and write identity,
+  network, report, and limit settings into `/etc/xaccel-node/config.toml`.
+- Keep legacy top-level bootstrap `server_ip` and `server_port` fields for
+  older installers while new installers prefer the nested `network` object.
+
 Goals:
 
 - Keep game, region, and route ownership in the business backend. The control
   panel no longer exposes game/route management as a primary menu entry; it
   keeps business sync snapshots and operations fallback visibility only.
 - Add nonce replay storage for node report requests.
-- Parse production bootstrap response.
 - Add websocket or long-poll events for drain, config update, and user kick.
+
+Next release focus:
+
+- `v0.64`: close the user/device entitlement boundary, add client API auth, and
+  formalize scheduler policy for ISP, region, latency, and node load.
+- `v0.65`: start the real game tunnel MVP after UDP relay cleanup is stable.
 
 ## P4: UDP Relay MVP
 

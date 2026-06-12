@@ -168,6 +168,23 @@ POST /api/node/v1/bootstrap
   "server_ip": "1.2.3.4",
   "server_port": 666,
   "config_revision": 20001,
+  "network": {
+    "server_ip": "1.2.3.4",
+    "listen_ip": "0.0.0.0",
+    "server_port": 666,
+    "relay_server_ip": null,
+    "relay_server_port": null,
+    "is_support_ipv6": false,
+    "disable_quic": false,
+    "area": "HK",
+    "bandwidth_quality": "normal",
+    "tag": "free",
+    "operator_ips": {
+      "telecom_ip": null,
+      "mobile_ip": null,
+      "unicom_ip": null
+    }
+  },
   "release": {
     "version": "0.1.0",
     "manifest_url": "https://install.example.com/releases/stable.json"
@@ -192,4 +209,3 @@ Uninstall: /usr/local/bin/xaccel-node-uninstall
 ## 一键安装脚本的边界
 
 一键安装可以降低交付成本，但不要把所有逻辑塞进 shell。shell 只做 bootstrap、下载、校验、安装和启动。复杂逻辑放进 `xaccel-node` 本体，例如配置校验、网络监听检查、健康上报和升级策略。
-

@@ -17,6 +17,7 @@ this MVP is to verify the node lifecycle:
   client integration testing.
 - Bind connect-intent route targets from signed client tokens.
 - Forward authenticated UDP `session.data` payloads to the bound UDP endpoint.
+- Report structured listener bind errors for common deployment failures.
 - Optionally post HMAC-signed health reports to the backend.
 - Support `--check-config` for installer validation.
 - Provide a stable place to add config sync, session, and relay modules.

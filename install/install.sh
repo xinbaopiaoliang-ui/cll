@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.33.5"
+INSTALLER_VERSION="0.63.0"
 SERVICE_NAME="xaccel-node"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-node"
@@ -22,8 +22,20 @@ PANEL_URL=""
 SERVER_IP=""
 LISTEN_IP="0.0.0.0"
 SERVER_PORT=""
+RELAY_SERVER_IP=""
+RELAY_SERVER_PORT="0"
+IS_SUPPORT_IPV6="false"
+DISABLE_QUIC="false"
+AREA="UNKNOWN"
+BANDWIDTH_QUALITY="normal"
+NETWORK_TAG=""
+TELECOM_IP=""
+MOBILE_IP=""
+UNICOM_IP=""
 NODE_SECRET=""
 CONFIG_REVISION="1"
+RELEASE_VERSION=""
+RELEASE_MANIFEST_URL=""
 CHANNEL="stable"
 OPEN_FIREWALL="0"
 DRY_RUN="0"
@@ -281,26 +293,144 @@ json_number_field() {
   sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$file" | head -n 1
 }
 
+json_bool_field() {
+  local file key
+  file="$1"
+  key="$2"
+  sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p" "$file" | head -n 1
+}
+
+json_path_field() {
+  local file path value
+  file="$1"
+  path="$2"
+
+  if command -v python3 >/dev/null 2>&1; then
+    value="$(
+      python3 - "$file" "$path" <<'PY' || true
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as fh:
+        value = json.load(fh)
+    for part in sys.argv[2].split("."):
+        if isinstance(value, dict):
+            value = value.get(part)
+        else:
+            value = None
+            break
+    if value is None:
+        sys.exit(0)
+    if isinstance(value, bool):
+        print("true" if value else "false")
+    elif isinstance(value, (str, int, float)):
+        print(value)
+except Exception:
+    sys.exit(0)
+PY
+    )"
+    if [[ -n "$value" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  fi
+
+  if command -v jq >/dev/null 2>&1; then
+    value="$(
+      jq -er --arg path "$path" '
+        getpath($path | split(".")) //
+        empty |
+        if type == "boolean" then tostring else tostring end
+      ' "$file" 2>/dev/null || true
+    )"
+    if [[ -n "$value" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  fi
+
+  if [[ "$path" != *.* ]]; then
+    value="$(json_string_field "$file" "$path")"
+    if [[ -n "$value" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+    value="$(json_number_field "$file" "$path")"
+    if [[ -n "$value" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+    value="$(json_bool_field "$file" "$path")"
+    if [[ -n "$value" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  fi
+}
+
+validate_bool_text() {
+  local value name
+  value="$1"
+  name="$2"
+  case "$value" in
+    true|false) ;;
+    *) fail "bootstrap response ${name} must be true or false" ;;
+  esac
+}
+
 load_bootstrap_response_vars() {
   local file
   file="${DATA_DIR}/bootstrap-response.json"
   [[ -f "$file" ]] || fail "bootstrap response missing: $file"
 
-  NODE_ID="$(json_number_field "$file" "node_id")"
-  NODE_SECRET="$(json_string_field "$file" "node_secret")"
-  PANEL_URL="$(json_string_field "$file" "panel_url")"
-  SERVER_IP="$(json_string_field "$file" "server_ip")"
-  SERVER_PORT="$(json_number_field "$file" "server_port")"
-  CONFIG_REVISION="$(json_number_field "$file" "config_revision")"
+  NODE_ID="$(json_path_field "$file" "node_id")"
+  NODE_SECRET="$(json_path_field "$file" "node_secret")"
+  PANEL_URL="$(json_path_field "$file" "panel_url")"
+  SERVER_IP="$(json_path_field "$file" "network.server_ip")"
+  SERVER_IP="${SERVER_IP:-$(json_path_field "$file" "server_ip")}"
+  LISTEN_IP="$(json_path_field "$file" "network.listen_ip")"
+  LISTEN_IP="${LISTEN_IP:-0.0.0.0}"
+  SERVER_PORT="$(json_path_field "$file" "network.server_port")"
+  SERVER_PORT="${SERVER_PORT:-$(json_path_field "$file" "server_port")}"
+  RELAY_SERVER_IP="$(json_path_field "$file" "network.relay_server_ip")"
+  RELAY_SERVER_PORT="$(json_path_field "$file" "network.relay_server_port")"
+  RELAY_SERVER_PORT="${RELAY_SERVER_PORT:-0}"
+  IS_SUPPORT_IPV6="$(json_path_field "$file" "network.is_support_ipv6")"
+  IS_SUPPORT_IPV6="${IS_SUPPORT_IPV6:-false}"
+  DISABLE_QUIC="$(json_path_field "$file" "network.disable_quic")"
+  DISABLE_QUIC="${DISABLE_QUIC:-false}"
+  AREA="$(json_path_field "$file" "network.area")"
+  AREA="${AREA:-UNKNOWN}"
+  BANDWIDTH_QUALITY="$(json_path_field "$file" "network.bandwidth_quality")"
+  BANDWIDTH_QUALITY="${BANDWIDTH_QUALITY:-normal}"
+  NETWORK_TAG="$(json_path_field "$file" "network.tag")"
+  TELECOM_IP="$(json_path_field "$file" "network.operator_ips.telecom_ip")"
+  MOBILE_IP="$(json_path_field "$file" "network.operator_ips.mobile_ip")"
+  UNICOM_IP="$(json_path_field "$file" "network.operator_ips.unicom_ip")"
+  CONFIG_REVISION="$(json_path_field "$file" "config_revision")"
   CONFIG_REVISION="${CONFIG_REVISION:-1}"
+  RELEASE_VERSION="$(json_path_field "$file" "release.version")"
+  RELEASE_MANIFEST_URL="$(json_path_field "$file" "release.manifest_url")"
 
   [[ -n "$NODE_ID" ]] || fail "bootstrap response missing node_id"
   [[ -n "$NODE_SECRET" ]] || fail "bootstrap response missing node_secret"
   [[ -n "$PANEL_URL" ]] || fail "bootstrap response missing panel_url"
   [[ -n "$SERVER_IP" ]] || fail "bootstrap response missing server_ip"
   [[ -n "$SERVER_PORT" ]] || fail "bootstrap response missing server_port"
+  [[ "$NODE_ID" =~ ^[0-9]+$ ]] || fail "bootstrap response node_id must be numeric"
+  [[ "$SERVER_PORT" =~ ^[0-9]+$ ]] || fail "bootstrap response server_port must be numeric"
+  [[ "$RELAY_SERVER_PORT" =~ ^[0-9]+$ ]] || fail "bootstrap response relay_server_port must be numeric"
+  [[ "$CONFIG_REVISION" =~ ^[0-9]+$ ]] || fail "bootstrap response config_revision must be numeric"
   (( SERVER_PORT >= 1 && SERVER_PORT <= 65535 )) || fail "bootstrap response server_port must be 1-65535"
+  (( RELAY_SERVER_PORT >= 0 && RELAY_SERVER_PORT <= 65535 )) || fail "bootstrap response relay_server_port must be 0-65535"
   (( CONFIG_REVISION >= 1 )) || fail "bootstrap response config_revision must be positive"
+  validate_bool_text "$IS_SUPPORT_IPV6" "network.is_support_ipv6"
+  validate_bool_text "$DISABLE_QUIC" "network.disable_quic"
+  case "$BANDWIDTH_QUALITY" in
+    fast|normal|slow) ;;
+    *) fail "bootstrap response network.bandwidth_quality must be fast, normal, or slow" ;;
+  esac
 }
 
 bootstrap() {
@@ -361,8 +491,25 @@ bootstrap_standalone() {
   "server_ip": "$(json_escape "$SERVER_IP")",
   "server_port": $SERVER_PORT,
   "config_revision": 1,
+  "network": {
+    "server_ip": "$(json_escape "$SERVER_IP")",
+    "listen_ip": "$(json_escape "$LISTEN_IP")",
+    "server_port": $SERVER_PORT,
+    "relay_server_ip": "",
+    "relay_server_port": 0,
+    "is_support_ipv6": false,
+    "disable_quic": false,
+    "area": "UNKNOWN",
+    "bandwidth_quality": "normal",
+    "tag": "standalone",
+    "operator_ips": {
+      "telecom_ip": "",
+      "mobile_ip": "",
+      "unicom_ip": ""
+    }
+  },
   "release": {
-      "version": "0.33.0",
+    "version": "0.34.0",
     "manifest_url": ""
   },
   "standalone": true
@@ -515,6 +662,8 @@ write_config() {
   chmod 0755 "$CONFIG_DIR" "$LOG_DIR"
   cat > "$CONFIG_FILE" <<EOF
 [identity]
+node_id = $NODE_ID
+panel_url = "$PANEL_URL"
 identity_file = "$IDENTITY_FILE"
 
 [runtime]
@@ -536,13 +685,22 @@ config_poll_interval_sec = 30
 interval_sec = 30
 traffic_batch_sec = 60
 metrics_interval_sec = 15
+
+[limits]
+max_sessions = 200000
+max_sessions_per_user = 256
+max_udp_mappings = 500000
+default_user_speed_mbps = 0
 EOF
 
   if [[ -n "$SERVER_IP" && -n "$SERVER_PORT" ]]; then
     local network_tag
-    network_tag="bootstrap"
-    if [[ "$STANDALONE" == "1" ]]; then
-      network_tag="standalone"
+    network_tag="$NETWORK_TAG"
+    if [[ -z "$network_tag" ]]; then
+      network_tag="bootstrap"
+      if [[ "$STANDALONE" == "1" ]]; then
+        network_tag="standalone"
+      fi
     fi
     cat >> "$CONFIG_FILE" <<EOF
 
@@ -550,18 +708,18 @@ EOF
 server_ip = "$SERVER_IP"
 listen_ip = "$LISTEN_IP"
 server_port = $SERVER_PORT
-relay_server_ip = ""
-relay_server_port = 0
-is_support_ipv6 = false
-disable_quic = false
-area = "UNKNOWN"
-bandwidth_quality = "normal"
+relay_server_ip = "$RELAY_SERVER_IP"
+relay_server_port = $RELAY_SERVER_PORT
+is_support_ipv6 = $IS_SUPPORT_IPV6
+disable_quic = $DISABLE_QUIC
+area = "$AREA"
+bandwidth_quality = "$BANDWIDTH_QUALITY"
 tag = "$network_tag"
 
 [network.operator_ips]
-telecom_ip = ""
-mobile_ip = ""
-unicom_ip = ""
+telecom_ip = "$TELECOM_IP"
+mobile_ip = "$MOBILE_IP"
+unicom_ip = "$UNICOM_IP"
 EOF
   fi
 

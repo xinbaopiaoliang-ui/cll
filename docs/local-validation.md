@@ -125,8 +125,9 @@ cargo run --manifest-path client-probe/Cargo.toml -- \
 
 ## Current Gaps
 
-- The installer still does not parse production bootstrap JSON into all config
-  fields.
+- Production bootstrap parsing now writes identity, network, report, and limit
+  settings into `config.toml`; validate this with a real bootstrap token before
+  cutting each Linux release.
 - The node forwards UDP session data to token-bound route targets, but full game
   tunnel framing is still pending.
-- Control-plane config sync, user/device auth, and QUIC tunnel are pending.
+- User/device auth, production scheduler policy, and QUIC tunnel are pending.
