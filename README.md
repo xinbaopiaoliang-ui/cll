@@ -38,6 +38,8 @@ traffic through a self-developed node core.
 - [Rust + MySQL connect-intent 控制面](docs/control-api-mysql.md)
 - [业务后台对接控制面](docs/business-backend-integration.md)
 
+- [Per-session acceleration ticket contract](docs/per-session-accel-ticket.md)
+
 ## Core Assumptions
 
 - The node core runs on Linux as a userspace daemon first.
@@ -62,8 +64,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.66.0
-git push origin v0.66.0
+git tag v0.70.0
+git push origin v0.70.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -81,11 +83,17 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.66.0` requires business `connect-intent` calls to carry
-entitlement and device verification context, and writes that context into the
-node credential for later attribution. Version `0.65.0` can protect the legacy client
-`/api/client/v1/connect-intent` endpoint with `XACCEL_CLIENT_API_TOKEN`, while
-`xaccel-client-probe 0.33.0` can send that token for diagnostics. Version
+next stage. Version `0.70.0` introduces per-session acceleration tickets with a
+dynamic `route_policy`: the business backend supplies node, domain/IP/CIDR,
+port ranges, entitlement, device, and risk context for each acceleration
+attempt, the control plane signs a short-lived node credential bound to the
+route-policy hash, and `xaccel-client-probe 0.37.0` can run directly from the
+returned `accel_ticket` JSON. Version `0.66.0` requires business `connect-intent` calls
+to carry entitlement and device verification context, and writes that context
+into the node credential for later attribution. Version `0.65.0` can protect
+the legacy client `/api/client/v1/connect-intent` endpoint with
+`XACCEL_CLIENT_API_TOKEN`, while `xaccel-client-probe 0.33.0` can send that
+token for diagnostics. Version
 `0.64.0` explains connect-intent scheduling decisions:
 business integration responses now show region matching, bandwidth-quality
 matching, report freshness, route priority, load counters, and selection

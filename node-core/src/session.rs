@@ -1,5 +1,8 @@
 use crate::{
     auth::{verify_probe_token, AuthDecision, ClientTokenClaims},
+    route_policy::{
+        hash_route_policy, match_route_policy_target, RoutePolicy, SessionDataTarget, TargetMatch,
+    },
     session_store::{UdpSession, UdpSessionError},
     state::RuntimeState,
 };
@@ -43,8 +46,10 @@ pub struct ClientProbeRequest {
     pub user_id: Option<u64>,
     pub device_id: Option<String>,
     pub game_id: Option<u64>,
+    pub region_id: Option<u64>,
     pub transport: Option<String>,
     pub token: Option<String>,
+    pub route_policy: Option<RoutePolicy>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +60,7 @@ pub struct ClientSessionDataRequest {
     pub target_addr: Option<String>,
     pub target_host: Option<String>,
     pub target_port: Option<u16>,
+    pub target: Option<SessionDataTarget>,
     pub response_timeout_ms: Option<u64>,
 }
 
@@ -88,6 +94,8 @@ struct ProbeSession {
     ttl_sec: u64,
     intent_id: Option<String>,
     route_target_addr: Option<String>,
+    route_policy_id: Option<String>,
+    route_policy_hash: Option<String>,
     auth_required: bool,
     credential_present: bool,
     credential_valid: bool,
@@ -95,6 +103,7 @@ struct ProbeSession {
     user_id: Option<u64>,
     device_id: Option<String>,
     game_id: Option<u64>,
+    region_id: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -119,7 +128,12 @@ struct ClientSessionDataResponse {
 
 #[derive(Debug, Serialize)]
 struct SessionTargetInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_id: Option<String>,
+    protocol: &'static str,
     address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    matched_policy: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -138,9 +152,12 @@ struct SessionDataInfo {
     authenticated: bool,
     intent_id: Option<String>,
     route_target_addr: Option<String>,
+    route_policy_id: Option<String>,
+    route_policy_hash: Option<String>,
     user_id: Option<u64>,
     device_id: Option<String>,
     game_id: Option<u64>,
+    region_id: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -166,9 +183,13 @@ struct ProbeIdentity {
     credential_expires_at: Option<u64>,
     intent_id: Option<String>,
     route_target_addr: Option<String>,
+    route_policy: Option<RoutePolicy>,
+    route_policy_id: Option<String>,
+    route_policy_hash: Option<String>,
     user_id: Option<u64>,
     device_id: Option<String>,
     game_id: Option<u64>,
+    region_id: Option<u64>,
 }
 
 pub fn parse_client_message(payload: &[u8]) -> ParsedClientMessage {
@@ -224,7 +245,13 @@ pub fn build_probe_response(
         }
         AuthDecision::Valid(claims) => {
             state.stats().record_auth_ok();
-            ProbeIdentity::from_claims(claims)
+            match ProbeIdentity::from_claims(claims, request.route_policy.clone()) {
+                Ok(identity) => identity,
+                Err((code, message)) => {
+                    state.stats().record_auth_failed();
+                    return build_probe_error_with_code(state, transport, code, message);
+                }
+            }
         }
         AuthDecision::Invalid { code, message } => {
             state.stats().record_auth_failed();
@@ -241,9 +268,13 @@ pub fn build_probe_response(
             identity.user_id,
             identity.device_id.clone(),
             identity.game_id,
+            identity.region_id,
             identity.credential_valid,
             identity.intent_id.clone(),
             identity.route_target_addr.clone(),
+            identity.route_policy.clone(),
+            identity.route_policy_id.clone(),
+            identity.route_policy_hash.clone(),
             PROBE_TTL_SEC,
             peer,
         ));
@@ -264,6 +295,8 @@ pub fn build_probe_response(
             ttl_sec: PROBE_TTL_SEC,
             intent_id: identity.intent_id,
             route_target_addr: identity.route_target_addr,
+            route_policy_id: identity.route_policy_id,
+            route_policy_hash: identity.route_policy_hash,
             auth_required: true,
             credential_present: identity.credential_present,
             credential_valid: identity.credential_valid,
@@ -271,6 +304,7 @@ pub fn build_probe_response(
             user_id: identity.user_id,
             device_id: identity.device_id,
             game_id: identity.game_id,
+            region_id: identity.region_id,
         },
         capabilities: vec![
             "tcp_probe",
@@ -279,6 +313,9 @@ pub fn build_probe_response(
             "udp_session_echo",
             "udp_target_relay",
             "connect_intent_route",
+            "dynamic_route_policy",
+            "port_range_target",
+            "domain_target",
             "session_stats",
         ],
     };
@@ -376,7 +413,12 @@ pub async fn build_session_data_response(
         );
     }
 
-    let target = match resolve_session_target(&request, session.route_target_addr.as_deref()).await
+    let target = match resolve_session_target(
+        &request,
+        session.route_target_addr.as_deref(),
+        session.route_policy.as_ref(),
+    )
+    .await
     {
         Ok(target) => target,
         Err(error) => {
@@ -387,7 +429,7 @@ pub async fn build_session_data_response(
 
     if let Some(target) = target {
         let timeout_ms = clamp_relay_timeout(request.response_timeout_ms);
-        let relay = match relay_udp_payload(target, &payload_bytes, timeout_ms).await {
+        let relay = match relay_udp_payload(target.socket_addr, &payload_bytes, timeout_ms).await {
             Ok(relay) => relay,
             Err(error) => {
                 state.stats().record_udp_relay_error();
@@ -402,7 +444,13 @@ pub async fn build_session_data_response(
 
         state.stats().record_udp_relay_tx(relay.upstream_tx_bytes);
         target_info = Some(SessionTargetInfo {
-            address: target.to_string(),
+            target_id: target
+                .policy_match
+                .as_ref()
+                .map(|matched| matched.target_id.clone()),
+            protocol: "udp",
+            address: target.socket_addr.to_string(),
+            matched_policy: target.policy_match.map(|matched| matched.policy_id),
         });
         relay_info = Some(RelayInfo {
             mode: "udp_target",
@@ -448,9 +496,12 @@ pub async fn build_session_data_response(
             authenticated: session.authenticated,
             intent_id: session.intent_id,
             route_target_addr: session.route_target_addr,
+            route_policy_id: session.route_policy_id,
+            route_policy_hash: session.route_policy_hash,
             user_id: session.user_id,
             device_id: session.device_id,
             game_id: session.game_id,
+            region_id: session.region_id,
         },
     };
     let encoded = encode_json_line(&response)?;
@@ -477,11 +528,17 @@ struct RelayOutcome {
     timed_out: bool,
 }
 
+struct ResolvedTarget {
+    socket_addr: SocketAddr,
+    policy_match: Option<TargetMatch>,
+}
+
 fn has_session_target(request: &ClientSessionDataRequest) -> bool {
-    request
-        .target_addr
-        .as_deref()
-        .is_some_and(|target_addr| !target_addr.trim().is_empty())
+    request.target.is_some()
+        || request
+            .target_addr
+            .as_deref()
+            .is_some_and(|target_addr| !target_addr.trim().is_empty())
         || request
             .target_host
             .as_deref()
@@ -491,12 +548,39 @@ fn has_session_target(request: &ClientSessionDataRequest) -> bool {
 async fn resolve_session_target(
     request: &ClientSessionDataRequest,
     session_target_addr: Option<&str>,
-) -> Result<Option<SocketAddr>, TargetResolveError> {
+    route_policy: Option<&RoutePolicy>,
+) -> Result<Option<ResolvedTarget>, TargetResolveError> {
+    if let Some(route_policy) = route_policy {
+        let Some(target) = request.target.as_ref() else {
+            return Err(TargetResolveError {
+                code: "missing_target",
+                message: "target is required for dynamic route_policy sessions".to_string(),
+            });
+        };
+        let policy_match =
+            match_route_policy_target(route_policy, target).map_err(|code| TargetResolveError {
+                code,
+                message: "target does not match route_policy".to_string(),
+            })?;
+        let socket_addr = resolve_host_port(&target.host, target.port).await?;
+        return Ok(Some(ResolvedTarget {
+            socket_addr,
+            policy_match: Some(policy_match),
+        }));
+    }
+
     if let Some(session_target_addr) = session_target_addr
         .map(str::trim)
         .filter(|session_target_addr| !session_target_addr.is_empty())
     {
-        return resolve_socket_addr(session_target_addr).await.map(Some);
+        return resolve_socket_addr(session_target_addr)
+            .await
+            .map(|socket_addr| {
+                Some(ResolvedTarget {
+                    socket_addr,
+                    policy_match: None,
+                })
+            });
     }
 
     if let Some(target_addr) = request
@@ -505,7 +589,12 @@ async fn resolve_session_target(
         .map(str::trim)
         .filter(|target_addr| !target_addr.is_empty())
     {
-        return resolve_socket_addr(target_addr).await.map(Some);
+        return resolve_socket_addr(target_addr).await.map(|socket_addr| {
+            Some(ResolvedTarget {
+                socket_addr,
+                policy_match: None,
+            })
+        });
     }
 
     let Some(target_host) = request
@@ -524,12 +613,23 @@ async fn resolve_session_target(
         });
     };
 
-    let endpoint = match target_host.parse::<IpAddr>() {
-        Ok(IpAddr::V6(_)) => format!("[{target_host}]:{target_port}"),
-        _ => format!("{target_host}:{target_port}"),
+    resolve_host_port(target_host, target_port)
+        .await
+        .map(|socket_addr| {
+            Some(ResolvedTarget {
+                socket_addr,
+                policy_match: None,
+            })
+        })
+}
+
+async fn resolve_host_port(host: &str, port: u16) -> Result<SocketAddr, TargetResolveError> {
+    let endpoint = match host.parse::<IpAddr>() {
+        Ok(IpAddr::V6(_)) => format!("[{host}]:{port}"),
+        _ => format!("{host}:{port}"),
     };
 
-    resolve_socket_addr(&endpoint).await.map(Some)
+    resolve_socket_addr(&endpoint).await
 }
 
 async fn resolve_socket_addr(endpoint: &str) -> Result<SocketAddr, TargetResolveError> {
@@ -638,23 +738,68 @@ impl ProbeIdentity {
             credential_expires_at: None,
             intent_id: None,
             route_target_addr: None,
+            route_policy: None,
+            route_policy_id: None,
+            route_policy_hash: None,
             user_id: request.user_id,
             device_id: request.device_id.clone(),
             game_id: request.game_id,
+            region_id: request.region_id,
         }
     }
 
-    fn from_claims(claims: ClientTokenClaims) -> Self {
-        Self {
+    fn from_claims(
+        claims: ClientTokenClaims,
+        route_policy: Option<RoutePolicy>,
+    ) -> Result<Self, (&'static str, String)> {
+        if let Some(expected_hash) = claims.route_policy_hash.as_deref() {
+            let Some(route_policy) = route_policy.as_ref() else {
+                return Err((
+                    "missing_route_policy",
+                    "route_policy is required by token".to_string(),
+                ));
+            };
+            let actual_hash = hash_route_policy(route_policy).map_err(|error| {
+                (
+                    "invalid_route_policy",
+                    format!("failed to hash route_policy: {error}"),
+                )
+            })?;
+            if actual_hash != expected_hash {
+                return Err((
+                    "route_policy_mismatch",
+                    "route_policy hash does not match token".to_string(),
+                ));
+            }
+            if let Some(policy_id) = claims.route_policy_id.as_deref() {
+                if route_policy.policy_id != policy_id {
+                    return Err((
+                        "route_policy_mismatch",
+                        "route_policy policy_id does not match token".to_string(),
+                    ));
+                }
+            }
+        }
+
+        let dynamic_route = claims.route_policy_hash.is_some();
+        Ok(Self {
             credential_present: true,
             credential_valid: true,
             credential_expires_at: Some(claims.expires_at),
             intent_id: claims.intent_id,
-            route_target_addr: claims.route.map(|route| route.target_addr),
+            route_target_addr: if dynamic_route {
+                None
+            } else {
+                claims.route.map(|route| route.target_addr)
+            },
+            route_policy: if dynamic_route { route_policy } else { None },
+            route_policy_id: claims.route_policy_id,
+            route_policy_hash: claims.route_policy_hash,
             user_id: Some(claims.user_id),
             device_id: Some(claims.device_id),
             game_id: Some(claims.game_id),
-        }
+            region_id: claims.region_id,
+        })
     }
 }
 
@@ -723,7 +868,22 @@ mod tests {
         assert_eq!(request.payload.as_deref(), Some("aGVsbG8="));
         assert_eq!(request.target_host.as_deref(), Some("127.0.0.1"));
         assert_eq!(request.target_port, Some(7777));
+        assert!(request.target.is_none());
         assert_eq!(request.response_timeout_ms, Some(50));
+    }
+
+    #[test]
+    fn parses_dynamic_session_data_target() {
+        let payload = br#"{"type":"session.data","protocol":"xaccel/1","session_id":"s1","payload":"aGVsbG8=","target":{"target_id":"gameplay","protocol":"udp","host":"198.51.100.20","port":27015}}"#;
+        let ParsedClientMessage::SessionData(request) = parse_client_message(payload) else {
+            panic!("expected session.data request");
+        };
+
+        let target = request.target.expect("dynamic target");
+        assert_eq!(target.target_id.as_deref(), Some("gameplay"));
+        assert_eq!(target.protocol.as_deref(), Some("udp"));
+        assert_eq!(target.host, "198.51.100.20");
+        assert_eq!(target.port, 27015);
     }
 
     #[tokio::test]
@@ -754,15 +914,16 @@ mod tests {
             target_addr: Some("127.0.0.1:9999".to_string()),
             target_host: None,
             target_port: None,
+            target: None,
             response_timeout_ms: None,
         };
 
-        let target = resolve_session_target(&request, Some("127.0.0.1:7777"))
+        let target = resolve_session_target(&request, Some("127.0.0.1:7777"), None)
             .await
             .expect("target resolves")
             .expect("target exists");
 
-        assert_eq!(target.port(), 7777);
+        assert_eq!(target.socket_addr.port(), 7777);
     }
 
     #[test]

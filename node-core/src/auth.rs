@@ -18,8 +18,17 @@ pub struct ClientTokenClaims {
     pub device_id: String,
     pub game_id: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub game_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub business: Option<BusinessAuthContext>,
     pub intent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_policy_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_policy_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub route: Option<ClientRouteClaims>,
     pub expires_at: u64,
     pub issued_at: Option<u64>,
@@ -173,6 +182,16 @@ fn match_request_claims(request: &ClientProbeRequest, claims: ClientTokenClaims)
         };
     }
 
+    if request
+        .region_id
+        .is_some_and(|region_id| Some(region_id) != claims.region_id)
+    {
+        return AuthDecision::Invalid {
+            code: "claim_mismatch",
+            message: "request region_id does not match token".to_string(),
+        };
+    }
+
     AuthDecision::Valid(claims)
 }
 
@@ -205,8 +224,12 @@ mod tests {
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
+            game_key: None,
+            region_id: Some(1),
             business: None,
             intent_id: Some("intent-test".to_string()),
+            route_policy_hash: None,
+            route_policy_id: None,
             route: Some(ClientRouteClaims {
                 target_addr: "127.0.0.1:7777".to_string(),
                 protocol: "udp".to_string(),
@@ -225,8 +248,10 @@ mod tests {
             user_id: Some(1001),
             device_id: Some("pc-001".to_string()),
             game_id: Some(8888),
+            region_id: Some(1),
             transport: None,
             token: Some(token),
+            route_policy: None,
         };
 
         assert!(matches!(
@@ -243,8 +268,10 @@ mod tests {
             user_id: Some(1001),
             device_id: Some("pc-001".to_string()),
             game_id: Some(8888),
+            region_id: Some(1),
             transport: None,
             token: Some(token),
+            route_policy: None,
         };
 
         let AuthDecision::Valid(claims) = verify_probe_token(&request, Some(1), Some("secret"))
@@ -270,8 +297,33 @@ mod tests {
             user_id: Some(1002),
             device_id: Some("pc-001".to_string()),
             game_id: Some(8888),
+            region_id: Some(1),
             transport: None,
             token: Some(token),
+            route_policy: None,
+        };
+
+        assert!(matches!(
+            verify_probe_token(&request, Some(1), Some("secret")),
+            AuthDecision::Invalid {
+                code: "claim_mismatch",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_mismatched_region_claim() {
+        let token = sign_client_token(&claims(), "secret").expect("test token signs");
+        let request = ClientProbeRequest {
+            client_nonce: None,
+            user_id: Some(1001),
+            device_id: Some("pc-001".to_string()),
+            game_id: Some(8888),
+            region_id: Some(2),
+            transport: None,
+            token: Some(token),
+            route_policy: None,
         };
 
         assert!(matches!(
@@ -290,8 +342,10 @@ mod tests {
             user_id: None,
             device_id: None,
             game_id: None,
+            region_id: None,
             transport: None,
             token: None,
+            route_policy: None,
         };
 
         assert!(matches!(

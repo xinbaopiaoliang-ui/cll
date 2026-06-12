@@ -4,7 +4,9 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    fs,
     net::SocketAddr,
+    path::PathBuf,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{net::UdpSocket, time::timeout};
@@ -25,6 +27,12 @@ struct Cli {
 
     #[arg(long, env = "XACCEL_CLIENT_API_TOKEN")]
     client_api_token: Option<String>,
+
+    #[arg(long, env = "XACCEL_ACCEL_TICKET_FILE")]
+    accel_ticket_file: Option<PathBuf>,
+
+    #[arg(long, env = "XACCEL_ACCEL_TICKET_JSON")]
+    accel_ticket_json: Option<String>,
 
     #[arg(long, default_value_t = 1001)]
     user_id: u64,
@@ -67,6 +75,21 @@ struct Cli {
 
     #[arg(long)]
     compact: bool,
+
+    #[arg(long)]
+    target_host: Option<String>,
+
+    #[arg(long)]
+    target_port: Option<u16>,
+
+    #[arg(long, default_value = "udp")]
+    target_protocol: String,
+
+    #[arg(long)]
+    target_id: Option<String>,
+
+    #[arg(long)]
+    original_domain: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -87,6 +110,91 @@ struct ConnectIntentResponse {
     intent_id: String,
     ttl_sec: u64,
     candidates: Vec<NodeCandidate>,
+    #[serde(default, skip)]
+    ticket_client: Option<AccelTicketClient>,
+    #[serde(default, skip)]
+    ticket_route_policy: Option<RoutePolicy>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AccelTicket {
+    ticket_id: String,
+    ttl_sec: u64,
+    client: AccelTicketClient,
+    node: AccelTicketNode,
+    route: CandidateRoute,
+    #[serde(default)]
+    route_policy: Option<RoutePolicy>,
+    credential: CandidateCredential,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AccelTicketClient {
+    user_id: u64,
+    device_id: String,
+    game_id: u64,
+    region_id: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AccelTicketNode {
+    node_id: u64,
+    host: String,
+    port: u16,
+    #[serde(default = "default_area")]
+    area: String,
+    #[serde(default = "default_tag")]
+    tag: String,
+    #[serde(default = "default_transports")]
+    transports: Vec<String>,
+    #[serde(default = "default_bandwidth_quality")]
+    bandwidth_quality: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct RoutePolicy {
+    policy_id: String,
+    policy_version: u32,
+    mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_protocol: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dns_strategy: Option<String>,
+    #[serde(default)]
+    targets: Vec<RouteTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    capture: Option<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct RouteTarget {
+    target_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    purpose: Option<String>,
+    host_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host: Option<String>,
+    #[serde(default)]
+    resolved_ips: Vec<String>,
+    #[serde(default)]
+    observed_ips: Vec<String>,
+    #[serde(default)]
+    cidrs: Vec<String>,
+    #[serde(default)]
+    ports: Vec<PortRange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allow_client_observed_ip: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resolve_ttl_sec: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct PortRange {
+    protocol: String,
+    from: u16,
+    to: u16,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -99,6 +207,8 @@ struct NodeCandidate {
     transports: Vec<String>,
     bandwidth_quality: String,
     route: CandidateRoute,
+    #[serde(default)]
+    route_policy: Option<RoutePolicy>,
     credential: CandidateCredential,
     scheduler: Option<CandidateScheduler>,
 }
@@ -144,6 +254,8 @@ struct ProbeRequest {
     region_id: Option<u64>,
     transport: &'static str,
     token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    route_policy: Option<RoutePolicy>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,8 +285,21 @@ struct SessionDataRequest {
     protocol: &'static str,
     session_id: String,
     client_nonce: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<SessionDataTarget>,
     payload: String,
     response_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SessionDataTarget {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_id: Option<String>,
+    protocol: String,
+    host: String,
+    port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    original_domain: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -191,7 +316,10 @@ struct SessionDataResponse {
 
 #[derive(Debug, Deserialize)]
 struct TargetInfo {
+    target_id: Option<String>,
+    protocol: Option<String>,
     address: String,
+    matched_policy: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -266,7 +394,10 @@ struct SessionDataStepSummary {
     response_payload_bytes: u64,
     response_payload_base64: String,
     response_payload_text: Option<String>,
+    target_id: Option<String>,
+    target_protocol: Option<String>,
     target_addr: Option<String>,
+    matched_policy: Option<String>,
     relay: Option<RelaySummary>,
 }
 
@@ -285,7 +416,27 @@ async fn main() -> anyhow::Result<()> {
     validate_cli(&cli)?;
 
     let deadline = Duration::from_secs(cli.timeout_sec.max(1));
-    let connect_intent = request_connect_intent(&cli, deadline).await?;
+    let connect_intent = match load_accel_ticket(&cli)? {
+        Some(ticket) => connect_intent_from_ticket(ticket),
+        None => request_connect_intent(&cli, deadline).await?,
+    };
+    let ticket_client = connect_intent.ticket_client.clone();
+    let probe_user_id = ticket_client
+        .as_ref()
+        .map(|client| client.user_id)
+        .unwrap_or(cli.user_id);
+    let probe_device_id = ticket_client
+        .as_ref()
+        .map(|client| client.device_id.clone())
+        .unwrap_or_else(|| cli.device_id.clone());
+    let probe_game_id = ticket_client
+        .as_ref()
+        .map(|client| client.game_id)
+        .unwrap_or(cli.game_id);
+    let probe_region_id = ticket_client
+        .as_ref()
+        .map(|client| client.region_id)
+        .unwrap_or(cli.region_id);
     let candidate = connect_intent
         .candidates
         .get(cli.candidate_index)
@@ -317,17 +468,22 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("failed to connect UDP socket to {node_addr}"))?;
 
-    let probe_nonce = format!("probe-{}-{}", cli.user_id, now_unix());
+    let probe_nonce = format!("probe-{}-{}", probe_user_id, now_unix());
+    let route_policy = candidate
+        .route_policy
+        .clone()
+        .or_else(|| connect_intent.ticket_route_policy.clone());
     let probe_request = ProbeRequest {
         message_type: "probe",
         protocol: PROTOCOL_VERSION,
         client_nonce: probe_nonce,
-        user_id: cli.user_id,
-        device_id: cli.device_id.clone(),
-        game_id: cli.game_id,
-        region_id: cli.region_id,
+        user_id: probe_user_id,
+        device_id: probe_device_id,
+        game_id: probe_game_id,
+        region_id: probe_region_id,
         transport: "udp",
         token: candidate.credential.token.clone(),
+        route_policy: route_policy.clone(),
     };
     let probe_timer = Instant::now();
     let probe_value = send_json_udp(&socket, &probe_request, deadline).await?;
@@ -355,7 +511,16 @@ async fn main() -> anyhow::Result<()> {
     let session_data = if cli.skip_session_data {
         None
     } else {
-        Some(run_session_data(&cli, &socket, &probe_response.session.session_id, deadline).await?)
+        Some(
+            run_session_data(
+                &cli,
+                &socket,
+                &probe_response.session.session_id,
+                deadline,
+                route_policy.as_ref(),
+            )
+            .await?,
+        )
     };
 
     let summary = ProbeSummary {
@@ -404,6 +569,9 @@ fn validate_cli(cli: &Cli) -> anyhow::Result<()> {
     if cli.control_url.trim().is_empty() {
         bail!("--control-url must not be empty");
     }
+    if cli.accel_ticket_file.is_some() && cli.accel_ticket_json.is_some() {
+        bail!("use only one of --accel-ticket-file or --accel-ticket-json");
+    }
     if cli.device_id.trim().is_empty() {
         bail!("--device-id must not be empty");
     }
@@ -413,7 +581,83 @@ fn validate_cli(cli: &Cli) -> anyhow::Result<()> {
     if cli.response_timeout_ms == 0 {
         bail!("--response-timeout-ms must be positive");
     }
+    if cli.target_host.is_some() ^ cli.target_port.is_some() {
+        bail!("--target-host and --target-port must be provided together");
+    }
+    if !matches!(cli.target_protocol.as_str(), "udp" | "UDP") {
+        bail!("--target-protocol currently supports udp only");
+    }
     Ok(())
+}
+
+fn load_accel_ticket(cli: &Cli) -> anyhow::Result<Option<AccelTicket>> {
+    let raw = if let Some(json) = cli.accel_ticket_json.as_ref() {
+        Some(json.clone())
+    } else if let Some(path) = cli.accel_ticket_file.as_ref() {
+        Some(
+            fs::read_to_string(path)
+                .with_context(|| format!("failed to read accel ticket file {}", path.display()))?,
+        )
+    } else {
+        None
+    };
+
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+
+    let value: Value = serde_json::from_str(&raw).context("failed to decode accel ticket JSON")?;
+    Ok(Some(decode_accel_ticket(value)?))
+}
+
+fn decode_accel_ticket(value: Value) -> anyhow::Result<AccelTicket> {
+    if let Some(ticket) = value.get("accel_ticket") {
+        return serde_json::from_value(ticket.clone()).context("failed to decode accel_ticket");
+    }
+    if let Some(ticket) = value.pointer("/result/accel_ticket") {
+        return serde_json::from_value(ticket.clone())
+            .context("failed to decode result.accel_ticket");
+    }
+    serde_json::from_value(value).context("failed to decode raw accel ticket")
+}
+
+fn connect_intent_from_ticket(ticket: AccelTicket) -> ConnectIntentResponse {
+    let route_policy = ticket.route_policy.clone();
+    ConnectIntentResponse {
+        intent_id: ticket.ticket_id,
+        ttl_sec: ticket.ttl_sec,
+        ticket_client: Some(ticket.client),
+        ticket_route_policy: route_policy.clone(),
+        candidates: vec![NodeCandidate {
+            node_id: ticket.node.node_id,
+            area: ticket.node.area,
+            tag: ticket.node.tag,
+            host: ticket.node.host,
+            port: ticket.node.port,
+            transports: ticket.node.transports,
+            bandwidth_quality: ticket.node.bandwidth_quality,
+            route: ticket.route.clone(),
+            route_policy,
+            credential: ticket.credential,
+            scheduler: None,
+        }],
+    }
+}
+
+fn default_area() -> String {
+    "UNKNOWN".to_string()
+}
+
+fn default_tag() -> String {
+    "default".to_string()
+}
+
+fn default_transports() -> Vec<String> {
+    vec!["udp".to_string()]
+}
+
+fn default_bandwidth_quality() -> String {
+    "normal".to_string()
 }
 
 async fn request_connect_intent(
@@ -465,12 +709,15 @@ async fn run_session_data(
     socket: &UdpSocket,
     session_id: &str,
     deadline: Duration,
+    route_policy: Option<&RoutePolicy>,
 ) -> anyhow::Result<SessionDataStepSummary> {
+    let target = select_session_target(cli, route_policy)?;
     let request = SessionDataRequest {
         message_type: "session.data",
         protocol: PROTOCOL_VERSION,
         session_id: session_id.to_string(),
         client_nonce: format!("data-{}-{}", cli.user_id, now_unix()),
+        target,
         payload: BASE64.encode(cli.payload.as_bytes()),
         response_timeout_ms: cli.response_timeout_ms,
     };
@@ -488,6 +735,8 @@ async fn run_session_data(
 
     let response_payload_text = decode_payload_text(&response.payload);
 
+    let target = response.target;
+
     Ok(SessionDataStepSummary {
         latency_ms: timer.elapsed().as_millis(),
         status: response.status,
@@ -495,7 +744,10 @@ async fn run_session_data(
         response_payload_bytes: response.payload_bytes,
         response_payload_base64: response.payload,
         response_payload_text,
-        target_addr: response.target.map(|target| target.address),
+        target_id: target.as_ref().and_then(|target| target.target_id.clone()),
+        target_protocol: target.as_ref().and_then(|target| target.protocol.clone()),
+        target_addr: target.as_ref().map(|target| target.address.clone()),
+        matched_policy: target.and_then(|target| target.matched_policy),
         relay: response.relay.map(|relay| RelaySummary {
             mode: relay.mode,
             timeout_ms: relay.timeout_ms,
@@ -504,6 +756,57 @@ async fn run_session_data(
             upstream_rx_bytes: relay.upstream_rx_bytes,
         }),
     })
+}
+
+fn select_session_target(
+    cli: &Cli,
+    route_policy: Option<&RoutePolicy>,
+) -> anyhow::Result<Option<SessionDataTarget>> {
+    if let (Some(host), Some(port)) = (cli.target_host.as_ref(), cli.target_port) {
+        return Ok(Some(SessionDataTarget {
+            target_id: cli.target_id.clone(),
+            protocol: cli.target_protocol.to_ascii_lowercase(),
+            host: host.trim().to_string(),
+            port,
+            original_domain: cli.original_domain.clone(),
+        }));
+    }
+
+    let Some(route_policy) = route_policy else {
+        return Ok(None);
+    };
+
+    for target in &route_policy.targets {
+        let Some(port) = target
+            .ports
+            .iter()
+            .find(|port| port.protocol.eq_ignore_ascii_case("udp"))
+        else {
+            continue;
+        };
+        if let Some(host) = target
+            .host
+            .as_deref()
+            .or_else(|| target.resolved_ips.first().map(String::as_str))
+            .or_else(|| target.observed_ips.first().map(String::as_str))
+        {
+            return Ok(Some(SessionDataTarget {
+                target_id: Some(target.target_id.clone()),
+                protocol: "udp".to_string(),
+                host: host.to_string(),
+                port: port.from,
+                original_domain: target
+                    .host
+                    .as_ref()
+                    .filter(|_| target.host_type == "domain")
+                    .cloned(),
+            }));
+        }
+    }
+
+    bail!(
+        "route_policy does not contain a concrete UDP host; pass --target-host and --target-port"
+    );
 }
 
 async fn send_json_udp<T: Serialize>(
@@ -581,5 +884,83 @@ mod tests {
     #[test]
     fn ignores_non_utf8_payload_text() {
         assert!(decode_payload_text("//4=").is_none());
+    }
+
+    #[test]
+    fn decodes_wrapped_accel_ticket() {
+        let value = serde_json::json!({
+            "status": "ok",
+            "accel_ticket": {
+                "ticket_id": "intent-1001-8888-1-2",
+                "ttl_sec": 120,
+                "client": {
+                    "user_id": 1001,
+                    "device_id": "pc-001",
+                    "game_id": 8888,
+                    "region_id": 1
+                },
+                "node": {
+                    "node_id": 2,
+                    "host": "47.83.160.126",
+                    "port": 666
+                },
+                "route": {
+                    "target_addr": "127.0.0.1:7777",
+                    "protocol": "udp",
+                    "region_id": 1,
+                    "region_name": "Default"
+                },
+                "credential": {
+                    "token": "xat.v1.payload.signature",
+                    "expires_at": 9999999999_u64,
+                    "intent_id": "intent-1001-8888-1-2"
+                }
+            }
+        });
+
+        let ticket = decode_accel_ticket(value).expect("ticket decodes");
+        let intent = connect_intent_from_ticket(ticket);
+        assert_eq!(intent.intent_id, "intent-1001-8888-1-2");
+        assert_eq!(intent.candidates[0].node_id, 2);
+        assert_eq!(intent.candidates[0].area, "UNKNOWN");
+        assert_eq!(intent.candidates[0].route.target_addr, "127.0.0.1:7777");
+        assert_eq!(
+            intent.ticket_client.as_ref().map(|client| client.region_id),
+            Some(Some(1))
+        );
+    }
+
+    #[test]
+    fn preserves_missing_ticket_region() {
+        let value = serde_json::json!({
+            "ticket_id": "intent-1001-8888-1-2",
+            "ttl_sec": 120,
+            "client": {
+                "user_id": 1001,
+                "device_id": "pc-001",
+                "game_id": 8888
+            },
+            "node": {
+                "node_id": 2,
+                "host": "47.83.160.126",
+                "port": 666
+            },
+            "route": {
+                "target_addr": "127.0.0.1:7777",
+                "protocol": "udp"
+            },
+            "credential": {
+                "token": "xat.v1.payload.signature",
+                "expires_at": 9999999999_u64,
+                "intent_id": "intent-1001-8888-1-2"
+            }
+        });
+
+        let ticket = decode_accel_ticket(value).expect("ticket decodes");
+        let intent = connect_intent_from_ticket(ticket);
+        assert_eq!(
+            intent.ticket_client.as_ref().map(|client| client.region_id),
+            Some(None)
+        );
     }
 }

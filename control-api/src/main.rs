@@ -138,11 +138,12 @@ struct AppState {
     credential_key: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct ConnectIntentRequest {
     user_id: u64,
     device_id: String,
     game_id: u64,
+    game_key: Option<String>,
     region_id: Option<u64>,
     platform: Option<String>,
     client_isp: Option<String>,
@@ -150,7 +151,7 @@ struct ConnectIntentRequest {
     bandwidth_quality: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct BusinessConnectIntentRequest {
     request_id: Option<String>,
     entitlement_id: Option<String>,
@@ -166,12 +167,20 @@ struct BusinessConnectIntentRequest {
     user_id: u64,
     device_id: String,
     game_id: u64,
+    game_key: Option<String>,
     region_id: Option<u64>,
+    #[serde(alias = "candidate_node_id")]
+    node_id: Option<u64>,
+    #[serde(alias = "route_target_addr")]
+    target_addr: Option<String>,
+    protocol: Option<String>,
+    region_name: Option<String>,
     platform: Option<String>,
     client_isp: Option<String>,
     client_ip: Option<String>,
     bandwidth_quality: Option<String>,
     client_version: Option<String>,
+    route_policy: Option<RoutePolicy>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,12 +203,65 @@ struct BusinessAuthContext {
     business_trace_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RoutePolicy {
+    policy_id: String,
+    policy_version: u32,
+    mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_protocol: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dns_strategy: Option<String>,
+    #[serde(default)]
+    targets: Vec<RouteTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    capture: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RouteTarget {
+    target_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    purpose: Option<String>,
+    host_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host: Option<String>,
+    #[serde(default)]
+    resolved_ips: Vec<String>,
+    #[serde(default)]
+    observed_ips: Vec<String>,
+    #[serde(default)]
+    cidrs: Vec<String>,
+    #[serde(default)]
+    ports: Vec<PortRange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allow_client_observed_ip: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resolve_ttl_sec: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PortRange {
+    protocol: String,
+    from: u16,
+    to: u16,
+}
+
+#[derive(Debug, Clone)]
+struct RoutePolicyBinding {
+    policy: RoutePolicy,
+    hash: String,
+}
+
 impl BusinessConnectIntentRequest {
     fn to_connect_intent_request(&self) -> ConnectIntentRequest {
         ConnectIntentRequest {
             user_id: self.user_id,
             device_id: self.device_id.clone(),
             game_id: self.game_id,
+            game_key: normalize_business_text(&self.game_key),
             region_id: self.region_id,
             platform: self.platform.clone(),
             client_isp: self.client_isp.clone(),
@@ -208,17 +270,80 @@ impl BusinessConnectIntentRequest {
         }
     }
 
-    fn into_connect_intent_request(self) -> ConnectIntentRequest {
-        ConnectIntentRequest {
-            user_id: self.user_id,
-            device_id: self.device_id,
-            game_id: self.game_id,
-            region_id: self.region_id,
-            platform: self.platform,
-            client_isp: self.client_isp,
-            client_ip: self.client_ip,
-            bandwidth_quality: self.bandwidth_quality,
+    fn per_session_route(&self) -> Result<Option<BusinessPerSessionRoute>, AppError> {
+        let route_policy = self
+            .route_policy
+            .as_ref()
+            .map(validate_route_policy)
+            .transpose()?;
+        let target_addr = self
+            .target_addr
+            .as_deref()
+            .map(str::trim)
+            .filter(|target_addr| !target_addr.is_empty());
+
+        if target_addr.is_none() && route_policy.is_none() {
+            if self.node_id.is_some() || self.protocol.is_some() || self.region_name.is_some() {
+                return Err(AppError::bad_request(
+                    "incomplete_accel_ticket",
+                    "node_id and target_addr or route_policy are required for per-session acceleration",
+                ));
+            }
+            return Ok(None);
         }
+
+        let node_id = self.node_id.ok_or_else(|| {
+            AppError::bad_request(
+                "incomplete_accel_ticket",
+                "node_id is required for per-session acceleration",
+            )
+        })?;
+        if node_id == 0 {
+            return Err(AppError::bad_request(
+                "invalid_node",
+                "node_id must be positive",
+            ));
+        }
+
+        let protocol = self
+            .protocol
+            .as_deref()
+            .map(str::trim)
+            .filter(|protocol| !protocol.is_empty())
+            .or_else(|| {
+                route_policy
+                    .as_ref()
+                    .and_then(|policy| policy.policy.default_protocol.as_deref())
+            })
+            .unwrap_or("udp");
+        let protocol = protocol.to_ascii_lowercase();
+        if protocol != "udp" {
+            return Err(AppError::bad_request(
+                "invalid_ticket_protocol",
+                "per-session acceleration currently supports udp only",
+            ));
+        }
+
+        let target_addr = match target_addr {
+            Some(target_addr) => validate_target_addr(target_addr)?,
+            None => representative_route_policy_target(
+                route_policy
+                    .as_ref()
+                    .expect("route_policy exists when target_addr is absent")
+                    .policy
+                    .targets
+                    .as_slice(),
+            )?,
+        };
+
+        Ok(Some(BusinessPerSessionRoute {
+            node_id,
+            target_addr,
+            protocol,
+            region_id: self.region_id,
+            region_name: normalize_optional_text(self.region_name.as_deref(), 128)?,
+            route_policy,
+        }))
     }
 
     fn auth_context(&self) -> BusinessAuthContext {
@@ -236,6 +361,16 @@ impl BusinessConnectIntentRequest {
     }
 }
 
+#[derive(Debug, Clone)]
+struct BusinessPerSessionRoute {
+    node_id: u64,
+    target_addr: String,
+    protocol: String,
+    region_id: Option<u64>,
+    region_name: Option<String>,
+    route_policy: Option<RoutePolicyBinding>,
+}
+
 fn normalize_business_text(value: &Option<String>) -> Option<String> {
     value
         .as_deref()
@@ -244,10 +379,136 @@ fn normalize_business_text(value: &Option<String>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-#[derive(Debug, Serialize)]
+fn validate_route_policy(policy: &RoutePolicy) -> Result<RoutePolicyBinding, AppError> {
+    let mut policy = policy.clone();
+    policy.policy_id = normalize_required_text(&policy.policy_id, "route_policy.policy_id", 128)?;
+    if policy.policy_version == 0 {
+        return Err(AppError::bad_request(
+            "invalid_route_policy",
+            "route_policy.policy_version must be positive",
+        ));
+    }
+    policy.mode =
+        normalize_required_text(&policy.mode, "route_policy.mode", 32)?.to_ascii_lowercase();
+    if policy.mode != "dynamic_targets" {
+        return Err(AppError::bad_request(
+            "invalid_route_policy",
+            "route_policy.mode must be dynamic_targets",
+        ));
+    }
+    if let Some(protocol) = policy.default_protocol.as_mut() {
+        *protocol = protocol.trim().to_ascii_lowercase();
+        if !matches!(protocol.as_str(), "udp" | "tcp") {
+            return Err(AppError::bad_request(
+                "invalid_route_policy",
+                "route_policy.default_protocol must be udp or tcp",
+            ));
+        }
+    }
+    if policy.targets.is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_route_policy",
+            "route_policy.targets must not be empty",
+        ));
+    }
+    if policy.targets.len() > 128 {
+        return Err(AppError::bad_request(
+            "invalid_route_policy",
+            "route_policy.targets must not exceed 128 entries",
+        ));
+    }
+
+    for target in &mut policy.targets {
+        target.target_id =
+            normalize_required_text(&target.target_id, "route_policy.targets[].target_id", 128)?;
+        target.host_type =
+            normalize_required_text(&target.host_type, "route_policy.targets[].host_type", 32)?
+                .to_ascii_lowercase();
+        if !matches!(
+            target.host_type.as_str(),
+            "domain" | "ipv4" | "ipv6" | "cidr" | "observed_ip" | "steam_sdr" | "any"
+        ) {
+            return Err(AppError::bad_request(
+                "invalid_route_policy",
+                "route_policy.targets[].host_type is unsupported",
+            ));
+        }
+        if let Some(host) = target.host.as_mut() {
+            *host = normalize_required_text(host, "route_policy.targets[].host", 255)?;
+        }
+        if target.ports.is_empty() {
+            return Err(AppError::bad_request(
+                "invalid_route_policy",
+                "route_policy.targets[].ports must not be empty",
+            ));
+        }
+        if target.ports.len() > 32 {
+            return Err(AppError::bad_request(
+                "invalid_route_policy",
+                "route_policy.targets[].ports must not exceed 32 entries",
+            ));
+        }
+        for port in &mut target.ports {
+            port.protocol = port.protocol.trim().to_ascii_lowercase();
+            if !matches!(port.protocol.as_str(), "udp" | "tcp") {
+                return Err(AppError::bad_request(
+                    "invalid_route_policy",
+                    "route_policy.targets[].ports[].protocol must be udp or tcp",
+                ));
+            }
+            if port.from == 0 || port.to == 0 || port.from > port.to {
+                return Err(AppError::bad_request(
+                    "invalid_route_policy",
+                    "route_policy.targets[].ports[] must use a valid port range",
+                ));
+            }
+        }
+    }
+
+    let bytes = serde_json::to_vec(&policy).map_err(|error| {
+        AppError::internal(anyhow::anyhow!("failed to encode route_policy: {error}"))
+    })?;
+    let hash = URL_SAFE_NO_PAD.encode(Sha256::digest(&bytes));
+    Ok(RoutePolicyBinding { policy, hash })
+}
+
+fn representative_route_policy_target(targets: &[RouteTarget]) -> Result<String, AppError> {
+    for target in targets {
+        let Some(port) = target.ports.iter().find(|port| port.protocol == "udp") else {
+            continue;
+        };
+        if let Some(host) = target
+            .host
+            .as_deref()
+            .or_else(|| target.resolved_ips.first().map(String::as_str))
+            .or_else(|| target.observed_ips.first().map(String::as_str))
+        {
+            return validate_target_addr(&format_endpoint(host, port.from));
+        }
+        if target.host_type == "any" || target.host_type == "steam_sdr" {
+            return Ok(format!("0.0.0.0:{}", port.from));
+        }
+    }
+
+    Err(AppError::bad_request(
+        "invalid_route_policy",
+        "route_policy must include at least one udp target or target_addr must be provided",
+    ))
+}
+
+fn format_endpoint(host: &str, port: u16) -> String {
+    if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct ConnectIntentResponse {
     intent_id: String,
     ttl_sec: u64,
+    issue_mode: &'static str,
     client: ClientContext,
     #[serde(skip_serializing_if = "Option::is_none")]
     auth_context: Option<BusinessAuthContext>,
@@ -458,7 +719,7 @@ struct NodeErrorBody {
     message: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct ClientContext {
     platform: Option<String>,
     client_isp: Option<String>,
@@ -467,7 +728,7 @@ struct ClientContext {
     region_id: Option<u64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct NodeCandidate {
     node_id: u64,
     area: String,
@@ -478,6 +739,8 @@ struct NodeCandidate {
     bandwidth_quality: String,
     probe: ProbeInfo,
     route: ClientRouteClaims,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    route_policy: Option<RoutePolicy>,
     credential: CredentialInfo,
     scheduler: CandidateSchedulerInfo,
 }
@@ -499,19 +762,25 @@ struct CandidateSchedulerInfo {
     selection_reasons: Vec<&'static str>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct ProbeInfo {
     udp: bool,
     tcp: bool,
     protocol: &'static str,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct CredentialInfo {
     token: String,
     expires_at: u64,
     intent_id: String,
     route: ClientRouteClaims,
+    token_type: &'static str,
+    signing_alg: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    route_policy_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    route_policy_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -521,10 +790,17 @@ struct ClientTokenClaims {
     device_id: String,
     game_id: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    game_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     region_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     business: Option<BusinessAuthContext>,
     intent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    route_policy_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    route_policy_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     route: Option<ClientRouteClaims>,
     expires_at: u64,
     issued_at: Option<u64>,
@@ -1389,8 +1665,92 @@ struct BusinessConnectIntentResponse {
     entitlement_id: Option<String>,
     auth_context: BusinessAuthContext,
     client_version: Option<String>,
+    accel_ticket: AccelTicket,
     connect_intent: ConnectIntentResponse,
     server_time: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AccelTicket {
+    ticket_id: String,
+    ttl_sec: u64,
+    issue_mode: &'static str,
+    client: AccelTicketClient,
+    node: AccelTicketNode,
+    route: ClientRouteClaims,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    route_policy: Option<RoutePolicy>,
+    credential: CredentialInfo,
+    auth_context: BusinessAuthContext,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AccelTicketClient {
+    user_id: u64,
+    device_id: String,
+    game_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    game_key: Option<String>,
+    region_id: Option<u64>,
+    platform: Option<String>,
+    client_isp: Option<String>,
+    client_ip: Option<String>,
+    bandwidth_quality: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AccelTicketNode {
+    node_id: u64,
+    host: String,
+    port: u16,
+    area: String,
+    tag: String,
+    transports: Vec<&'static str>,
+    bandwidth_quality: String,
+}
+
+impl AccelTicket {
+    fn from_connect_intent(
+        connect_intent: &ConnectIntentResponse,
+        request: &ConnectIntentRequest,
+        auth_context: BusinessAuthContext,
+    ) -> Result<Self, AppError> {
+        let candidate = connect_intent.candidates.first().ok_or_else(|| {
+            AppError::internal(anyhow::anyhow!(
+                "connect-intent did not include a candidate"
+            ))
+        })?;
+
+        Ok(Self {
+            ticket_id: connect_intent.intent_id.clone(),
+            ttl_sec: connect_intent.ttl_sec,
+            issue_mode: connect_intent.issue_mode,
+            client: AccelTicketClient {
+                user_id: request.user_id,
+                device_id: request.device_id.clone(),
+                game_id: request.game_id,
+                game_key: request.game_key.clone(),
+                region_id: request.region_id,
+                platform: request.platform.clone(),
+                client_isp: request.client_isp.clone(),
+                client_ip: request.client_ip.clone(),
+                bandwidth_quality: connect_intent.client.bandwidth_quality.clone(),
+            },
+            node: AccelTicketNode {
+                node_id: candidate.node_id,
+                host: candidate.host.clone(),
+                port: candidate.port,
+                area: candidate.area.clone(),
+                tag: candidate.tag.clone(),
+                transports: candidate.transports.clone(),
+                bandwidth_quality: candidate.bandwidth_quality.clone(),
+            },
+            route: candidate.route.clone(),
+            route_policy: candidate.route_policy.clone(),
+            credential: candidate.credential.clone(),
+            auth_context,
+        })
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -3827,15 +4187,30 @@ async fn business_connect_intent(
         return Err(error);
     }
     let auth_context = request.auth_context();
-    let connect_request = request.into_connect_intent_request();
-    let connect_intent = match issue_connect_intent(
-        &state.pool,
-        state.token_ttl_sec,
-        connect_request,
-        Some(auth_context.clone()),
-    )
-    .await
-    {
+    let connect_request = request.to_connect_intent_request();
+    let per_session_route = request.per_session_route()?;
+    let issued = match per_session_route {
+        Some(route) => {
+            issue_per_session_connect_intent(
+                &state.pool,
+                state.token_ttl_sec,
+                connect_request.clone(),
+                Some(auth_context.clone()),
+                route,
+            )
+            .await
+        }
+        None => {
+            issue_connect_intent(
+                &state.pool,
+                state.token_ttl_sec,
+                connect_request.clone(),
+                Some(auth_context.clone()),
+            )
+            .await
+        }
+    };
+    let connect_intent = match issued {
         Ok(connect_intent) => connect_intent,
         Err(error) => {
             record_business_api_failure_best_effort(
@@ -3853,6 +4228,8 @@ async fn business_connect_intent(
             return Err(error);
         }
     };
+    let accel_ticket =
+        AccelTicket::from_connect_intent(&connect_intent, &connect_request, auth_context.clone())?;
     record_business_api_log_best_effort(
         &state.pool,
         NewBusinessApiLog {
@@ -3870,6 +4247,11 @@ async fn business_connect_intent(
             detail: json!({
                 "auth_context": auth_context.clone(),
                 "client_version": client_version.clone(),
+                "issue_mode": connect_intent.issue_mode,
+                "target_addr": connect_intent
+                    .candidates
+                    .first()
+                    .map(|candidate| candidate.route.target_addr.clone()),
                 "candidate_count": connect_intent.candidates.len(),
                 "candidate_node_ids": connect_intent
                     .candidates
@@ -3887,6 +4269,7 @@ async fn business_connect_intent(
         entitlement_id,
         auth_context,
         client_version,
+        accel_ticket,
         connect_intent,
         server_time: now_unix(),
     }))
@@ -5084,15 +5467,30 @@ async fn admin_business_api_connect_intent(
         return Err(error);
     }
     let auth_context = request.auth_context();
-    let connect_request = request.into_connect_intent_request();
-    let connect_intent = match issue_connect_intent(
-        &state.pool,
-        state.token_ttl_sec,
-        connect_request,
-        Some(auth_context.clone()),
-    )
-    .await
-    {
+    let connect_request = request.to_connect_intent_request();
+    let per_session_route = request.per_session_route()?;
+    let issued = match per_session_route {
+        Some(route) => {
+            issue_per_session_connect_intent(
+                &state.pool,
+                state.token_ttl_sec,
+                connect_request.clone(),
+                Some(auth_context.clone()),
+                route,
+            )
+            .await
+        }
+        None => {
+            issue_connect_intent(
+                &state.pool,
+                state.token_ttl_sec,
+                connect_request.clone(),
+                Some(auth_context.clone()),
+            )
+            .await
+        }
+    };
+    let connect_intent = match issued {
         Ok(connect_intent) => connect_intent,
         Err(error) => {
             record_business_api_failure_best_effort(
@@ -5110,6 +5508,8 @@ async fn admin_business_api_connect_intent(
             return Err(error);
         }
     };
+    let accel_ticket =
+        AccelTicket::from_connect_intent(&connect_intent, &connect_request, auth_context.clone())?;
     record_business_api_log_best_effort(
         &state.pool,
         NewBusinessApiLog {
@@ -5127,6 +5527,11 @@ async fn admin_business_api_connect_intent(
             detail: json!({
                 "auth_context": auth_context.clone(),
                 "client_version": client_version.clone(),
+                "issue_mode": connect_intent.issue_mode,
+                "target_addr": connect_intent
+                    .candidates
+                    .first()
+                    .map(|candidate| candidate.route.target_addr.clone()),
                 "candidate_count": connect_intent.candidates.len(),
                 "candidate_node_ids": connect_intent
                     .candidates
@@ -5143,6 +5548,7 @@ async fn admin_business_api_connect_intent(
         entitlement_id,
         auth_context,
         client_version,
+        accel_ticket,
         connect_intent,
         server_time: now_unix(),
     };
@@ -6381,6 +6787,7 @@ async fn run_connectivity_diagnostic(
         user_id: request.user_id,
         device_id: request.device_id.clone(),
         game_id: request.game_id,
+        game_key: None,
         region_id: request.region_id,
         platform: request.platform.clone(),
         client_isp: request.client_isp.clone(),
@@ -6783,6 +7190,64 @@ async fn issue_connect_intent(
         .await?
         .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "no_candidate", "no available node"))?;
 
+    issue_connect_intent_for_row(
+        pool,
+        ttl_sec,
+        request,
+        auth_context,
+        row,
+        "catalog",
+        None,
+        requested_quality,
+    )
+    .await
+}
+
+async fn issue_per_session_connect_intent(
+    pool: &MySqlPool,
+    ttl_sec: u64,
+    request: ConnectIntentRequest,
+    auth_context: Option<BusinessAuthContext>,
+    route: BusinessPerSessionRoute,
+) -> Result<ConnectIntentResponse, AppError> {
+    let requested_quality = request
+        .bandwidth_quality
+        .clone()
+        .unwrap_or_else(|| "normal".to_string());
+    let row = select_per_session_candidate(pool, &route)
+        .await?
+        .ok_or_else(|| {
+            AppError::new(
+                StatusCode::NOT_FOUND,
+                "no_candidate",
+                "selected node is not available",
+            )
+        })?;
+    let route_policy = route.route_policy.clone();
+
+    issue_connect_intent_for_row(
+        pool,
+        ttl_sec,
+        request,
+        auth_context,
+        row,
+        "per_session",
+        route_policy,
+        requested_quality,
+    )
+    .await
+}
+
+async fn issue_connect_intent_for_row(
+    pool: &MySqlPool,
+    ttl_sec: u64,
+    request: ConnectIntentRequest,
+    auth_context: Option<BusinessAuthContext>,
+    row: CandidateRow,
+    issue_mode: &'static str,
+    route_policy: Option<RoutePolicyBinding>,
+    requested_quality: String,
+) -> Result<ConnectIntentResponse, AppError> {
     let issued_at = now_unix();
     let expires_at = issued_at + ttl_sec;
     let scheduler = CandidateSchedulerInfo::from_candidate_row(
@@ -6806,9 +7271,14 @@ async fn issue_connect_intent(
         user_id: request.user_id,
         device_id: request.device_id.clone(),
         game_id: request.game_id,
+        game_key: request.game_key.clone(),
         region_id: request.region_id,
         business: auth_context.clone(),
         intent_id: Some(intent_id.clone()),
+        route_policy_hash: route_policy.as_ref().map(|binding| binding.hash.clone()),
+        route_policy_id: route_policy
+            .as_ref()
+            .map(|binding| binding.policy.policy_id.clone()),
         route: Some(route.clone()),
         expires_at,
         issued_at: Some(issued_at),
@@ -6832,6 +7302,7 @@ async fn issue_connect_intent(
     Ok(ConnectIntentResponse {
         intent_id: intent_id.clone(),
         ttl_sec,
+        issue_mode,
         client,
         auth_context,
         candidates: vec![NodeCandidate {
@@ -6854,15 +7325,72 @@ async fn issue_connect_intent(
                 protocol: "xaccel/1",
             },
             route: route.clone(),
+            route_policy: route_policy.as_ref().map(|binding| binding.policy.clone()),
             credential: CredentialInfo {
                 token,
                 expires_at,
                 intent_id,
                 route,
+                token_type: "xat.v1",
+                signing_alg: "HMAC-SHA256",
+                route_policy_hash: route_policy.as_ref().map(|binding| binding.hash.clone()),
+                route_policy_id: route_policy
+                    .as_ref()
+                    .map(|binding| binding.policy.policy_id.clone()),
             },
             scheduler,
         }],
     })
+}
+
+async fn select_per_session_candidate(
+    pool: &MySqlPool,
+    route: &BusinessPerSessionRoute,
+) -> Result<Option<CandidateRow>, AppError> {
+    sqlx::query_as::<_, CandidateRow>(
+        r#"
+SELECT
+  n.id AS node_id,
+  n.server_ip,
+  n.server_port,
+  n.area,
+  n.tag,
+  n.bandwidth_quality,
+  n.node_secret,
+  ? AS target_addr,
+  ? AS protocol,
+  ? AS region_id,
+  ? AS region_name,
+  0 AS route_priority,
+  lr.active_sessions AS latest_active_sessions,
+  lr.udp_sessions AS latest_udp_sessions,
+  lr.tcp_sessions AS latest_tcp_sessions,
+  CAST(UNIX_TIMESTAMP(lr.reported_at) AS UNSIGNED) AS latest_reported_at
+FROM accel_nodes n
+LEFT JOIN node_runtime_reports lr
+  ON lr.id = (
+    SELECT nr.id
+    FROM node_runtime_reports nr
+    WHERE nr.node_id = n.id
+    ORDER BY nr.reported_at DESC, nr.id DESC
+    LIMIT 1
+  )
+WHERE n.id = ?
+  AND n.status = 'online'
+  AND n.disable_quic = 0
+  AND n.node_secret IS NOT NULL
+  AND n.node_secret <> ''
+LIMIT 1
+"#,
+    )
+    .bind(&route.target_addr)
+    .bind(&route.protocol)
+    .bind(route.region_id)
+    .bind(&route.region_name)
+    .bind(route.node_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::database)
 }
 
 async fn select_candidate(
@@ -10553,6 +11081,7 @@ fn validate_business_connect_intent_request(
         "business_trace_id",
         128,
     )?;
+    request.per_session_route()?;
     if request.entitlement_verified != Some(true) {
         return Err(AppError::forbidden(
             "entitlement_not_verified",
@@ -10619,6 +11148,7 @@ fn validate_connectivity_diagnostic_request(
         user_id: request.user_id,
         device_id: request.device_id.clone(),
         game_id: request.game_id,
+        game_key: None,
         region_id: request.region_id,
         platform: request.platform.clone(),
         client_isp: request.client_isp.clone(),
@@ -13550,6 +14080,7 @@ mod tests {
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
+            game_key: None,
             region_id: None,
             platform: Some("pc".to_string()),
             client_isp: Some("telecom".to_string()),
@@ -13573,12 +14104,18 @@ mod tests {
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
+            game_key: None,
             region_id: Some(1),
+            node_id: None,
+            target_addr: None,
+            protocol: None,
+            region_name: None,
             platform: Some("pc".to_string()),
             client_isp: Some("telecom".to_string()),
             client_ip: Some("127.0.0.1".to_string()),
             bandwidth_quality: Some("fast".to_string()),
             client_version: Some("0.1.0".to_string()),
+            route_policy: None,
         }
     }
 
@@ -13724,9 +14261,12 @@ mod tests {
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
+            game_key: None,
             region_id: None,
             business: None,
             intent_id: Some("intent-test".to_string()),
+            route_policy_hash: None,
+            route_policy_id: None,
             route: Some(ClientRouteClaims {
                 target_addr: "127.0.0.1:7777".to_string(),
                 protocol: "udp".to_string(),
@@ -14382,12 +14922,18 @@ mod tests {
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
+            game_key: None,
             region_id: Some(1),
+            node_id: None,
+            target_addr: None,
+            protocol: None,
+            region_name: None,
             platform: Some("pc".to_string()),
             client_isp: Some("telecom".to_string()),
             client_ip: Some("127.0.0.1".to_string()),
             bandwidth_quality: Some("fast".to_string()),
             client_version: Some("0.1.0".to_string()),
+            route_policy: None,
         };
 
         validate_business_connect_intent_request(&request).expect("request is valid");
@@ -14401,6 +14947,26 @@ mod tests {
         assert!(auth_context.entitlement_verified);
         assert!(auth_context.device_verified);
         assert_eq!(auth_context.order_id.as_deref(), Some("order-1001"));
+    }
+
+    #[test]
+    fn validates_per_session_business_route() {
+        let mut request = valid_business_connect_intent_request();
+        request.node_id = Some(2);
+        request.target_addr = Some("198.51.100.20:27015".to_string());
+        request.protocol = Some("UDP".to_string());
+        request.region_name = Some(" International ".to_string());
+
+        validate_business_connect_intent_request(&request).expect("request is valid");
+        let route = request
+            .per_session_route()
+            .expect("route validation")
+            .expect("per-session route");
+        assert_eq!(route.node_id, 2);
+        assert_eq!(route.target_addr, "198.51.100.20:27015");
+        assert_eq!(route.protocol, "udp");
+        assert_eq!(route.region_id, Some(1));
+        assert_eq!(route.region_name.as_deref(), Some("International"));
     }
 
     #[test]
@@ -14419,12 +14985,18 @@ mod tests {
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
+            game_key: None,
             region_id: None,
+            node_id: None,
+            target_addr: None,
+            protocol: None,
+            region_name: None,
             platform: Some("pc".to_string()),
             client_isp: None,
             client_ip: None,
             bandwidth_quality: Some("normal".to_string()),
             client_version: None,
+            route_policy: None,
         };
 
         let error = validate_business_connect_intent_request(&request).unwrap_err();

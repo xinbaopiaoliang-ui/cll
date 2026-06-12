@@ -25,6 +25,24 @@ cargo metadata --manifest-path control-api\Cargo.toml --locked --no-deps --forma
 cargo metadata --manifest-path client-probe\Cargo.toml --locked --no-deps --format-version 1
 ```
 
+## v0.70 Local Client-to-Node E2E
+
+Run the local dynamic `route_policy` integration check from the repository root:
+
+```powershell
+.\scripts\run-v70-local-e2e.ps1
+```
+
+The script builds `node-core` and `client-probe`, starts a temporary local node,
+starts a UDP echo target that acts like a game server, generates a short-lived
+`accel_ticket` with a dynamic `route_policy`, and verifies that
+`session.data` is forwarded through the node. Use `-KeepTemp` to keep the
+generated ticket and logs:
+
+```powershell
+.\scripts\run-v70-local-e2e.ps1 -KeepTemp
+```
+
 On Linux or a complete Rust toolchain:
 
 ```bash

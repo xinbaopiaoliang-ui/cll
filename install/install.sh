@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-INSTALLER_VERSION="0.63.0"
+INSTALLER_VERSION="0.70.0"
 SERVICE_NAME="xaccel-node"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/xaccel-node"
@@ -509,7 +509,7 @@ bootstrap_standalone() {
     }
   },
   "release": {
-    "version": "0.34.0",
+    "version": "0.39.0",
     "manifest_url": ""
   },
   "standalone": true

@@ -367,12 +367,31 @@ Done in `v0.66.0`:
 - Show the auth context in the control-panel business debug result and update
   Apifox/business integration documentation.
 
+Done in `v0.70.0`:
+
+- Define the per-session acceleration ticket contract in
+  `docs/per-session-accel-ticket.md`.
+- Let business `connect-intent` calls provide `node_id`, `target_addr`,
+  `protocol`, and optional region metadata for the current acceleration attempt.
+- Sign per-session node credentials without reading `game_route_rules` when the
+  business request includes the live route decision.
+- Add an `accel_ticket` response envelope that the client can pass to the node.
+- Let the node validate `region_id` claim mirrors and keep route forwarding
+  bound to the signed token target.
+- Let `xaccel-client-probe 0.37.0` run directly from raw or wrapped
+  `accel_ticket` JSON for basic client/node diagnostics.
+- Upgrade v0.70 from single-target tickets to the dynamic `route_policy`
+  contract: domains, IPs, CIDRs, port ranges, observed targets, and
+  `route_policy_hash`.
+- Let the client send explicit per-packet `target` metadata, and let the node
+  verify every target against the signed route policy before relay.
+
 Next release focus:
 
-- `v0.67`: start the real game tunnel MVP after UDP relay cleanup and auth
-  boundaries are stable.
-- `v0.68`: add traffic attribution reports by business session/order once the
-  tunnel path starts carrying real packets.
+- Collect Steam and NARAKA international target endpoints from client-side
+  observation, then feed those targets through business-issued route policies.
+- Add traffic attribution reports by business session/order once the tunnel path
+  starts carrying real packets.
 
 ## P4: UDP Relay MVP
 

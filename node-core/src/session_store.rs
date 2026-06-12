@@ -1,3 +1,4 @@
+use crate::route_policy::RoutePolicy;
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -16,9 +17,13 @@ pub struct UdpSession {
     pub user_id: Option<u64>,
     pub device_id: Option<String>,
     pub game_id: Option<u64>,
+    pub region_id: Option<u64>,
     pub authenticated: bool,
     pub intent_id: Option<String>,
     pub route_target_addr: Option<String>,
+    pub route_policy: Option<RoutePolicy>,
+    pub route_policy_id: Option<String>,
+    pub route_policy_hash: Option<String>,
     pub created_at: u64,
     pub expires_at: u64,
     pub last_seen_at: u64,
@@ -33,9 +38,13 @@ pub struct UdpSessionSnapshot {
     pub user_id: Option<u64>,
     pub device_id: Option<String>,
     pub game_id: Option<u64>,
+    pub region_id: Option<u64>,
     pub authenticated: bool,
     pub intent_id: Option<String>,
     pub route_target_addr: Option<String>,
+    pub route_policy: Option<RoutePolicy>,
+    pub route_policy_id: Option<String>,
+    pub route_policy_hash: Option<String>,
     pub created_at: u64,
     pub expires_at: u64,
 }
@@ -53,9 +62,13 @@ impl UdpSession {
         user_id: Option<u64>,
         device_id: Option<String>,
         game_id: Option<u64>,
+        region_id: Option<u64>,
         authenticated: bool,
         intent_id: Option<String>,
         route_target_addr: Option<String>,
+        route_policy: Option<RoutePolicy>,
+        route_policy_id: Option<String>,
+        route_policy_hash: Option<String>,
         ttl_sec: u64,
         peer: SocketAddr,
     ) -> Self {
@@ -66,9 +79,13 @@ impl UdpSession {
             user_id,
             device_id,
             game_id,
+            region_id,
             authenticated,
             intent_id,
             route_target_addr,
+            route_policy,
+            route_policy_id,
+            route_policy_hash,
             created_at: now,
             expires_at: now + ttl_sec,
             last_seen_at: now,
@@ -132,9 +149,13 @@ impl UdpSession {
             user_id: self.user_id,
             device_id: self.device_id.clone(),
             game_id: self.game_id,
+            region_id: self.region_id,
             authenticated: self.authenticated,
             intent_id: self.intent_id.clone(),
             route_target_addr: self.route_target_addr.clone(),
+            route_policy: self.route_policy.clone(),
+            route_policy_id: self.route_policy_id.clone(),
+            route_policy_hash: self.route_policy_hash.clone(),
             created_at: self.created_at,
             expires_at: self.expires_at,
         }
@@ -165,9 +186,13 @@ mod tests {
             Some(1001),
             Some("pc-001".to_string()),
             Some(8888),
+            Some(1),
             true,
             Some("intent-test".to_string()),
             Some("127.0.0.1:7777".to_string()),
+            None,
+            None,
+            None,
             30,
             peer,
         ));
@@ -178,6 +203,7 @@ mod tests {
 
         assert_eq!(session.session_id, "s1");
         assert_eq!(session.user_id, Some(1001));
+        assert_eq!(session.region_id, Some(1));
         assert!(session.authenticated);
         assert_eq!(session.intent_id.as_deref(), Some("intent-test"));
         assert_eq!(session.route_target_addr.as_deref(), Some("127.0.0.1:7777"));
