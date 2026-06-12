@@ -7361,7 +7361,7 @@ SELECT
   ? AS protocol,
   ? AS region_id,
   ? AS region_name,
-  0 AS route_priority,
+  ? AS route_priority,
   lr.active_sessions AS latest_active_sessions,
   lr.udp_sessions AS latest_udp_sessions,
   lr.tcp_sessions AS latest_tcp_sessions,
@@ -7387,6 +7387,7 @@ LIMIT 1
     .bind(&route.protocol)
     .bind(route.region_id)
     .bind(&route.region_name)
+    .bind(0_u32)
     .bind(route.node_id)
     .fetch_optional(pool)
     .await
