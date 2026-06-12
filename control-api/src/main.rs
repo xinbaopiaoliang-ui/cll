@@ -154,6 +154,15 @@ struct ConnectIntentRequest {
 struct BusinessConnectIntentRequest {
     request_id: Option<String>,
     entitlement_id: Option<String>,
+    order_id: Option<String>,
+    subscription_id: Option<String>,
+    business_session_id: Option<String>,
+    entitlement_verified: Option<bool>,
+    device_verified: Option<bool>,
+    #[serde(alias = "expires_at")]
+    entitlement_expires_at: Option<u64>,
+    risk_level: Option<String>,
+    business_trace_id: Option<String>,
     user_id: u64,
     device_id: String,
     game_id: u64,
@@ -163,6 +172,26 @@ struct BusinessConnectIntentRequest {
     client_ip: Option<String>,
     bandwidth_quality: Option<String>,
     client_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BusinessAuthContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entitlement_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    order_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subscription_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    business_session_id: Option<String>,
+    entitlement_verified: bool,
+    device_verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entitlement_expires_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    risk_level: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    business_trace_id: Option<String>,
 }
 
 impl BusinessConnectIntentRequest {
@@ -191,6 +220,28 @@ impl BusinessConnectIntentRequest {
             bandwidth_quality: self.bandwidth_quality,
         }
     }
+
+    fn auth_context(&self) -> BusinessAuthContext {
+        BusinessAuthContext {
+            entitlement_id: normalize_business_text(&self.entitlement_id),
+            order_id: normalize_business_text(&self.order_id),
+            subscription_id: normalize_business_text(&self.subscription_id),
+            business_session_id: normalize_business_text(&self.business_session_id),
+            entitlement_verified: self.entitlement_verified.unwrap_or(false),
+            device_verified: self.device_verified.unwrap_or(false),
+            entitlement_expires_at: self.entitlement_expires_at,
+            risk_level: normalize_business_text(&self.risk_level),
+            business_trace_id: normalize_business_text(&self.business_trace_id),
+        }
+    }
+}
+
+fn normalize_business_text(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 #[derive(Debug, Serialize)]
@@ -198,6 +249,8 @@ struct ConnectIntentResponse {
     intent_id: String,
     ttl_sec: u64,
     client: ClientContext,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auth_context: Option<BusinessAuthContext>,
     candidates: Vec<NodeCandidate>,
 }
 
@@ -469,6 +522,8 @@ struct ClientTokenClaims {
     game_id: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     region_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    business: Option<BusinessAuthContext>,
     intent_id: Option<String>,
     route: Option<ClientRouteClaims>,
     expires_at: u64,
@@ -1332,6 +1387,7 @@ struct BusinessConnectIntentResponse {
     status: &'static str,
     request_id: Option<String>,
     entitlement_id: Option<String>,
+    auth_context: BusinessAuthContext,
     client_version: Option<String>,
     connect_intent: ConnectIntentResponse,
     server_time: u64,
@@ -3321,7 +3377,7 @@ async fn connect_intent(
 ) -> Result<Json<ConnectIntentResponse>, AppError> {
     require_client_api(&state, &headers)?;
     validate_connect_intent_request(&request)?;
-    let response = issue_connect_intent(&state.pool, state.token_ttl_sec, request).await?;
+    let response = issue_connect_intent(&state.pool, state.token_ttl_sec, request, None).await?;
     Ok(Json(response))
 }
 
@@ -3770,26 +3826,33 @@ async fn business_connect_intent(
         .await;
         return Err(error);
     }
+    let auth_context = request.auth_context();
     let connect_request = request.into_connect_intent_request();
-    let connect_intent =
-        match issue_connect_intent(&state.pool, state.token_ttl_sec, connect_request).await {
-            Ok(connect_intent) => connect_intent,
-            Err(error) => {
-                record_business_api_failure_best_effort(
-                    &state.pool,
-                    "connect-intent",
-                    "business.connect_intent",
-                    "business_api",
-                    request_id.as_deref(),
-                    Some(log_user_id),
-                    Some(log_game_id),
-                    log_region_id,
-                    &error,
-                )
-                .await;
-                return Err(error);
-            }
-        };
+    let connect_intent = match issue_connect_intent(
+        &state.pool,
+        state.token_ttl_sec,
+        connect_request,
+        Some(auth_context.clone()),
+    )
+    .await
+    {
+        Ok(connect_intent) => connect_intent,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "connect-intent",
+                "business.connect_intent",
+                "business_api",
+                request_id.as_deref(),
+                Some(log_user_id),
+                Some(log_game_id),
+                log_region_id,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
     record_business_api_log_best_effort(
         &state.pool,
         NewBusinessApiLog {
@@ -3805,7 +3868,7 @@ async fn business_connect_intent(
             error_code: None,
             error_message: None,
             detail: json!({
-                "entitlement_id": entitlement_id.clone(),
+                "auth_context": auth_context.clone(),
                 "client_version": client_version.clone(),
                 "candidate_count": connect_intent.candidates.len(),
                 "candidate_node_ids": connect_intent
@@ -3822,6 +3885,7 @@ async fn business_connect_intent(
         status: "ok",
         request_id,
         entitlement_id,
+        auth_context,
         client_version,
         connect_intent,
         server_time: now_unix(),
@@ -5019,26 +5083,33 @@ async fn admin_business_api_connect_intent(
         .await;
         return Err(error);
     }
+    let auth_context = request.auth_context();
     let connect_request = request.into_connect_intent_request();
-    let connect_intent =
-        match issue_connect_intent(&state.pool, state.token_ttl_sec, connect_request).await {
-            Ok(connect_intent) => connect_intent,
-            Err(error) => {
-                record_business_api_failure_best_effort(
-                    &state.pool,
-                    "connect-intent",
-                    "admin.business.connect_intent",
-                    "admin_debug",
-                    request_id.as_deref(),
-                    Some(log_user_id),
-                    Some(log_game_id),
-                    log_region_id,
-                    &error,
-                )
-                .await;
-                return Err(error);
-            }
-        };
+    let connect_intent = match issue_connect_intent(
+        &state.pool,
+        state.token_ttl_sec,
+        connect_request,
+        Some(auth_context.clone()),
+    )
+    .await
+    {
+        Ok(connect_intent) => connect_intent,
+        Err(error) => {
+            record_business_api_failure_best_effort(
+                &state.pool,
+                "connect-intent",
+                "admin.business.connect_intent",
+                "admin_debug",
+                request_id.as_deref(),
+                Some(log_user_id),
+                Some(log_game_id),
+                log_region_id,
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
+    };
     record_business_api_log_best_effort(
         &state.pool,
         NewBusinessApiLog {
@@ -5054,7 +5125,7 @@ async fn admin_business_api_connect_intent(
             error_code: None,
             error_message: None,
             detail: json!({
-                "entitlement_id": entitlement_id.clone(),
+                "auth_context": auth_context.clone(),
                 "client_version": client_version.clone(),
                 "candidate_count": connect_intent.candidates.len(),
                 "candidate_node_ids": connect_intent
@@ -5070,6 +5141,7 @@ async fn admin_business_api_connect_intent(
         status: "ok",
         request_id,
         entitlement_id,
+        auth_context,
         client_version,
         connect_intent,
         server_time: now_unix(),
@@ -6316,7 +6388,7 @@ async fn run_connectivity_diagnostic(
         bandwidth_quality: request.bandwidth_quality.clone(),
     };
     let connect_intent =
-        issue_connect_intent(&state.pool, state.token_ttl_sec, connect_request).await?;
+        issue_connect_intent(&state.pool, state.token_ttl_sec, connect_request, None).await?;
     let candidate = connect_intent
         .candidates
         .get(candidate_index)
@@ -6701,6 +6773,7 @@ async fn issue_connect_intent(
     pool: &MySqlPool,
     ttl_sec: u64,
     request: ConnectIntentRequest,
+    auth_context: Option<BusinessAuthContext>,
 ) -> Result<ConnectIntentResponse, AppError> {
     let requested_quality = request
         .bandwidth_quality
@@ -6734,6 +6807,7 @@ async fn issue_connect_intent(
         device_id: request.device_id.clone(),
         game_id: request.game_id,
         region_id: request.region_id,
+        business: auth_context.clone(),
         intent_id: Some(intent_id.clone()),
         route: Some(route.clone()),
         expires_at,
@@ -6759,6 +6833,7 @@ async fn issue_connect_intent(
         intent_id: intent_id.clone(),
         ttl_sec,
         client,
+        auth_context,
         candidates: vec![NodeCandidate {
             node_id: row.node_id,
             area: row.area,
@@ -10464,7 +10539,54 @@ fn validate_business_connect_intent_request(
     validate_connect_intent_request(&request.to_connect_intent_request())?;
     validate_optional_business_text(request.request_id.as_deref(), "request_id", 128)?;
     validate_optional_business_text(request.entitlement_id.as_deref(), "entitlement_id", 128)?;
+    validate_optional_business_text(request.order_id.as_deref(), "order_id", 128)?;
+    validate_optional_business_text(request.subscription_id.as_deref(), "subscription_id", 128)?;
+    validate_optional_business_text(
+        request.business_session_id.as_deref(),
+        "business_session_id",
+        128,
+    )?;
     validate_optional_business_text(request.client_version.as_deref(), "client_version", 64)?;
+    validate_optional_business_text(request.risk_level.as_deref(), "risk_level", 32)?;
+    validate_optional_business_text(
+        request.business_trace_id.as_deref(),
+        "business_trace_id",
+        128,
+    )?;
+    if request.entitlement_verified != Some(true) {
+        return Err(AppError::forbidden(
+            "entitlement_not_verified",
+            "business backend must confirm entitlement before issuing connect-intent",
+        ));
+    }
+    if request.device_verified != Some(true) {
+        return Err(AppError::forbidden(
+            "device_not_verified",
+            "business backend must confirm device before issuing connect-intent",
+        ));
+    }
+    if let Some(expires_at) = request.entitlement_expires_at {
+        if expires_at <= now_unix() {
+            return Err(AppError::forbidden(
+                "entitlement_expired",
+                "business entitlement is expired",
+            ));
+        }
+    }
+    if let Some(risk_level) = request.risk_level.as_deref().map(str::trim) {
+        if !matches!(risk_level, "low" | "normal" | "medium" | "high" | "blocked") {
+            return Err(AppError::bad_request(
+                "invalid_risk_level",
+                "risk_level must be low, normal, medium, high, or blocked",
+            ));
+        }
+        if risk_level == "blocked" {
+            return Err(AppError::forbidden(
+                "risk_blocked",
+                "business backend marked this connect-intent as blocked",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -13436,6 +13558,30 @@ mod tests {
         }
     }
 
+    fn valid_business_connect_intent_request() -> BusinessConnectIntentRequest {
+        BusinessConnectIntentRequest {
+            request_id: Some("req-20260610-0001".to_string()),
+            entitlement_id: Some("vip-order-1001".to_string()),
+            order_id: Some("order-1001".to_string()),
+            subscription_id: Some("sub-2026".to_string()),
+            business_session_id: Some("session-1001".to_string()),
+            entitlement_verified: Some(true),
+            device_verified: Some(true),
+            entitlement_expires_at: Some(now_unix() + 3600),
+            risk_level: Some("normal".to_string()),
+            business_trace_id: Some("trace-20260610-0001".to_string()),
+            user_id: 1001,
+            device_id: "pc-001".to_string(),
+            game_id: 8888,
+            region_id: Some(1),
+            platform: Some("pc".to_string()),
+            client_isp: Some("telecom".to_string()),
+            client_ip: Some("127.0.0.1".to_string()),
+            bandwidth_quality: Some("fast".to_string()),
+            client_version: Some("0.1.0".to_string()),
+        }
+    }
+
     fn valid_create_node_request() -> AdminCreateNodeRequest {
         AdminCreateNodeRequest {
             name: "node-1".to_string(),
@@ -13579,6 +13725,7 @@ mod tests {
             device_id: "pc-001".to_string(),
             game_id: 8888,
             region_id: None,
+            business: None,
             intent_id: Some("intent-test".to_string()),
             route: Some(ClientRouteClaims {
                 target_addr: "127.0.0.1:7777".to_string(),
@@ -14224,6 +14371,14 @@ mod tests {
         let request = BusinessConnectIntentRequest {
             request_id: Some("req-20260610-0001".to_string()),
             entitlement_id: Some("vip-order-1001".to_string()),
+            order_id: Some("order-1001".to_string()),
+            subscription_id: Some("sub-2026".to_string()),
+            business_session_id: Some("session-1001".to_string()),
+            entitlement_verified: Some(true),
+            device_verified: Some(true),
+            entitlement_expires_at: Some(now_unix() + 3600),
+            risk_level: Some("normal".to_string()),
+            business_trace_id: Some("trace-20260610-0001".to_string()),
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
@@ -14242,6 +14397,10 @@ mod tests {
         assert_eq!(connect_request.game_id, 8888);
         assert_eq!(connect_request.region_id, Some(1));
         assert_eq!(connect_request.bandwidth_quality.as_deref(), Some("fast"));
+        let auth_context = request.auth_context();
+        assert!(auth_context.entitlement_verified);
+        assert!(auth_context.device_verified);
+        assert_eq!(auth_context.order_id.as_deref(), Some("order-1001"));
     }
 
     #[test]
@@ -14249,6 +14408,14 @@ mod tests {
         let request = BusinessConnectIntentRequest {
             request_id: Some(" ".to_string()),
             entitlement_id: None,
+            order_id: None,
+            subscription_id: None,
+            business_session_id: None,
+            entitlement_verified: Some(true),
+            device_verified: Some(true),
+            entitlement_expires_at: Some(now_unix() + 3600),
+            risk_level: Some("normal".to_string()),
+            business_trace_id: None,
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
@@ -14263,6 +14430,50 @@ mod tests {
         let error = validate_business_connect_intent_request(&request).unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.code, "invalid_business_field");
+    }
+
+    #[test]
+    fn rejects_unverified_business_connect_intent() {
+        let mut request = valid_business_connect_intent_request();
+        request.entitlement_verified = Some(false);
+        let error = validate_business_connect_intent_request(&request).unwrap_err();
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert_eq!(error.code, "entitlement_not_verified");
+
+        let mut request = valid_business_connect_intent_request();
+        request.device_verified = Some(false);
+        let error = validate_business_connect_intent_request(&request).unwrap_err();
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert_eq!(error.code, "device_not_verified");
+    }
+
+    #[test]
+    fn rejects_expired_or_blocked_business_connect_intent() {
+        let mut request = valid_business_connect_intent_request();
+        request.entitlement_expires_at = Some(now_unix().saturating_sub(1));
+        let error = validate_business_connect_intent_request(&request).unwrap_err();
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert_eq!(error.code, "entitlement_expired");
+
+        let mut request = valid_business_connect_intent_request();
+        request.risk_level = Some("blocked".to_string());
+        let error = validate_business_connect_intent_request(&request).unwrap_err();
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert_eq!(error.code, "risk_blocked");
+    }
+
+    #[test]
+    fn trims_business_auth_context_text() {
+        let mut request = valid_business_connect_intent_request();
+        request.order_id = Some(" order-1001 ".to_string());
+        request.risk_level = Some(" normal ".to_string());
+        request.business_trace_id = Some(" trace-1 ".to_string());
+
+        validate_business_connect_intent_request(&request).expect("request is valid");
+        let auth_context = request.auth_context();
+        assert_eq!(auth_context.order_id.as_deref(), Some("order-1001"));
+        assert_eq!(auth_context.risk_level.as_deref(), Some("normal"));
+        assert_eq!(auth_context.business_trace_id.as_deref(), Some("trace-1"));
     }
 
     #[test]

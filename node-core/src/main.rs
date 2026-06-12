@@ -127,6 +127,7 @@ fn make_client_token(cli: &Cli, identity: &IdentityState) -> anyhow::Result<Stri
         user_id,
         device_id,
         game_id,
+        business: None,
         intent_id: cli.token_intent_id.clone(),
         route,
         expires_at: issued_at + cli.token_ttl_sec.max(1),

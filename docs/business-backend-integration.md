@@ -69,7 +69,7 @@ Apifox 可直接导入 OpenAPI 文件：[apifox-business-api.openapi.json](apifo
 
 ## 控制面联调入口
 
-从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台。`0.58.0` 起，联调结果会以卡片展示，并支持一键探测节点。`0.59.0` 起，`sync-catalog` 支持游戏内嵌多个分类、区服和节点线路。`0.60.0` 起，业务后台可以调用业务 API 登记节点基础信息。`0.61.0` 起，业务 API 补齐节点 CRUD 和目录快照/删除。`0.62.0` 起，控制面联调页可以直接测试节点列表、详情、新增、修改、删除，以及目录快照查询和目录删除。`0.62.1` 起，新增或修改节点时如果公网 IP + 端口重复，会返回明确的 `node_endpoint_exists` 提示。`0.64.0` 起，`connect-intent` 候选节点会返回调度解释字段。`0.65.0` 起，可以通过 `XACCEL_CLIENT_API_TOKEN` 保护老的客户端直连 `connect-intent` 接口：
+从 `0.57.0` 开始，控制面左侧菜单增加“业务联调”页面。这个页面给节点后台运维人员使用，不替代业务后台。`0.58.0` 起，联调结果会以卡片展示，并支持一键探测节点。`0.59.0` 起，`sync-catalog` 支持游戏内嵌多个分类、区服和节点线路。`0.60.0` 起，业务后台可以调用业务 API 登记节点基础信息。`0.61.0` 起，业务 API 补齐节点 CRUD 和目录快照/删除。`0.62.0` 起，控制面联调页可以直接测试节点列表、详情、新增、修改、删除，以及目录快照查询和目录删除。`0.62.1` 起，新增或修改节点时如果公网 IP + 端口重复，会返回明确的 `node_endpoint_exists` 提示。`0.64.0` 起，`connect-intent` 候选节点会返回调度解释字段。`0.65.0` 起，可以通过 `XACCEL_CLIENT_API_TOKEN` 保护老的客户端直连 `connect-intent` 接口。`0.66.0` 起，业务 `connect-intent` 必须带权益和设备校验结果，并会把授权上下文写入节点凭证：
 
 - “状态检查”会调用控制面内部业务状态接口，确认业务 API Token、节点、游戏和路由是否可用。
 - “同步目录”可以粘贴业务后台准备下发的 `sync-catalog` JSON，先验证游戏、区服和线路执行副本是否能写入。
@@ -91,7 +91,7 @@ curl -fsSL http://103.201.131.99:18080/api/business/v1/status \
 ```json
 {
   "status": "ok",
-  "version": "0.65.0",
+  "version": "0.66.0",
   "catalog_owner": "business_backend",
   "control_role": "node_operations",
   "business_api_enabled": true,
@@ -341,6 +341,14 @@ curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/connect-intent \
   -d '{
     "request_id": "req-20260610-0001",
     "entitlement_id": "vip-order-1001",
+    "order_id": "order-1001",
+    "subscription_id": "sub-2026",
+    "business_session_id": "session-1001",
+    "entitlement_verified": true,
+    "device_verified": true,
+    "entitlement_expires_at": 1781073600,
+    "risk_level": "normal",
+    "business_trace_id": "trace-20260610-0001",
     "user_id": 1001,
     "device_id": "pc-001",
     "game_id": 8888,
@@ -353,6 +361,15 @@ curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/connect-intent \
   }'
 ```
 
+v0.66.0 起，控制面会做最小边界校验：
+
+- `entitlement_verified` 必须为 `true`，否则返回 `entitlement_not_verified`。
+- `device_verified` 必须为 `true`，否则返回 `device_not_verified`。
+- `entitlement_expires_at` 如果传入，必须大于控制面当前时间，否则返回 `entitlement_expired`。
+- `risk_level` 可传 `low`、`normal`、`medium`、`high`、`blocked`；传 `blocked` 会返回 `risk_blocked`。
+
+这些字段不是让控制面接管订单系统，而是让业务后台把“已经校验通过”的结果带给控制面。控制面只负责基于这个结果签发节点凭证和记录链路。
+
 返回示例：
 
 ```json
@@ -360,10 +377,32 @@ curl -fsSL -X POST http://103.201.131.99:18080/api/business/v1/connect-intent \
   "status": "ok",
   "request_id": "req-20260610-0001",
   "entitlement_id": "vip-order-1001",
+  "auth_context": {
+    "entitlement_id": "vip-order-1001",
+    "order_id": "order-1001",
+    "subscription_id": "sub-2026",
+    "business_session_id": "session-1001",
+    "entitlement_verified": true,
+    "device_verified": true,
+    "entitlement_expires_at": 1781073600,
+    "risk_level": "normal",
+    "business_trace_id": "trace-20260610-0001"
+  },
   "client_version": "0.1.0",
   "connect_intent": {
     "intent_id": "intent-1001-8888-1781070000-2",
     "ttl_sec": 120,
+    "auth_context": {
+      "entitlement_id": "vip-order-1001",
+      "order_id": "order-1001",
+      "subscription_id": "sub-2026",
+      "business_session_id": "session-1001",
+      "entitlement_verified": true,
+      "device_verified": true,
+      "entitlement_expires_at": 1781073600,
+      "risk_level": "normal",
+      "business_trace_id": "trace-20260610-0001"
+    },
     "client": {
       "platform": "pc",
       "client_isp": "telecom",

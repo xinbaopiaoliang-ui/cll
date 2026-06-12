@@ -2776,7 +2776,7 @@
         </nav>
         <div class="sidebar-foot">
           <span id="currentAdminLabel">未登录</span>
-          <span class="mono">v0.65.0</span>
+          <span class="mono">v0.66.0</span>
         </div>
       </aside>
 
@@ -3380,6 +3380,14 @@
                     <textarea id="businessIntentPayload" spellcheck="false">{
   "request_id": "debug-connect-001",
   "entitlement_id": "debug-order-001",
+  "order_id": "order-1001",
+  "subscription_id": "sub-debug-001",
+  "business_session_id": "session-debug-001",
+  "entitlement_verified": true,
+  "device_verified": true,
+  "entitlement_expires_at": 4102444800,
+  "risk_level": "normal",
+  "business_trace_id": "trace-debug-001",
   "user_id": 1001,
   "device_id": "pc-001",
   "game_id": 8888,
@@ -3689,7 +3697,7 @@
           <section class="grid-3">
             <div class="insight-card">
               <h3>控制面版本</h3>
-              <div class="insight-value">0.65.0</div>
+              <div class="insight-value">0.66.0</div>
               <div class="insight-note">页面、API 和安装脚本同版本发布。</div>
             </div>
             <div class="insight-card">
@@ -7383,6 +7391,7 @@
         const route = selected?.route || {};
         const credential = selected?.credential || {};
         const scheduler = selected?.scheduler || {};
+        const authContext = result.auth_context || intent.auth_context || {};
         return `
           <div class="business-result-layout">
             <div class="diagnostic-strip">
@@ -7411,6 +7420,18 @@
                   ${metric("路由协议", protocolText(route.protocol))}
                   ${metric("区服", route.region_name || route.region_id || "--")}
                   ${metric("凭证过期", formatTime(credential.expires_at))}
+                </div>
+              </div>
+              <div class="business-result-card">
+                <div class="business-result-label">业务授权上下文</div>
+                <div class="detail-grid">
+                  ${metric("权益确认", booleanText(authContext.entitlement_verified))}
+                  ${metric("设备确认", booleanText(authContext.device_verified))}
+                  ${metric("订单", authContext.order_id || authContext.entitlement_id || "--")}
+                  ${metric("会话", authContext.business_session_id || "--")}
+                  ${metric("权益过期", formatTime(authContext.entitlement_expires_at))}
+                  ${metric("风控", authContext.risk_level || "--")}
+                  ${metric("链路 ID", authContext.business_trace_id || result.request_id || "--")}
                 </div>
               </div>
               <div class="business-result-card">

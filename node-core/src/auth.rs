@@ -17,11 +17,33 @@ pub struct ClientTokenClaims {
     pub user_id: u64,
     pub device_id: String,
     pub game_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub business: Option<BusinessAuthContext>,
     pub intent_id: Option<String>,
     pub route: Option<ClientRouteClaims>,
     pub expires_at: u64,
     pub issued_at: Option<u64>,
     pub nonce: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BusinessAuthContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entitlement_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub business_session_id: Option<String>,
+    pub entitlement_verified: bool,
+    pub device_verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entitlement_expires_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub risk_level: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub business_trace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -183,6 +205,7 @@ mod tests {
             user_id: 1001,
             device_id: "pc-001".to_string(),
             game_id: 8888,
+            business: None,
             intent_id: Some("intent-test".to_string()),
             route: Some(ClientRouteClaims {
                 target_addr: "127.0.0.1:7777".to_string(),

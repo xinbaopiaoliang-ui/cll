@@ -127,11 +127,33 @@ struct ClientTokenClaims {
     user_id: u64,
     device_id: String,
     game_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    business: Option<BusinessAuthContext>,
     intent_id: Option<String>,
     route: Option<ClientRouteClaims>,
     expires_at: u64,
     issued_at: Option<u64>,
     nonce: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BusinessAuthContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entitlement_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    order_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subscription_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    business_session_id: Option<String>,
+    entitlement_verified: bool,
+    device_verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entitlement_expires_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    risk_level: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    business_trace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -265,6 +287,7 @@ fn build_connect_intent(
         user_id: request.user_id,
         device_id: request.device_id.clone(),
         game_id: request.game_id,
+        business: None,
         intent_id: Some(intent_id.clone()),
         route: Some(route.clone()),
         expires_at,

@@ -62,8 +62,8 @@ traffic through a self-developed node core.
 Before deploying, create a GitHub Release by pushing a version tag:
 
 ```bash
-git tag v0.65.0
-git push origin v0.65.0
+git tag v0.66.0
+git push origin v0.66.0
 ```
 
 GitHub Actions will build Linux `x86_64` artifacts for `xaccel-node`,
@@ -81,7 +81,9 @@ curl -fsSL https://raw.githubusercontent.com/xinbaopiaoliang-ui/cll/main/install
 
 Replace `YOUR_SERVER_IP` with the public IP of the Linux server. Current release
 automation builds Linux `x86_64` first; `aarch64` packaging is reserved for the
-next stage. Version `0.65.0` can protect the legacy client
+next stage. Version `0.66.0` requires business `connect-intent` calls to carry
+entitlement and device verification context, and writes that context into the
+node credential for later attribution. Version `0.65.0` can protect the legacy client
 `/api/client/v1/connect-intent` endpoint with `XACCEL_CLIENT_API_TOKEN`, while
 `xaccel-client-probe 0.33.0` can send that token for diagnostics. Version
 `0.64.0` explains connect-intent scheduling decisions:

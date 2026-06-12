@@ -355,13 +355,24 @@ Done in `v0.65.0`:
   and operators can verify whether the legacy client path is locked down.
 - Extend the installer and integration docs with the client-token rollout path.
 
+Done in `v0.66.0`:
+
+- Require business `connect-intent` calls to carry entitlement and device
+  verification results before the control plane signs node credentials.
+- Add order ID, subscription ID, business session ID, entitlement expiry,
+  risk level, and business trace ID to the business auth context.
+- Write the business auth context into `connect-intent` responses and the
+  signed node token so later node logs and traffic accounting can be attributed
+  back to business orders and sessions.
+- Show the auth context in the control-panel business debug result and update
+  Apifox/business integration documentation.
+
 Next release focus:
 
-- `v0.66`: carry business-auth context into `connect-intent` results, including
-  user entitlement, device verification, order/session IDs, and explicit
-  rejection reasons.
 - `v0.67`: start the real game tunnel MVP after UDP relay cleanup and auth
   boundaries are stable.
+- `v0.68`: add traffic attribution reports by business session/order once the
+  tunnel path starts carrying real packets.
 
 ## P4: UDP Relay MVP
 
