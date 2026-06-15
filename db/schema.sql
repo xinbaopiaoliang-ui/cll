@@ -125,7 +125,7 @@ CREATE TABLE connect_intents (
   region_id BIGINT UNSIGNED NULL,
   node_id BIGINT UNSIGNED NOT NULL,
   target_addr VARCHAR(255) NOT NULL,
-  protocol ENUM('udp') NOT NULL DEFAULT 'udp',
+  protocol ENUM('udp','tcp') NOT NULL DEFAULT 'udp',
   client_ip VARCHAR(64) NULL,
   client_isp VARCHAR(64) NULL,
   platform VARCHAR(32) NULL,

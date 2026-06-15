@@ -2834,6 +2834,7 @@ async fn run_schema_migrations(pool: &MySqlPool) -> anyhow::Result<()> {
     ensure_game_route_business_columns(pool).await?;
     ensure_game_route_region_indexes(pool).await?;
     ensure_connect_intent_region_column(pool).await?;
+    ensure_connect_intent_tcp_protocol(pool).await?;
     ensure_node_remote_tasks_table(pool).await?;
     ensure_node_ssh_credentials_table(pool).await?;
     ensure_node_operation_tasks_table(pool).await?;
@@ -3035,6 +3036,26 @@ async fn ensure_connect_intent_region_column(pool: &MySqlPool) -> anyhow::Result
     Ok(())
 }
 
+async fn ensure_connect_intent_tcp_protocol(pool: &MySqlPool) -> anyhow::Result<()> {
+    let column_type = mysql_column_type(pool, "connect_intents", "protocol")
+        .await
+        .context("failed to inspect connect_intents.protocol")?;
+    if column_type
+        .as_deref()
+        .is_some_and(|column_type| column_type.contains("'tcp'"))
+    {
+        return Ok(());
+    }
+
+    sqlx::query(
+        "ALTER TABLE connect_intents MODIFY COLUMN protocol ENUM('udp','tcp') NOT NULL DEFAULT 'udp'",
+    )
+    .execute(pool)
+    .await
+    .context("failed to allow tcp connect_intents.protocol")?;
+    Ok(())
+}
+
 async fn ensure_column(
     pool: &MySqlPool,
     table: &'static str,
@@ -3159,6 +3180,29 @@ LIMIT 1
     .await?;
 
     Ok(data_type)
+}
+
+async fn mysql_column_type(
+    pool: &MySqlPool,
+    table: &'static str,
+    column: &'static str,
+) -> anyhow::Result<Option<String>> {
+    let column_type = sqlx::query_scalar::<_, String>(
+        r#"
+SELECT CAST(LOWER(COLUMN_TYPE) AS CHAR)
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = ?
+  AND COLUMN_NAME = ?
+LIMIT 1
+"#,
+    )
+    .bind(table)
+    .bind(column)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(column_type)
 }
 
 async fn ensure_game_catalog_table(pool: &MySqlPool) -> anyhow::Result<()> {
