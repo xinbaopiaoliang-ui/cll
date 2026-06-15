@@ -584,8 +584,11 @@ fn validate_cli(cli: &Cli) -> anyhow::Result<()> {
     if cli.target_host.is_some() ^ cli.target_port.is_some() {
         bail!("--target-host and --target-port must be provided together");
     }
-    if !matches!(cli.target_protocol.as_str(), "udp" | "UDP") {
-        bail!("--target-protocol currently supports udp only");
+    if !matches!(
+        cli.target_protocol.to_ascii_lowercase().as_str(),
+        "udp" | "tcp"
+    ) {
+        bail!("--target-protocol must be udp or tcp");
     }
     Ok(())
 }
@@ -776,11 +779,12 @@ fn select_session_target(
         return Ok(None);
     };
 
+    let requested_protocol = cli.target_protocol.to_ascii_lowercase();
     for target in &route_policy.targets {
         let Some(port) = target
             .ports
             .iter()
-            .find(|port| port.protocol.eq_ignore_ascii_case("udp"))
+            .find(|port| port.protocol.eq_ignore_ascii_case(&requested_protocol))
         else {
             continue;
         };
@@ -792,7 +796,7 @@ fn select_session_target(
         {
             return Ok(Some(SessionDataTarget {
                 target_id: Some(target.target_id.clone()),
-                protocol: "udp".to_string(),
+                protocol: requested_protocol,
                 host: host.to_string(),
                 port: port.from,
                 original_domain: target
@@ -805,7 +809,7 @@ fn select_session_target(
     }
 
     bail!(
-        "route_policy does not contain a concrete UDP host; pass --target-host and --target-port"
+        "route_policy does not contain a concrete target for --target-protocol; pass --target-host and --target-port"
     );
 }
 
@@ -962,5 +966,20 @@ mod tests {
             intent.ticket_client.as_ref().map(|client| client.region_id),
             Some(None)
         );
+    }
+
+    #[test]
+    fn validates_tcp_target_protocol() {
+        let cli = Cli::parse_from([
+            "xaccel-client-probe",
+            "--target-host",
+            "127.0.0.1",
+            "--target-port",
+            "7788",
+            "--target-protocol",
+            "tcp",
+        ]);
+
+        validate_cli(&cli).expect("tcp target protocol is valid");
     }
 }

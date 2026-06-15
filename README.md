@@ -87,7 +87,7 @@ next stage. Version `0.70.0` introduces per-session acceleration tickets with a
 dynamic `route_policy`: the business backend supplies node, domain/IP/CIDR,
 port ranges, entitlement, device, and risk context for each acceleration
 attempt, the control plane signs a short-lived node credential bound to the
-route-policy hash, and `xaccel-client-probe 0.37.0` can run directly from the
+route-policy hash, and `xaccel-client-probe 0.38.0` can run directly from the
 returned `accel_ticket` JSON. Version `0.66.0` requires business `connect-intent` calls
 to carry entitlement and device verification context, and writes that context
 into the node credential for later attribution. Version `0.65.0` can protect

@@ -378,7 +378,7 @@ Done in `v0.70.0`:
 - Add an `accel_ticket` response envelope that the client can pass to the node.
 - Let the node validate `region_id` claim mirrors and keep route forwarding
   bound to the signed token target.
-- Let `xaccel-client-probe 0.37.0` run directly from raw or wrapped
+- Let `xaccel-client-probe 0.38.0` run directly from raw or wrapped
   `accel_ticket` JSON for basic client/node diagnostics.
 - Upgrade v0.70 from single-target tickets to the dynamic `route_policy`
   contract: domains, IPs, CIDRs, port ranges, observed targets, and

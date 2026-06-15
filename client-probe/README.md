@@ -8,9 +8,9 @@ connect path:
 3. send one UDP `session.data` packet through the same socket;
 4. print a JSON summary with latency, node, route, and relay result.
 
-Version `0.37.0` supports `--accel-ticket-file` and `--accel-ticket-json` for
+Version `0.38.0` supports `--accel-ticket-file` and `--accel-ticket-json` for
 the per-session acceleration ticket path, including dynamic `route_policy`
-probe and explicit `session.data.target` relay checks. Version `0.33.0`
+probe and explicit UDP/TCP `session.data.target` relay checks. Version `0.33.0`
 supports `--client-api-token` for control panels that protect the legacy direct
 client API with `XACCEL_CLIENT_API_TOKEN`.
 
@@ -44,10 +44,10 @@ xaccel-client-probe \
 
 The file can contain either the raw `accel_ticket`, the business API response
 with an `accel_ticket` field, or the admin debug response with
-`result.accel_ticket`. If the ticket contains a concrete UDP target in
-`route_policy.targets[]`, the probe can derive the target automatically. Use
-`--target-host` and `--target-port` when the policy uses `host_type=any` or
-when you want to test a specific observed target.
+`result.accel_ticket`. If the ticket contains a concrete target for
+`--target-protocol` in `route_policy.targets[]`, the probe can derive the target
+automatically. Use `--target-host` and `--target-port` when the policy uses
+`host_type=any` or when you want to test a specific observed target.
 
 Expected result:
 

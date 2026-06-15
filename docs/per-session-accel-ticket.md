@@ -229,6 +229,13 @@
 }
 ```
 
+`control-api 0.71.1` supports `udp` and `tcp` for per-session ticket
+issuance. If `target_addr` is omitted, the control plane chooses a
+representative target from `route_policy.targets[]` that matches the selected
+protocol and writes it into the compatibility `route.target_addr` field. The
+client should still use the full `route_policy` as the actual forwarding
+allowlist.
+
 - `protocol`: `udp` 或 `tcp`。当前节点先实现 UDP 转发，合同预留 TCP。
 - `from`: 起始端口。
 - `to`: 结束端口。单端口时 `from` 和 `to` 相同。

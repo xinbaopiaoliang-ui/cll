@@ -317,10 +317,10 @@ impl BusinessConnectIntentRequest {
             })
             .unwrap_or("udp");
         let protocol = protocol.to_ascii_lowercase();
-        if protocol != "udp" {
+        if !matches!(protocol.as_str(), "udp" | "tcp") {
             return Err(AppError::bad_request(
                 "invalid_ticket_protocol",
-                "per-session acceleration currently supports udp only",
+                "per-session acceleration currently supports udp or tcp",
             ));
         }
 
@@ -333,6 +333,7 @@ impl BusinessConnectIntentRequest {
                     .policy
                     .targets
                     .as_slice(),
+                &protocol,
             )?,
         };
 
@@ -472,9 +473,12 @@ fn validate_route_policy(policy: &RoutePolicy) -> Result<RoutePolicyBinding, App
     Ok(RoutePolicyBinding { policy, hash })
 }
 
-fn representative_route_policy_target(targets: &[RouteTarget]) -> Result<String, AppError> {
+fn representative_route_policy_target(
+    targets: &[RouteTarget],
+    protocol: &str,
+) -> Result<String, AppError> {
     for target in targets {
-        let Some(port) = target.ports.iter().find(|port| port.protocol == "udp") else {
+        let Some(port) = target.ports.iter().find(|port| port.protocol == protocol) else {
             continue;
         };
         if let Some(host) = target
@@ -492,7 +496,7 @@ fn representative_route_policy_target(targets: &[RouteTarget]) -> Result<String,
 
     Err(AppError::bad_request(
         "invalid_route_policy",
-        "route_policy must include at least one udp target or target_addr must be provided",
+        "route_policy must include at least one target for the selected protocol or target_addr must be provided",
     ))
 }
 
@@ -14968,6 +14972,50 @@ mod tests {
         assert_eq!(route.protocol, "udp");
         assert_eq!(route.region_id, Some(1));
         assert_eq!(route.region_name.as_deref(), Some("International"));
+    }
+
+    #[test]
+    fn validates_tcp_per_session_business_route_policy() {
+        let mut request = valid_business_connect_intent_request();
+        request.node_id = Some(3);
+        request.protocol = None;
+        request.route_policy = Some(RoutePolicy {
+            policy_id: "rp-smoke-v71-tcp-echo".to_string(),
+            policy_version: 1,
+            mode: "dynamic_targets".to_string(),
+            default_protocol: Some("tcp".to_string()),
+            dns_strategy: None,
+            targets: vec![RouteTarget {
+                target_id: "tcp-echo-local".to_string(),
+                purpose: None,
+                host_type: "observed_ip".to_string(),
+                host: None,
+                resolved_ips: vec![],
+                observed_ips: vec!["127.0.0.1".to_string()],
+                cidrs: vec![],
+                ports: vec![PortRange {
+                    protocol: "tcp".to_string(),
+                    from: 7788,
+                    to: 7788,
+                }],
+                allow_client_observed_ip: None,
+                resolve_ttl_sec: None,
+                required: None,
+            }],
+            capture: None,
+        });
+
+        let route = request
+            .per_session_route()
+            .expect("route validation")
+            .expect("per-session route");
+
+        assert_eq!(route.node_id, 3);
+        assert_eq!(route.protocol, "tcp");
+        assert_eq!(route.target_addr, "127.0.0.1:7788");
+        let binding = route.route_policy.expect("route policy binding");
+        assert_eq!(binding.policy.policy_id, "rp-smoke-v71-tcp-echo");
+        assert!(!binding.hash.is_empty());
     }
 
     #[test]
