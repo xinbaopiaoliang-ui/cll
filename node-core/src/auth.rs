@@ -142,8 +142,8 @@ fn verify_token(
         if route.target_addr.trim().is_empty() {
             bail!("token route.target_addr is required when route is present");
         }
-        if route.protocol != "udp" {
-            bail!("token route.protocol must be udp");
+        if route.protocol != "udp" && route.protocol != "tcp" {
+            bail!("token route.protocol must be udp or tcp");
         }
     }
 

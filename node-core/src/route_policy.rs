@@ -80,7 +80,7 @@ pub fn match_route_policy_target(
         .unwrap_or(policy.default_protocol.as_deref().unwrap_or("udp"))
         .to_ascii_lowercase();
 
-    if protocol != "udp" {
+    if protocol != "udp" && protocol != "tcp" {
         return Err("target_protocol_unsupported");
     }
 
@@ -278,5 +278,43 @@ mod tests {
             match_route_policy_target(&policy, &target).unwrap_err(),
             "target_not_allowed"
         );
+    }
+
+    #[test]
+    fn matches_tcp_port_range() {
+        let policy = RoutePolicy {
+            policy_id: "rp-1".to_string(),
+            policy_version: 1,
+            mode: "dynamic_targets".to_string(),
+            default_protocol: Some("udp".to_string()),
+            dns_strategy: None,
+            targets: vec![RouteTarget {
+                target_id: "login".to_string(),
+                purpose: None,
+                host_type: "domain".to_string(),
+                host: Some("login.example.test".to_string()),
+                resolved_ips: vec!["203.0.113.10".to_string()],
+                observed_ips: Vec::new(),
+                cidrs: Vec::new(),
+                ports: vec![PortRange {
+                    protocol: "tcp".to_string(),
+                    from: 443,
+                    to: 443,
+                }],
+                allow_client_observed_ip: None,
+                resolve_ttl_sec: None,
+                required: None,
+            }],
+            capture: None,
+        };
+        let target = SessionDataTarget {
+            target_id: Some("login".to_string()),
+            protocol: Some("tcp".to_string()),
+            host: "203.0.113.10".to_string(),
+            port: 443,
+            original_domain: Some("login.example.test".to_string()),
+        };
+
+        assert!(match_route_policy_target(&policy, &target).is_ok());
     }
 }

@@ -5,6 +5,7 @@ mod control_plane;
 mod health;
 mod identity;
 mod listener;
+mod quic_tunnel;
 mod route_policy;
 mod session;
 mod session_store;
@@ -19,6 +20,7 @@ use control_plane::spawn_control_plane;
 use health::run_health_server;
 use identity::IdentityState;
 use listener::spawn_network_listeners;
+use quic_tunnel::spawn_quic_tunnel;
 use state::RuntimeState;
 use std::{
     path::PathBuf,
@@ -74,6 +76,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let listener_tasks = spawn_network_listeners(state.clone()).await?;
+    let quic_task = spawn_quic_tunnel(state.clone()).await?;
     let control_plane_tasks = spawn_control_plane(state.clone(), config_path.clone());
 
     let health_state = state.clone();
@@ -86,6 +89,9 @@ async fn main() -> anyhow::Result<()> {
 
     health_task.abort();
     for task in listener_tasks {
+        task.abort();
+    }
+    if let Some(task) = quic_task {
         task.abort();
     }
     for task in control_plane_tasks {

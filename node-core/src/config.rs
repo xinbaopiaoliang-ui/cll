@@ -85,6 +85,22 @@ impl NetworkConfig {
     pub fn listen_endpoint(&self) -> String {
         socket_endpoint(self.listen_host(), self.server_port)
     }
+
+    pub fn quic_listen_endpoint(&self) -> Option<String> {
+        if self.disable_quic {
+            return None;
+        }
+        let port = self
+            .relay_server_port
+            .filter(|port| *port > 0 && *port != self.server_port)?;
+        let host = self
+            .relay_server_ip
+            .as_deref()
+            .map(str::trim)
+            .filter(|host| !host.is_empty())
+            .unwrap_or_else(|| self.listen_host());
+        Some(socket_endpoint(host, port))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -376,6 +392,47 @@ mod tests {
         };
 
         assert_eq!(network.listen_endpoint(), "103.201.131.99:666");
+    }
+
+    #[test]
+    fn quic_listen_endpoint_uses_relay_port() {
+        let network = NetworkConfig {
+            server_ip: "47.83.160.126".to_string(),
+            listen_ip: Some("0.0.0.0".to_string()),
+            server_port: 666,
+            relay_server_ip: None,
+            relay_server_port: Some(1666),
+            is_support_ipv6: false,
+            disable_quic: false,
+            area: "UNKNOWN".to_string(),
+            bandwidth_quality: BandwidthQuality::Normal,
+            tag: None,
+            operator_ips: None,
+        };
+
+        assert_eq!(
+            network.quic_listen_endpoint().as_deref(),
+            Some("0.0.0.0:1666")
+        );
+    }
+
+    #[test]
+    fn quic_listen_endpoint_is_disabled_without_relay_port() {
+        let network = NetworkConfig {
+            server_ip: "47.83.160.126".to_string(),
+            listen_ip: Some("0.0.0.0".to_string()),
+            server_port: 666,
+            relay_server_ip: None,
+            relay_server_port: None,
+            is_support_ipv6: false,
+            disable_quic: false,
+            area: "UNKNOWN".to_string(),
+            bandwidth_quality: BandwidthQuality::Normal,
+            tag: None,
+            operator_ips: None,
+        };
+
+        assert_eq!(network.quic_listen_endpoint(), None);
     }
 
     #[test]

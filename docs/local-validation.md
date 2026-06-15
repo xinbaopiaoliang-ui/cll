@@ -25,6 +25,28 @@ cargo metadata --manifest-path control-api\Cargo.toml --locked --no-deps --forma
 cargo metadata --manifest-path client-probe\Cargo.toml --locked --no-deps --format-version 1
 ```
 
+Node tunnel protocol checks:
+
+```powershell
+cd D:\椤圭洰\broad\game-accelerator-research\node-core
+cargo test --locked
+```
+
+The node tests cover JSON probe/session parsing, UDP target relay, TCP target
+relay, raw `XAU1` UDP tunnel frame parsing, TCP target protocol selection, and
+QUIC listener configuration gating.
+
+Run the node tunnel E2E from the repository root:
+
+```powershell
+.\scripts\run-node-tunnel-e2e.ps1
+```
+
+The script starts a temporary local node with a separate QUIC relay port,
+starts UDP and TCP echo targets, generates a token-bound dynamic route policy,
+then verifies raw UDP tunnel forwarding, TCP `session.data` relay, TCP
+long-lived JSON framing, and QUIC listener binding.
+
 ## v0.70 Local Client-to-Node E2E
 
 Run the local dynamic `route_policy` integration check from the repository root:
@@ -146,6 +168,8 @@ cargo run --manifest-path client-probe/Cargo.toml -- \
 - Production bootstrap parsing now writes identity, network, report, and limit
   settings into `config.toml`; validate this with a real bootstrap token before
   cutting each Linux release.
-- The node forwards UDP session data to token-bound route targets, but full game
-  tunnel framing is still pending.
-- User/device auth, production scheduler policy, and QUIC tunnel are pending.
+- The node now has TCP relay, raw UDP tunnel framing, and a QUIC listener
+  foundation; validate these with a real Windows capture or redirect layer
+  before enabling broad game traffic.
+- Production certificate trust for QUIC, user/device auth, production scheduler
+  policy, and traffic attribution reporting are pending.

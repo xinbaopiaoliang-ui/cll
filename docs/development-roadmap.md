@@ -386,10 +386,26 @@ Done in `v0.70.0`:
 - Let the client send explicit per-packet `target` metadata, and let the node
   verify every target against the signed route policy before relay.
 
+Done in `node-core 0.40.0`:
+
+- Let node probe sessions work across UDP, TCP, and QUIC transports instead of
+  storing only UDP probe sessions.
+- Add TCP target relay for JSON `session.data` when `target.protocol = "tcp"`.
+- Keep TCP client connections open as newline-delimited `xaccel/1` channels so
+  a client can send repeated `probe` and `session.data` frames.
+- Add the `XAU1` raw UDP tunnel binary frame so game UDP payloads can be
+  forwarded without JSON/base64 overhead.
+- Add a QUIC tunnel listener on `network.relay_server_port`, reusing the same
+  token, session, route-policy, JSON, and raw frame handlers.
+- Document the node-facing Windows capture contract in
+  `docs/node-kernel-tunnel-protocol.md`.
+
 Next release focus:
 
-- Collect Steam and NARAKA international target endpoints from client-side
-  observation, then feed those targets through business-issued route policies.
+- Validate the node tunnel protocols with a real Windows packet capture or
+  redirect layer that observes Steam and NARAKA international UDP destinations,
+  matches them against business-issued route policies, and sends allowed
+  payloads to the node.
 - Add traffic attribution reports by business session/order once the tunnel path
   starts carrying real packets.
 

@@ -1,15 +1,15 @@
 use crate::{
     config::NetworkConfig,
     session::{
-        build_probe_error, build_probe_response, build_session_data_response, parse_client_message,
-        ParsedClientMessage, TransportKind,
+        build_probe_error, build_probe_response, build_raw_udp_tunnel_response,
+        build_session_data_response, parse_client_message, ParsedClientMessage, TransportKind,
     },
     state::RuntimeState,
 };
 use anyhow::{anyhow, bail, Context};
 use std::{io, net::SocketAddr, sync::Arc};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream, UdpSocket},
     task::JoinHandle,
 };
@@ -177,25 +177,31 @@ async fn run_tcp_listener(listener: TcpListener, state: RuntimeState) -> anyhow:
 }
 
 async fn handle_tcp_connection(mut stream: TcpStream, state: RuntimeState) -> anyhow::Result<()> {
-    let mut buf = [0_u8; 1024];
-    let size = stream.read(&mut buf).await?;
-    state.stats().record_tcp_rx(size as u64);
+    let peer = stream.peer_addr()?;
+    let (reader, mut writer) = stream.split();
+    let mut reader = BufReader::new(reader);
+    let mut frame = Vec::with_capacity(1024);
 
-    let response = handle_client_payload(
-        &buf[..size],
-        &state,
-        TransportKind::Tcp,
-        stream.peer_addr()?,
-    )
-    .await
-    .unwrap_or_else(|error| {
-        warn!(?error, "failed to build TCP response");
-        TCP_PROBE_RESPONSE.to_vec()
-    });
+    loop {
+        frame.clear();
+        let size = reader.read_until(b'\n', &mut frame).await?;
+        if size == 0 {
+            break;
+        }
+        state.stats().record_tcp_rx(size as u64);
 
-    stream.write_all(&response).await?;
-    state.stats().record_tcp_tx(response.len() as u64);
-    stream.shutdown().await?;
+        let response = handle_client_payload(&frame, &state, TransportKind::Tcp, peer)
+            .await
+            .unwrap_or_else(|error| {
+                warn!(?error, "failed to build TCP response");
+                TCP_PROBE_RESPONSE.to_vec()
+            });
+
+        writer.write_all(&response).await?;
+        state.stats().record_tcp_tx(response.len() as u64);
+    }
+
+    writer.shutdown().await?;
     Ok(())
 }
 
@@ -209,12 +215,16 @@ async fn handle_client_payload(
         ParsedClientMessage::LegacyPing => Ok(match transport {
             TransportKind::Tcp => TCP_PROBE_RESPONSE.to_vec(),
             TransportKind::Udp => UDP_PROBE_RESPONSE.to_vec(),
+            TransportKind::Quic => b"xaccel-node quic listener ready\n".to_vec(),
         }),
         ParsedClientMessage::Probe(request) => {
             build_probe_response(state, transport, peer, request)
         }
         ParsedClientMessage::SessionData(request) => {
             build_session_data_response(state, transport, peer, request).await
+        }
+        ParsedClientMessage::RawUdpTunnel(request) => {
+            build_raw_udp_tunnel_response(state, transport, peer, request).await
         }
         ParsedClientMessage::Invalid(message) => build_probe_error(state, transport, message),
     }

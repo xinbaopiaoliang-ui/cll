@@ -60,6 +60,20 @@
 }
 ```
 
+## Node 0.40.0 Tunnel Notes
+
+- TCP listener now keeps a connection open and reads newline-delimited
+  `xaccel/1` JSON frames until the client closes the connection.
+- JSON `session.data` supports `target.protocol = "udp"` and
+  `target.protocol = "tcp"`.
+- Raw UDP tunnel frames use the binary `XAU1` format described in
+  `docs/node-kernel-tunnel-protocol.md`.
+- QUIC tunnel starts only when `network.disable_quic = false` and
+  `network.relay_server_port` is set to a non-zero port different from
+  `network.server_port`.
+- QUIC stream payloads reuse the same JSON and raw frame handlers as the UDP
+  and TCP listeners.
+
 ## QUIC 开关规则
 
 当 `disable_quic = true`：
