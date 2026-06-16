@@ -35,8 +35,8 @@ $repoRoot = (Resolve-Path (Join-Path $scriptDir "..")).Path
 $workDir = Join-Path ([System.IO.Path]::GetTempPath()) ("xaccel-node-tunnel-e2e-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 $logDir = Join-Path $workDir "logs"
 $nodeProcess = $null
-$udpEchoJob = $null
-$tcpEchoJob = $null
+$udpEchoProcess = $null
+$tcpEchoProcess = $null
 $succeeded = $false
 
 function ConvertTo-PosixPath([string]$Path) {
@@ -50,6 +50,17 @@ function ConvertTo-Utf8Bytes([string]$Text) {
 function Write-Utf8NoBomFile([string]$Path, [string]$Content) {
     $encoding = [System.Text.UTF8Encoding]::new($false)
     [System.IO.File]::WriteAllText($Path, $Content, $encoding)
+}
+
+function Get-CurrentPowerShellPath {
+    $processPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    if ([string]::IsNullOrWhiteSpace($processPath) -or -not (Test-Path $processPath)) {
+        if ($isWindowsHost) {
+            return "powershell.exe"
+        }
+        return "pwsh"
+    }
+    return $processPath
 }
 
 function ConvertTo-Base64UrlNoPad([byte[]]$Bytes) {
@@ -333,6 +344,13 @@ try {
     if (-not (Test-Path $nodeExe)) {
         throw "node binary not found: $nodeExe"
     }
+    $clientProbeTargetDir = Join-Path $TargetRoot "client-probe"
+    Write-Host "Building client-probe with $Toolchain..."
+    Invoke-CargoBuild (Join-Path $repoRoot "client-probe") $clientProbeTargetDir
+    $clientProbeExe = Get-BinaryPath $clientProbeTargetDir "xaccel-client-probe"
+    if (-not (Test-Path $clientProbeExe)) {
+        throw "client-probe binary not found: $clientProbeExe"
+    }
 
     $nodeId = 7101
     $userId = 1001
@@ -350,8 +368,15 @@ try {
     $tcpReadyPath = Join-Path $workDir "tcp-echo.ready"
     $udpLogPath = Join-Path $logDir "udp-echo.log"
     $tcpLogPath = Join-Path $logDir "tcp-echo.log"
+    $udpWorkerPath = Join-Path $workDir "udp-echo-worker.ps1"
+    $tcpWorkerPath = Join-Path $workDir "tcp-echo-worker.ps1"
+    $udpWorkerOutPath = Join-Path $logDir "udp-echo-worker.out.log"
+    $udpWorkerErrPath = Join-Path $logDir "udp-echo-worker.err.log"
+    $tcpWorkerOutPath = Join-Path $logDir "tcp-echo-worker.out.log"
+    $tcpWorkerErrPath = Join-Path $logDir "tcp-echo-worker.err.log"
     $nodeOutPath = Join-Path $logDir "node.out.log"
     $nodeErrPath = Join-Path $logDir "node.err.log"
+    $ticketPath = Join-Path $workDir "accel-ticket.json"
 
     $identity = [ordered]@{
         node_id = $nodeId
@@ -444,60 +469,117 @@ default_user_speed_mbps = 0
         nonce = "nonce-$([Guid]::NewGuid().ToString("N"))"
     }
     $token = New-XAccelToken $claims $nodeSecret
+    $accelTicket = [ordered]@{
+        ticket_id = $intentId
+        ttl_sec = 300
+        client = [ordered]@{
+            user_id = $userId
+            device_id = $deviceId
+            game_id = $gameId
+            region_id = $regionId
+        }
+        node = [ordered]@{
+            node_id = $nodeId
+            host = "127.0.0.1"
+            port = $NodePort
+            area = "LOCAL"
+            tag = "node-tunnel-e2e"
+            transports = @("udp")
+            bandwidth_quality = "normal"
+        }
+        route = [ordered]@{
+            target_addr = "127.0.0.1:$UdpTargetPort"
+            protocol = "udp"
+            region_id = $regionId
+        }
+        route_policy = $routePolicy
+        credential = [ordered]@{
+            token = $token
+            expires_at = $expiresAt
+            intent_id = $intentId
+        }
+    }
+    Write-Utf8NoBomFile $ticketPath ($accelTicket | ConvertTo-Json -Depth 32)
 
-    $udpEchoJob = Start-Job -Name "xaccel-node-tunnel-udp-echo" -ArgumentList $UdpTargetPort, $udpReadyPath, $udpLogPath -ScriptBlock {
-        param([int]$Port, [string]$ReadyPath, [string]$LogPath)
-        $udp = [System.Net.Sockets.UdpClient]::new([System.Net.IPEndPoint]::new([System.Net.IPAddress]::Parse("127.0.0.1"), $Port))
-        try {
-            Set-Content -Encoding UTF8 -Path $ReadyPath -Value "ready"
-            while ($true) {
-                $remote = [System.Net.IPEndPoint]::new([System.Net.IPAddress]::Any, 0)
-                $bytes = $udp.Receive([ref]$remote)
-                $text = [System.Text.Encoding]::UTF8.GetString($bytes)
-                Add-Content -Encoding UTF8 -Path $LogPath -Value ("{0} {1} {2}" -f ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()), $remote, $text)
-                $responseBytes = [System.Text.Encoding]::UTF8.GetBytes("udp:$text")
-                [void]$udp.Send($responseBytes, $responseBytes.Length, $remote)
-            }
-        } finally {
-            $udp.Dispose()
-        }
+    $udpWorker = @'
+param([int]$Port, [string]$ReadyPath, [string]$LogPath)
+$ErrorActionPreference = "Stop"
+$udp = [System.Net.Sockets.UdpClient]::new([System.Net.IPEndPoint]::new([System.Net.IPAddress]::Parse("127.0.0.1"), $Port))
+try {
+    Set-Content -Encoding UTF8 -Path $ReadyPath -Value "ready"
+    while ($true) {
+        $remote = [System.Net.IPEndPoint]::new([System.Net.IPAddress]::Any, 0)
+        $bytes = $udp.Receive([ref]$remote)
+        $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+        Add-Content -Encoding UTF8 -Path $LogPath -Value ("{0} {1} {2}" -f ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()), $remote, $text)
+        $responseBytes = [System.Text.Encoding]::UTF8.GetBytes("udp:$text")
+        [void]$udp.Send($responseBytes, $responseBytes.Length, $remote)
     }
-    $tcpEchoJob = Start-Job -Name "xaccel-node-tunnel-tcp-echo" -ArgumentList $TcpTargetPort, $tcpReadyPath, $tcpLogPath -ScriptBlock {
-        param([int]$Port, [string]$ReadyPath, [string]$LogPath)
-        $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse("127.0.0.1"), $Port)
-        $listener.Start()
+} finally {
+    $udp.Dispose()
+}
+'@
+    $tcpWorker = @'
+param([int]$Port, [string]$ReadyPath, [string]$LogPath)
+$ErrorActionPreference = "Stop"
+$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse("127.0.0.1"), $Port)
+$listener.Start()
+try {
+    Set-Content -Encoding UTF8 -Path $ReadyPath -Value "ready"
+    while ($true) {
+        $client = $listener.AcceptTcpClient()
         try {
-            Set-Content -Encoding UTF8 -Path $ReadyPath -Value "ready"
-            while ($true) {
-                $client = $listener.AcceptTcpClient()
-                try {
-                    $stream = $client.GetStream()
-                    $client.ReceiveTimeout = 1000
-                    $buffer = New-Object byte[] 4096
-                    $bytes = New-Object System.Collections.Generic.List[byte]
-                    $read = $stream.Read($buffer, 0, $buffer.Length)
-                    while ($read -gt 0) {
-                        for ($i = 0; $i -lt $read; $i++) {
-                            [void]$bytes.Add($buffer[$i])
-                        }
-                        if (-not $stream.DataAvailable) {
-                            break
-                        }
-                        $read = $stream.Read($buffer, 0, $buffer.Length)
-                    }
-                    $text = [System.Text.Encoding]::UTF8.GetString($bytes.ToArray())
-                    Add-Content -Encoding UTF8 -Path $LogPath -Value ("{0} {1}" -f ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()), $text)
-                    $responseBytes = [System.Text.Encoding]::UTF8.GetBytes("tcp:$text")
-                    $stream.Write($responseBytes, 0, $responseBytes.Length)
-                    $stream.Flush()
-                } finally {
-                    $client.Close()
+            $stream = $client.GetStream()
+            $client.ReceiveTimeout = 1000
+            $buffer = New-Object byte[] 4096
+            $bytes = New-Object System.Collections.Generic.List[byte]
+            $read = $stream.Read($buffer, 0, $buffer.Length)
+            while ($read -gt 0) {
+                for ($i = 0; $i -lt $read; $i++) {
+                    [void]$bytes.Add($buffer[$i])
                 }
+                if (-not $stream.DataAvailable) {
+                    break
+                }
+                $read = $stream.Read($buffer, 0, $buffer.Length)
             }
+            $text = [System.Text.Encoding]::UTF8.GetString($bytes.ToArray())
+            Add-Content -Encoding UTF8 -Path $LogPath -Value ("{0} {1}" -f ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()), $text)
+            $responseBytes = [System.Text.Encoding]::UTF8.GetBytes("tcp:$text")
+            $stream.Write($responseBytes, 0, $responseBytes.Length)
+            $stream.Flush()
         } finally {
-            $listener.Stop()
+            $client.Close()
         }
     }
+} finally {
+    $listener.Stop()
+}
+'@
+    Write-Utf8NoBomFile $udpWorkerPath $udpWorker
+    Write-Utf8NoBomFile $tcpWorkerPath $tcpWorker
+
+    $powerShellPath = Get-CurrentPowerShellPath
+    $udpStart = @{
+        FilePath = $powerShellPath
+        ArgumentList = @("-NoProfile", "-NonInteractive", "-File", "`"$udpWorkerPath`"", $UdpTargetPort, "`"$udpReadyPath`"", "`"$udpLogPath`"")
+        RedirectStandardOutput = $udpWorkerOutPath
+        RedirectStandardError = $udpWorkerErrPath
+        PassThru = $true
+    }
+    $tcpStart = @{
+        FilePath = $powerShellPath
+        ArgumentList = @("-NoProfile", "-NonInteractive", "-File", "`"$tcpWorkerPath`"", $TcpTargetPort, "`"$tcpReadyPath`"", "`"$tcpLogPath`"")
+        RedirectStandardOutput = $tcpWorkerOutPath
+        RedirectStandardError = $tcpWorkerErrPath
+        PassThru = $true
+    }
+    if ($isWindowsHost) {
+        $udpStart["WindowStyle"] = "Hidden"
+        $tcpStart["WindowStyle"] = "Hidden"
+    }
+    $udpEchoProcess = Start-Process @udpStart
+    $tcpEchoProcess = Start-Process @tcpStart
     Wait-ForFile $udpReadyPath $TimeoutSec
     Wait-ForFile $tcpReadyPath $TimeoutSec
 
@@ -541,6 +623,29 @@ default_user_speed_mbps = 0
     $rawResponse = Invoke-RawUdpTunnel $NodePort $rawFrame
     if ($rawResponse.Status -ne "forwarded" -or $rawResponse.PayloadText -ne "udp:$Payload") {
         throw "raw UDP tunnel failed: $($rawResponse | ConvertTo-Json -Compress -Depth 8)"
+    }
+
+    Write-Host "Running client-probe raw XAU1 tunnel mode..."
+    $probeOutput = & $clientProbeExe `
+        --accel-ticket-file $ticketPath `
+        --target-host 127.0.0.1 `
+        --target-port $UdpTargetPort `
+        --target-id udp-echo `
+        --target-protocol udp `
+        --session-data-mode raw-udp `
+        --payload $Payload `
+        --compact
+    if ($LASTEXITCODE -ne 0) {
+        throw "client-probe raw UDP mode failed"
+    }
+    $probeSummary = $probeOutput | ConvertFrom-Json
+    if (
+        $probeSummary.status -ne "ok" -or
+        $probeSummary.session_data.mode -ne "raw_udp" -or
+        $probeSummary.session_data.status -ne "forwarded" -or
+        $probeSummary.session_data.response_payload_text -ne "udp:$Payload"
+    ) {
+        throw "client-probe raw UDP mode returned unexpected output: $probeOutput"
     }
 
     Write-Host "Running TCP long-lived JSON channel and TCP target relay..."
@@ -605,6 +710,10 @@ default_user_speed_mbps = 0
             status = $rawResponse.Status
             payload = $rawResponse.PayloadText
         }
+        client_probe_raw_udp = @{
+            status = $probeSummary.session_data.status
+            payload = $probeSummary.session_data.response_payload_text
+        }
         tcp_long_lived = @{
             frames = 2
             relay = "tcp_target"
@@ -619,13 +728,13 @@ default_user_speed_mbps = 0
     if ($null -ne $nodeProcess -and -not $nodeProcess.HasExited) {
         Stop-Process -Id $nodeProcess.Id -Force -ErrorAction SilentlyContinue
     }
-    if ($null -ne $udpEchoJob) {
-        Stop-Job $udpEchoJob -ErrorAction SilentlyContinue
-        Remove-Job $udpEchoJob -Force -ErrorAction SilentlyContinue
+    if ($null -ne $udpEchoProcess -and -not $udpEchoProcess.HasExited) {
+        Stop-Process -Id $udpEchoProcess.Id -Force -ErrorAction SilentlyContinue
+        [void]$udpEchoProcess.WaitForExit(1000)
     }
-    if ($null -ne $tcpEchoJob) {
-        Stop-Job $tcpEchoJob -ErrorAction SilentlyContinue
-        Remove-Job $tcpEchoJob -Force -ErrorAction SilentlyContinue
+    if ($null -ne $tcpEchoProcess -and -not $tcpEchoProcess.HasExited) {
+        Stop-Process -Id $tcpEchoProcess.Id -Force -ErrorAction SilentlyContinue
+        [void]$tcpEchoProcess.WaitForExit(1000)
     }
     if (-not $KeepTemp -and $succeeded) {
         Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue

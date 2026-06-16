@@ -13,6 +13,12 @@ use tokio::{net::UdpSocket, time::timeout};
 
 const PROTOCOL_VERSION: &str = "xaccel/1";
 const UDP_BUFFER_BYTES: usize = 64 * 1024;
+const RAW_UDP_TUNNEL_MAGIC: &[u8; 4] = b"XAU1";
+const RAW_UDP_TUNNEL_VERSION: u8 = 1;
+const RAW_UDP_KIND_PACKET: u8 = 1;
+const RAW_UDP_KIND_RESPONSE: u8 = 2;
+const RAW_UDP_HEADER_BYTES: usize = 20;
+const RAW_UDP_RELAY_TIMEOUT_MS: u64 = 200;
 
 #[derive(Debug, Parser)]
 #[command(name = "xaccel-client-probe")]
@@ -72,6 +78,9 @@ struct Cli {
 
     #[arg(long)]
     skip_session_data: bool,
+
+    #[arg(long, default_value = "json")]
+    session_data_mode: String,
 
     #[arg(long)]
     compact: bool,
@@ -389,6 +398,7 @@ struct ProbeStepSummary {
 #[derive(Debug, Serialize)]
 struct SessionDataStepSummary {
     latency_ms: u128,
+    mode: String,
     status: String,
     request_payload_bytes: u64,
     response_payload_bytes: u64,
@@ -581,6 +591,12 @@ fn validate_cli(cli: &Cli) -> anyhow::Result<()> {
     if cli.response_timeout_ms == 0 {
         bail!("--response-timeout-ms must be positive");
     }
+    if !matches!(
+        cli.session_data_mode.to_ascii_lowercase().as_str(),
+        "json" | "raw-udp"
+    ) {
+        bail!("--session-data-mode must be json or raw-udp");
+    }
     if cli.target_host.is_some() ^ cli.target_port.is_some() {
         bail!("--target-host and --target-port must be provided together");
     }
@@ -714,6 +730,10 @@ async fn run_session_data(
     deadline: Duration,
     route_policy: Option<&RoutePolicy>,
 ) -> anyhow::Result<SessionDataStepSummary> {
+    if cli.session_data_mode.eq_ignore_ascii_case("raw-udp") {
+        return run_raw_udp_tunnel(cli, socket, session_id, deadline, route_policy).await;
+    }
+
     let target = select_session_target(cli, route_policy)?;
     let request = SessionDataRequest {
         message_type: "session.data",
@@ -742,6 +762,7 @@ async fn run_session_data(
 
     Ok(SessionDataStepSummary {
         latency_ms: timer.elapsed().as_millis(),
+        mode: "json".to_string(),
         status: response.status,
         request_payload_bytes: response.request_payload_bytes,
         response_payload_bytes: response.payload_bytes,
@@ -757,6 +778,64 @@ async fn run_session_data(
             timed_out: relay.timed_out,
             upstream_tx_bytes: relay.upstream_tx_bytes,
             upstream_rx_bytes: relay.upstream_rx_bytes,
+        }),
+    })
+}
+
+async fn run_raw_udp_tunnel(
+    cli: &Cli,
+    socket: &UdpSocket,
+    session_id: &str,
+    deadline: Duration,
+    route_policy: Option<&RoutePolicy>,
+) -> anyhow::Result<SessionDataStepSummary> {
+    let Some(target) = select_session_target(cli, route_policy)? else {
+        bail!("raw UDP tunnel requires a concrete target");
+    };
+    if !target.protocol.eq_ignore_ascii_case("udp") {
+        bail!("raw UDP tunnel requires --target-protocol udp");
+    }
+
+    let payload = cli.payload.as_bytes();
+    let frame = encode_raw_udp_tunnel_frame(
+        session_id,
+        target.target_id.as_deref().unwrap_or_default(),
+        &target.host,
+        target.port,
+        payload,
+    )?;
+    let timer = Instant::now();
+    let response = send_raw_udp_tunnel(socket, &frame, deadline).await?;
+    if response.session_id != session_id {
+        bail!(
+            "raw UDP response session_id does not match probe session: expected {}, got {}",
+            session_id,
+            response.session_id
+        );
+    }
+
+    let response_payload_base64 = BASE64.encode(&response.payload);
+    let response_payload_text = String::from_utf8(response.payload.clone()).ok();
+    let response_payload_bytes = response.payload.len() as u64;
+    let timed_out = response.status_code == 1 || response.status == "upstream_timeout";
+    Ok(SessionDataStepSummary {
+        latency_ms: timer.elapsed().as_millis(),
+        mode: "raw_udp".to_string(),
+        status: response.status,
+        request_payload_bytes: payload.len() as u64,
+        response_payload_bytes,
+        response_payload_base64,
+        response_payload_text,
+        target_id: target.target_id,
+        target_protocol: Some(target.protocol),
+        target_addr: Some(format!("{}:{}", target.host, target.port)),
+        matched_policy: None,
+        relay: Some(RelaySummary {
+            mode: "raw_udp_tunnel".to_string(),
+            timeout_ms: RAW_UDP_RELAY_TIMEOUT_MS,
+            timed_out,
+            upstream_tx_bytes: payload.len() as u64,
+            upstream_rx_bytes: response_payload_bytes,
         }),
     })
 }
@@ -831,6 +910,145 @@ async fn send_json_udp<T: Serialize>(
         .context("timed out waiting for UDP response")?
         .context("failed to receive UDP response")?;
     serde_json::from_slice(&buf[..size]).context("failed to decode UDP JSON response")
+}
+
+async fn send_raw_udp_tunnel(
+    socket: &UdpSocket,
+    frame: &[u8],
+    deadline: Duration,
+) -> anyhow::Result<RawUdpTunnelResponse> {
+    socket
+        .send(frame)
+        .await
+        .context("failed to send raw UDP tunnel frame")?;
+
+    let mut buf = vec![0u8; UDP_BUFFER_BYTES];
+    let size = timeout(deadline, socket.recv(&mut buf))
+        .await
+        .context("timed out waiting for raw UDP tunnel response")?
+        .context("failed to receive raw UDP tunnel response")?;
+    decode_raw_udp_tunnel_response(&buf[..size])
+}
+
+#[derive(Debug)]
+struct RawUdpTunnelResponse {
+    status_code: u8,
+    session_id: String,
+    status: String,
+    payload: Vec<u8>,
+}
+
+fn encode_raw_udp_tunnel_frame(
+    session_id: &str,
+    target_id: &str,
+    host: &str,
+    port: u16,
+    payload: &[u8],
+) -> anyhow::Result<Vec<u8>> {
+    let session_bytes = session_id.as_bytes();
+    let target_bytes = target_id.as_bytes();
+    let host_bytes = host.as_bytes();
+    let session_len = u16::try_from(session_bytes.len()).context("session_id is too long")?;
+    let target_len = u16::try_from(target_bytes.len()).context("target_id is too long")?;
+    let host_len = u16::try_from(host_bytes.len()).context("target host is too long")?;
+    let payload_len = u32::try_from(payload.len()).context("payload is too large")?;
+
+    let mut frame = Vec::with_capacity(
+        RAW_UDP_HEADER_BYTES
+            + session_bytes.len()
+            + target_bytes.len()
+            + host_bytes.len()
+            + payload.len(),
+    );
+    frame.extend_from_slice(RAW_UDP_TUNNEL_MAGIC);
+    frame.push(RAW_UDP_TUNNEL_VERSION);
+    frame.push(RAW_UDP_KIND_PACKET);
+    frame.push(0);
+    frame.push(0);
+    frame.extend_from_slice(&session_len.to_be_bytes());
+    frame.extend_from_slice(&target_len.to_be_bytes());
+    frame.extend_from_slice(&host_len.to_be_bytes());
+    frame.extend_from_slice(&port.to_be_bytes());
+    frame.extend_from_slice(&payload_len.to_be_bytes());
+    frame.extend_from_slice(session_bytes);
+    frame.extend_from_slice(target_bytes);
+    frame.extend_from_slice(host_bytes);
+    frame.extend_from_slice(payload);
+    Ok(frame)
+}
+
+fn decode_raw_udp_tunnel_response(bytes: &[u8]) -> anyhow::Result<RawUdpTunnelResponse> {
+    if bytes.len() < RAW_UDP_HEADER_BYTES {
+        bail!("raw UDP tunnel response is shorter than header");
+    }
+    if &bytes[..4] != RAW_UDP_TUNNEL_MAGIC {
+        bail!("raw UDP tunnel response magic mismatch");
+    }
+    if bytes[4] != RAW_UDP_TUNNEL_VERSION {
+        bail!("raw UDP tunnel response version mismatch");
+    }
+    if bytes[5] != RAW_UDP_KIND_RESPONSE {
+        bail!("raw UDP tunnel response kind mismatch");
+    }
+
+    let session_len = read_u16(bytes, 8)? as usize;
+    let status_len = read_u16(bytes, 10)? as usize;
+    let payload_len = read_u32(bytes, 16)? as usize;
+    let total_len = RAW_UDP_HEADER_BYTES
+        .checked_add(session_len)
+        .and_then(|value| value.checked_add(status_len))
+        .and_then(|value| value.checked_add(payload_len))
+        .context("raw UDP tunnel response length overflow")?;
+    if bytes.len() != total_len {
+        bail!(
+            "raw UDP tunnel response length mismatch: expected {}, got {}",
+            total_len,
+            bytes.len()
+        );
+    }
+
+    let mut offset = RAW_UDP_HEADER_BYTES;
+    let session_id = read_utf8_field(bytes, &mut offset, session_len, "session_id")?;
+    let status = read_utf8_field(bytes, &mut offset, status_len, "status")?;
+    let payload = bytes[offset..offset + payload_len].to_vec();
+
+    Ok(RawUdpTunnelResponse {
+        status_code: bytes[6],
+        session_id,
+        status,
+        payload,
+    })
+}
+
+fn read_u16(bytes: &[u8], offset: usize) -> anyhow::Result<u16> {
+    let field = bytes
+        .get(offset..offset + 2)
+        .context("raw UDP tunnel response is truncated")?;
+    Ok(u16::from_be_bytes([field[0], field[1]]))
+}
+
+fn read_u32(bytes: &[u8], offset: usize) -> anyhow::Result<u32> {
+    let field = bytes
+        .get(offset..offset + 4)
+        .context("raw UDP tunnel response is truncated")?;
+    Ok(u32::from_be_bytes([field[0], field[1], field[2], field[3]]))
+}
+
+fn read_utf8_field(
+    bytes: &[u8],
+    offset: &mut usize,
+    len: usize,
+    name: &str,
+) -> anyhow::Result<String> {
+    let end = offset
+        .checked_add(len)
+        .context("raw UDP tunnel response field length overflow")?;
+    let field = bytes
+        .get(*offset..end)
+        .with_context(|| format!("raw UDP tunnel response {name} is truncated"))?;
+    *offset = end;
+    String::from_utf8(field.to_vec())
+        .with_context(|| format!("raw UDP tunnel response {name} is not UTF-8"))
 }
 
 fn ensure_node_success(value: &Value, step: &str) -> anyhow::Result<()> {
@@ -981,5 +1199,55 @@ mod tests {
         ]);
 
         validate_cli(&cli).expect("tcp target protocol is valid");
+    }
+
+    #[test]
+    fn encodes_raw_udp_tunnel_frame() {
+        let frame =
+            encode_raw_udp_tunnel_frame("ps-udp-test", "udp-echo", "127.0.0.1", 7777, b"hello")
+                .expect("frame encodes");
+
+        assert_eq!(&frame[..4], b"XAU1");
+        assert_eq!(frame[4], RAW_UDP_TUNNEL_VERSION);
+        assert_eq!(frame[5], RAW_UDP_KIND_PACKET);
+        assert_eq!(u16::from_be_bytes([frame[8], frame[9]]), 11);
+        assert_eq!(u16::from_be_bytes([frame[10], frame[11]]), 8);
+        assert_eq!(u16::from_be_bytes([frame[12], frame[13]]), 9);
+        assert_eq!(u16::from_be_bytes([frame[14], frame[15]]), 7777);
+        assert_eq!(
+            u32::from_be_bytes([frame[16], frame[17], frame[18], frame[19]]),
+            5
+        );
+        assert_eq!(&frame[20..31], b"ps-udp-test");
+        assert_eq!(&frame[31..39], b"udp-echo");
+        assert_eq!(&frame[39..48], b"127.0.0.1");
+        assert_eq!(&frame[48..], b"hello");
+    }
+
+    #[test]
+    fn decodes_raw_udp_tunnel_response() {
+        let mut frame = Vec::new();
+        let session = b"ps-udp-test";
+        let status = b"forwarded";
+        let payload = b"udp:hello";
+        frame.extend_from_slice(b"XAU1");
+        frame.push(RAW_UDP_TUNNEL_VERSION);
+        frame.push(RAW_UDP_KIND_RESPONSE);
+        frame.push(0);
+        frame.push(0);
+        frame.extend_from_slice(&(session.len() as u16).to_be_bytes());
+        frame.extend_from_slice(&(status.len() as u16).to_be_bytes());
+        frame.extend_from_slice(&0_u16.to_be_bytes());
+        frame.extend_from_slice(&0_u16.to_be_bytes());
+        frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        frame.extend_from_slice(session);
+        frame.extend_from_slice(status);
+        frame.extend_from_slice(payload);
+
+        let response = decode_raw_udp_tunnel_response(&frame).expect("response decodes");
+        assert_eq!(response.status_code, 0);
+        assert_eq!(response.session_id, "ps-udp-test");
+        assert_eq!(response.status, "forwarded");
+        assert_eq!(response.payload, b"udp:hello");
     }
 }

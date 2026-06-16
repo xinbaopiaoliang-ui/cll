@@ -4,11 +4,13 @@
 not the final game client. It is a deployment and integration diagnostic tool
 for node operators and backend developers.
 
-Version `0.38.0` can run directly from a per-session `accel_ticket` returned by
-the business backend, send the ticket `route_policy` during probe, and relay a
-UDP or TCP `session.data` packet with explicit target metadata. Version `0.33.0`
-can send the optional `XACCEL_CLIENT_API_TOKEN` required by a control plane that
-protects the legacy client `connect-intent` endpoint.
+Version `0.39.0` can also send one raw UDP `XAU1` tunnel frame with
+`--session-data-mode raw-udp`. Version `0.38.0` can run directly from a
+per-session `accel_ticket` returned by the business backend, send the ticket
+`route_policy` during probe, and relay a UDP or TCP `session.data` packet with
+explicit target metadata. Version `0.33.0` can send the optional
+`XACCEL_CLIENT_API_TOKEN` required by a control plane that protects the legacy
+client `connect-intent` endpoint.
 
 ## What It Checks
 
@@ -83,8 +85,13 @@ The output is JSON so scripts and future dashboards can consume it directly.
 - `--target-id ID`: optional `route_policy.targets[].target_id` hint.
 - `--target-protocol udp|tcp`: target protocol. The probe still talks to the
   node over UDP, then asks the node to relay to the selected UDP or TCP target.
+- `--session-data-mode json|raw-udp`: `json` sends the existing JSON/base64
+  `session.data` request. `raw-udp` sends one binary `XAU1` frame and requires
+  `--target-protocol udp`. Raw UDP mode uses the node core's built-in raw relay
+  timeout; the frame does not carry `--response-timeout-ms`.
 - `--payload TEXT`: sends `TEXT` as the session payload. Default is `hello`.
-- `--response-timeout-ms N`: upstream response wait time. Default is `500`.
+- `--response-timeout-ms N`: upstream response wait time for JSON
+  `session.data`. Default is `500`.
 - `--candidate-index N`: selects a non-first candidate if the API returns many.
 - `--compact`: prints a single-line JSON result.
 

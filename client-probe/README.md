@@ -5,10 +5,13 @@ connect path:
 
 1. request `POST /api/client/v1/connect-intent` from `xaccel-control-api`;
 2. send a UDP `probe` packet to the selected node;
-3. send one UDP `session.data` packet through the same socket;
+3. send one JSON `session.data` packet or one raw UDP `XAU1` tunnel frame
+   through the same socket;
 4. print a JSON summary with latency, node, route, and relay result.
 
-Version `0.38.0` supports `--accel-ticket-file` and `--accel-ticket-json` for
+Version `0.39.0` supports `--session-data-mode raw-udp` for the node
+`XAU1` tunnel frame. Version `0.38.0` supports `--accel-ticket-file` and
+`--accel-ticket-json` for
 the per-session acceleration ticket path, including dynamic `route_policy`
 probe and explicit UDP/TCP `session.data.target` relay checks. Version `0.33.0`
 supports `--client-api-token` for control panels that protect the legacy direct
@@ -41,6 +44,22 @@ xaccel-client-probe \
   --target-id naraka-gameplay-observed \
   --payload hello
 ```
+
+Raw UDP tunnel mode:
+
+```bash
+xaccel-client-probe \
+  --accel-ticket-file ./accel-ticket.json \
+  --target-host 198.51.100.20 \
+  --target-port 27015 \
+  --target-id naraka-gameplay-observed \
+  --target-protocol udp \
+  --session-data-mode raw-udp \
+  --payload hello
+```
+
+Raw UDP mode uses the node core's built-in raw relay timeout; the `XAU1` frame
+does not carry `--response-timeout-ms`.
 
 The file can contain either the raw `accel_ticket`, the business API response
 with an `accel_ticket` field, or the admin debug response with
